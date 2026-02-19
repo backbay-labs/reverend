@@ -64,7 +64,7 @@ Every metric in the matrix must satisfy:
 
 ### 2.1 Dataset Registry
 
-Each feature area requires standardized test corpora. All datasets are version-pinned and stored as content-addressed archives (SHA-256 of the compressed archive recorded in `datasets.lock`).
+Each feature area requires standardized test corpora. All datasets are version-pinned and stored as content-addressed artifacts (SHA-256 recorded in `datasets/datasets.lock.json`).
 
 | Feature Area | Dataset | Source | Size | Format | Purpose |
 |---|---|---|---|---|---|
@@ -87,7 +87,7 @@ Each feature area requires standardized test corpora. All datasets are version-p
 ```
 datasets/
   prepare.sh              # Master preparation script
-  datasets.lock            # SHA-256 checksums for all archives
+  datasets.lock.json       # Locked dataset manifest + checksums
   config/
     binarycorp.yaml        # Download URLs, extraction, filtering config
     refuse-bench.yaml
@@ -102,9 +102,23 @@ datasets/
     ghidra_import.py       # Batch import into Ghidra project via headless
 ```
 
+**Repo implementation (as of 2026-02-19):**
+
+This repository includes a deterministic, repo-local smoke harness (no network, no external deps) backed by `datasets/datasets.lock.json`.
+
+- Run smoke eval: `bash eval/run_smoke.sh` (writes `eval/output/smoke/metrics.json`)
+- Materialize datasets: `python3 eval/scripts/download.py --verify`
+- Validate checksums: `python3 eval/scripts/validate_checksums.py`
+
+Determinism controls (enforced by `eval/run_smoke.sh` and checked by `eval/scripts/run_smoke.py`):
+- `PYTHONHASHSEED=0`
+- `TZ=UTC`
+- `LC_ALL=C`, `LANG=C`
+- `EVAL_SEED` (default `0`; override or pass `--seed`)
+
 **Preparation steps:**
 
-1. `download.py` fetches archives from pinned URLs, verifies SHA-256 against `datasets.lock`.
+1. `download.py` fetches archives from pinned URLs, verifies SHA-256 against `datasets/datasets.lock.json`.
 2. `extract_dwarf.py` extracts ground-truth type and symbol information from debug-info builds.
 3. `strip_binaries.py` creates stripped analysis targets (removing `.symtab`, `.debug_*` sections).
 4. `compile_corpus.py` compiles source corpora at specified compiler/optimization matrix (GCC 12/13/14, Clang 16/17/18 x O0/O1/O2/O3/Os).
@@ -118,23 +132,26 @@ datasets/
 - **Ghidra analysis output**: Pinned by (Ghidra version + analysis options hash). Re-analysis required when Ghidra version changes.
 - **Docker images**: All dataset preparation runs inside version-pinned Docker images (`Dockerfile.datasets` with locked base image digests).
 
-```yaml
-# datasets.lock (excerpt)
-binarycorp-3m:
-  url: "https://zenodo.org/records/XXXX/files/binarycorp-3m.tar.zst"
-  sha256: "<hash>"
-  version: "2024-01-15"
-  ghidra_compat: "11.2+"
-
-refuse-bench:
-  url: "https://github.com/REFuSe-Bench/refuse-bench/releases/download/v1.0/..."
-  sha256: "<hash>"
-  version: "v1.0-neurips2024"
-
-sure-2025:
-  url: "https://sure-workshop.org/data/sure25-benchmark-v1.tar.gz"
-  sha256: "<hash>"
-  version: "v1-sure2025"
+```json
+// datasets.lock.json (excerpt)
+{
+  "schema_version": 1,
+  "datasets": {
+    "toy-similarity-v1": {
+      "version": "1.0.0",
+      "source": {
+        "type": "local_directory",
+        "path": "datasets/registry/toy-similarity-v1"
+      },
+      "files": {
+        "corpus.json": {
+          "bytes": 689,
+          "sha256": "02955005933fde7c83b145ba90512d686a1b3c4c16f60fb9904b57868945f9be"
+        }
+      }
+    }
+  }
+}
 ```
 
 ---
@@ -652,7 +669,7 @@ volumes:
 # Dataset management
 datasets:
 	python eval/scripts/download.py --config datasets/config/ --verify
-	python eval/scripts/validate_checksums.py --lockfile datasets/datasets.lock
+	python eval/scripts/validate_checksums.py --lockfile datasets/datasets.lock.json
 
 # Individual pipeline stages
 analyze: datasets
@@ -953,7 +970,7 @@ python eval/scripts/reexecutability_test.py \
 ## 9. Summary and Implementation Priority
 
 ### Phase 1 (Immediate): Foundation
-1. Establish dataset preparation pipeline with version pinning (`datasets.lock`)
+1. Establish dataset preparation pipeline with version pinning (`datasets/datasets.lock.json`)
 2. Implement per-commit smoke tests for critical metrics
 3. Create `metric_values` database schema and basic dashboard
 4. Run SURE 2025 and REFuSe-Bench baselines against stock Ghidra

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "functions": [
+    {
+      "id": "l_add",
+      "name": "add",
+      "text": "adds two integers"
+    },
+    {
+      "id": "l_strlen",
+      "name": "strlen",
+      "text": "returns the length of a string"
+    },
+    {
+      "id": "l_memcpy",
+      "name": "memcpy",
+      "text": "copies bytes from src buffer to dst buffer"
+    }
+  ]
+}

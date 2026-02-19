@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "queries": [
+    {
+      "id": "q_strlen",
+      "text": "compute string length",
+      "ground_truth_id": "f_strlen"
+    },
+    {
+      "id": "q_memcpy",
+      "text": "copy bytes from a source buffer to a destination buffer",
+      "ground_truth_id": "f_memcpy"
+    },
+    {
+      "id": "q_add",
+      "text": "add two numbers",
+      "ground_truth_id": "f_add"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "datasets": {
+    "toy-diff-v1": {
+      "version": "1.0.0",
+      "source": {
+        "type": "local_directory",
+        "path": "datasets/registry/toy-diff-v1"
+      },
+      "files": {
+        "ground_truth.json": {
+          "bytes": 253,
+          "sha256": "869c4ce04020bd077e98054ae4c7d3e3d21347cbd4f088d85b4db908c141cd88"
+        },
+        "left.json": {
+          "bytes": 364,
+          "sha256": "0a6fcafab0178d09d0abb9407325adb3ef6fef23e0686b33cb1fea789dd26e11"
+        },
+        "right.json": {
+          "bytes": 372,
+          "sha256": "a18c09bb8adbf0773236e819bd573598bebca102a8b8dcb80170732b7fb0c2b6"
+        }
+      }
+    },
+    "toy-similarity-v1": {
+      "version": "1.0.0",
+      "source": {
+        "type": "local_directory",
+        "path": "datasets/registry/toy-similarity-v1"
+      },
+      "files": {
+        "corpus.json": {
+          "bytes": 689,
+          "sha256": "02955005933fde7c83b145ba90512d686a1b3c4c16f60fb9904b57868945f9be"
+        },
+        "queries.json": {
+          "bytes": 403,
+          "sha256": "f97ce3f36a771206019a8e2d7d90ba48a06af77c0d5552b2f393894c4f8e4ac4"
+        }
+      }
+    },
+    "toy-type-v1": {
+      "version": "1.0.0",
+      "source": {
+        "type": "local_directory",
+        "path": "datasets/registry/toy-type-v1"
+      },
+      "files": {
+        "cases.json": {
+          "bytes": 483,
+          "sha256": "c1e08d384285fcda6d930fb55e9d23269bfd3d5e703042dfcc9c7c38968ac941"
+        }
+      }
+    }
+  }
+}
