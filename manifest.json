@@ -1,0 +1,259 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "wc-1001-20260219T232412Z",
+  "run_dir": "/Users/connor/Medica/backbay/standalone/reverend/.cyntra/runs/wc-1001-20260219T232412Z",
+  "workcell_id": "wc-1001-20260219T232412Z",
+  "branch_name": "wc/1001/20260219T232412Z",
+  "apply_patch": true,
+  "issue": {
+    "id": "1001",
+    "title": "E1-S1: Pin datasets and stand up deterministic evaluation harness",
+    "description": "Type: Story. Epic: E1. Build dataset lock and baseline harness plumbing for similarity/type/diff metrics.",
+    "acceptance_criteria": [
+      "A locked dataset manifest exists with reproducible versions/checksums",
+      "Evaluation entrypoints run in a clean environment without manual steps",
+      "Seed and environment controls are documented and enforced"
+    ],
+    "context_files": [
+      "docs/research/evaluation-harness.md",
+      "docs/research/INDEX.md"
+    ],
+    "forbidden_paths": [],
+    "dk_priority": "P0",
+    "dk_risk": "medium",
+    "dk_size": "M",
+    "dk_tool_hint": "codex",
+    "dk_estimated_tokens": 50000,
+    "tags": [
+      "roadmap12w",
+      "type:story",
+      "epic:E1",
+      "lane:eval-devops",
+      "week:1",
+      "dk_size:M",
+      "dk_risk:medium"
+    ]
+  },
+  "job_type": "code",
+  "toolchain": "codex",
+  "toolchain_config": {
+    "model": "gpt-5.2"
+  },
+  "quality_gates": {
+    "test": "bash scripts/cyntra/gates.sh --mode=all",
+    "typecheck": "bash scripts/cyntra/gates.sh --mode=context",
+    "lint": "bash scripts/cyntra/gates.sh --mode=diff",
+    "max-diff-size": {
+      "type": "diff-check",
+      "max_lines": 4000,
+      "max_files": 200
+    },
+    "secret-detection": {
+      "type": "diff-check",
+      "scan_diff": true,
+      "max_bytes": 250000
+    }
+  },
+  "security_policy": {
+    "egress_mode": "open",
+    "allowed_domains": [],
+    "allowed_ip_cidrs": [],
+    "deny_domains": [],
+    "allowed_write_roots": [
+      "./"
+    ],
+    "forbidden_paths": [],
+    "deny_exec_patterns": [],
+    "allow_tools": [],
+    "secret_scopes": {},
+    "redact_in_logs": true,
+    "on_violation": "escalate"
+  },
+  "speculate_mode": false,
+  "speculate_tag": null,
+  "metadata": {
+    "lease_hash": null
+  },
+  "control": {
+    "mode": "disabled",
+    "reason": "no_dynamics_report",
+    "action_rate": null,
+    "speculate_parallelism": null,
+    "sampling": null
+  },
+  "memory_context": {
+    "memory_available": true,
+    "patterns": [],
+    "warnings": [],
+    "recent_learnings": [],
+    "observation_index": [],
+    "token_budget": {
+      "summaries": 0,
+      "remaining": 2000
+    },
+    "membox": {
+      "query": "E1-S1: Pin datasets and stand up deterministic evaluation harness\n\nType: Story. Epic: E1. Build dataset lock and baseline harness plumbing for similarity/type/diff metrics.\n\nAcceptance criteria:\nA locked dataset manifest exists with reproducible versions/checksums\nEvaluation entrypoints run in a clean environment without manual steps\nSeed and environment controls are documented and enforced\n\nRelevant files:\ndocs/research/evaluation-harness.md\ndocs/research/INDEX.md\n\nTags: roadmap12w type:story epic:E1 lane:eval-devops week:1\n\nJob type: code\n\nToolchain: codex\n\nQuality gates: test typecheck lint max-diff-size secret-detection",
+      "selected": [],
+      "stats": {
+        "query_tokens": 64,
+        "candidates": {
+          "traces": 0,
+          "memboxes": 0
+        },
+        "token_budget": {
+          "max_tokens": 200,
+          "used_tokens": 0
+        },
+        "db_totals": {
+          "memboxes": 0,
+          "traces": 0
+        }
+      }
+    }
+  },
+  "planner": {
+    "planner_input": {
+      "schema_version": "cyntra.planner_input.v1",
+      "created_at": "2026-02-19T23:24:12.493000Z",
+      "universe_id": "unknown",
+      "job_type": "code",
+      "universe_defaults": {
+        "swarm_id": null,
+        "objective_id": null
+      },
+      "issue": {
+        "issue_id": "1001",
+        "dk_priority": "P0",
+        "dk_risk": "medium",
+        "dk_size": "M",
+        "dk_tool_hint": "codex",
+        "dk_attempts": 0,
+        "tags": [
+          "roadmap12w",
+          "type:story",
+          "epic:E1",
+          "lane:eval-devops",
+          "week:1"
+        ],
+        "title": "E1-S1: Pin datasets and stand up deterministic evaluation harness",
+        "keywords": [
+          "harness",
+          "type",
+          "baseline",
+          "build",
+          "dataset",
+          "datasets",
+          "deterministic",
+          "diff",
+          "epic",
+          "evaluation",
+          "lock",
+          "metrics",
+          "pin",
+          "plumbing",
+          "similarity",
+          "stand"
+        ]
+      },
+      "history": {
+        "last_n_similar_runs": []
+      },
+      "action_space": {
+        "swarm_ids": [
+          "serial_handoff",
+          "speculate_vote"
+        ],
+        "max_minutes_bins": [
+          15,
+          30,
+          45,
+          60,
+          120,
+          "NA"
+        ],
+        "max_candidates_bins": [
+          1,
+          2,
+          3,
+          "NA"
+        ],
+        "max_iterations_bins": [
+          1,
+          2,
+          3,
+          5,
+          "NA"
+        ],
+        "validity_rules": [
+          {
+            "description": "If swarm_id=serial_handoff, then max_candidates_bin=1.",
+            "if": {
+              "swarm_id": "serial_handoff"
+            },
+            "then": {
+              "max_candidates_bin": 1
+            }
+          },
+          {
+            "description": "If job_type=\"code\", then max_iterations_bin=\"NA\".",
+            "if": {
+              "job_type": "code"
+            },
+            "then": {
+              "max_iterations_bin": "NA"
+            }
+          },
+          {
+            "description": "If job_type=\"fab-world\", then max_candidates_bin!=\"NA\".",
+            "if": {
+              "job_type": "fab-world"
+            },
+            "then": {
+              "max_candidates_bin_not": "NA"
+            }
+          }
+        ]
+      },
+      "system_state": {
+        "active_workcells_bin": "1_2",
+        "queue_depth_bin": null,
+        "available_toolchains": [
+          "codex",
+          "claude",
+          "opencode",
+          "crush"
+        ],
+        "toolchain_health": null,
+        "hour_bucket": "23",
+        "budget_remaining_bin": null
+      }
+    },
+    "planner_action": {
+      "schema_version": "cyntra.planner_action.v1",
+      "created_at": "2026-02-19T23:24:12.493000Z",
+      "swarm_id": "serial_handoff",
+      "budgets": {
+        "max_candidates_bin": 1,
+        "max_minutes_bin": 60,
+        "max_iterations_bin": "NA"
+      },
+      "confidence": 1.0,
+      "abstain_to_default": false,
+      "reason": null,
+      "model": {
+        "checkpoint_id": "baseline_heuristic_v0"
+      },
+      "input_hash": "953a3a028472de76915e5a0fb755e1823a02353718239c7716e4debca5cd398f"
+    },
+    "executed_plan": {
+      "schema_version": "cyntra.executed_plan.v1",
+      "swarm_id_executed": "serial_handoff",
+      "max_candidates_executed": 1,
+      "timeout_seconds_executed": 3600,
+      "max_iterations_executed": null,
+      "fallback_applied": false,
+      "fallback_reason": null
+    },
+    "timeout_seconds_override": null
+  }
+}

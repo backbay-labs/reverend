@@ -1,0 +1,9 @@
+{
+  "id": "wc-1001-20260219T232412Z",
+  "issue_id": "1001",
+  "created": "20260219T232412Z",
+  "parent_commit": "33cec45cc2feafa317c1cbd013044a6b9ea711bb",
+  "speculate_tag": null,
+  "branch_name": "wc/1001/20260219T232412Z",
+  "template": "code"
+}

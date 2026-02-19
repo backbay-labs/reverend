@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "matches": [
+    {
+      "left_id": "l_add",
+      "right_id": "r_add"
+    },
+    {
+      "left_id": "l_strlen",
+      "right_id": "r_strlen2"
+    },
+    {
+      "left_id": "l_memcpy",
+      "right_id": "r_memcpy"
+    }
+  ]
+}

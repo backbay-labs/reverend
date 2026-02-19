@@ -89,6 +89,10 @@ core.*
 *.egg-info
 __pycache__
 
+# Evaluation harness runtime artifacts
+datasets/data/
+eval/output/
+
 # Cyntra runtime artifacts (keep config files tracked)
 .workcells/
 .cyntra/logs/

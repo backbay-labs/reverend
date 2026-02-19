@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "functions": [
+    {
+      "id": "f_add",
+      "name": "add",
+      "text": "adds two integers"
+    },
+    {
+      "id": "f_sub",
+      "name": "subtract",
+      "text": "subtracts b from a"
+    },
+    {
+      "id": "f_strlen",
+      "name": "strlen",
+      "text": "returns the length of a string"
+    },
+    {
+      "id": "f_memcpy",
+      "name": "memcpy",
+      "text": "copies bytes from src buffer to dst buffer"
+    },
+    {
+      "id": "f_sha256",
+      "name": "sha256",
+      "text": "computes sha256 digest for input bytes"
+    },
+    {
+      "id": "f_sort",
+      "name": "quicksort",
+      "text": "sorts an array of integers in place"
+    }
+  ]
+}

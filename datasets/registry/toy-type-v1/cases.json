@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "c_len",
+      "var": "len",
+      "ground_truth": "size_t"
+    },
+    {
+      "id": "c_count",
+      "var": "count",
+      "ground_truth": "size_t"
+    },
+    {
+      "id": "c_buf",
+      "var": "buf",
+      "ground_truth": "uint8_t*"
+    },
+    {
+      "id": "c_name",
+      "var": "name",
+      "ground_truth": "char*"
+    },
+    {
+      "id": "c_is_valid",
+      "var": "is_valid",
+      "ground_truth": "bool"
+    }
+  ]
+}
