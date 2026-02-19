@@ -1,0 +1,98 @@
+version: "1.0"
+
+scheduling:
+  # Keep this low for large repos (Ghidra is heavy in per-workcell checkout size).
+  max_concurrent_workcells: 1
+  max_concurrent_tokens: 120000
+  starvation_threshold_hours: 4.0
+
+toolchain_priority:
+  - codex
+  - claude
+  - opencode
+  - crush
+
+toolchains:
+  codex:
+    enabled: true
+    path: "codex"
+    default_model: "gpt-5.2"
+    timeout_minutes: 60
+    max_tokens: 100000
+    config:
+      approval_mode: "full-auto"
+  claude:
+    enabled: true
+    path: "claude"
+    timeout_minutes: 60
+    max_tokens: 100000
+    config:
+      skip_permissions: true
+      output_format: "json"
+      allowed_tools: ["Edit", "Write", "Bash", "Read"]
+  opencode:
+    enabled: true
+    path: "opencode"
+    timeout_minutes: 45
+    max_tokens: 100000
+  crush:
+    enabled: true
+    path: "crush"
+    timeout_minutes: 45
+    max_tokens: 100000
+    config:
+      auto_approve: true
+
+routing:
+  rules:
+    - match: { dk_tool_hint: "codex" }
+      use: ["codex"]
+    - match: { dk_tool_hint: "claude" }
+      use: ["claude"]
+    - match: { dk_tool_hint: "opencode" }
+      use: ["opencode"]
+    - match: { dk_tool_hint: "crush" }
+      use: ["crush"]
+    - match: {}
+      use: ["codex"]
+  fallbacks:
+    codex: ["claude", "opencode"]
+    claude: ["codex", "opencode"]
+    opencode: ["codex", "claude"]
+    crush: ["codex", "opencode"]
+
+gates:
+  # Lightweight, repository-safe quality gate script run inside each workcell.
+  test_command: "bash scripts/cyntra/gates.sh --mode=all"
+  typecheck_command: "bash scripts/cyntra/gates.sh --mode=context"
+  lint_command: "bash scripts/cyntra/gates.sh --mode=diff"
+  build_command: null
+  timeout_seconds: 600
+  retry_flaky: 1
+  parallel: false
+  max_diff_lines: 4000
+  max_diff_files: 200
+  secret_detection: true
+  secret_detection_scan_diff: true
+  secret_detection_max_bytes: 250000
+
+speculation:
+  # Disabled by default to avoid N-way workcell fan-out and disk spikes.
+  enabled: false
+  default_parallelism: 1
+  max_parallelism: 1
+  vote_threshold: 0.7
+  auto_trigger:
+    on_critical_path: false
+    risk_levels: []
+
+control:
+  enabled: true
+
+planner:
+  mode: "off"
+  bundle_dir: null
+  confidence_threshold: 0.2
+
+sentinels:
+  enabled: false

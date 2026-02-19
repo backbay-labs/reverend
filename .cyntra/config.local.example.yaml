@@ -1,0 +1,11 @@
+# Copy this file to `.cyntra/config.local.yaml` for machine-local overrides.
+# This file is optional and loaded automatically by Cyntra if present.
+
+scheduling:
+  # Raise only if disk/headroom allows.
+  max_concurrent_workcells: 2
+
+speculation:
+  # Keep disabled unless you intentionally want parallel candidate workcells.
+  enabled: false
+

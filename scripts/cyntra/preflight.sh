@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repo_root"
+
+kernel_path="${CYNTRA_KERNEL_PATH:-/Users/connor/Medica/backbay/platform/kernel}"
+min_free_gb="${CYNTRA_MIN_FREE_GB:-35}"
+max_active_workcells="${CYNTRA_MAX_ACTIVE_WORKCELLS:-1}"
+auto_fix_main="${CYNTRA_AUTO_FIX_MAIN:-1}"
+run_status_check="${CYNTRA_PREFLIGHT_STATUS_CHECK:-1}"
+strict_context_main="${CYNTRA_STRICT_CONTEXT_MAIN:-1}"
+
+fail() {
+  echo "[preflight] ERROR: $*" >&2
+  exit 1
+}
+
+info() {
+  echo "[preflight] $*"
+}
+
+command -v uv >/dev/null 2>&1 || fail "uv is required but not found in PATH"
+[[ -d "$kernel_path" ]] || fail "kernel path not found: $kernel_path"
+[[ -f .beads/issues.jsonl ]] || fail "missing .beads/issues.jsonl"
+[[ -f .beads/deps.jsonl ]] || fail "missing .beads/deps.jsonl"
+[[ -f .cyntra/config.yaml ]] || fail "missing .cyntra/config.yaml"
+
+mkdir -p .cyntra/logs .cyntra/archives .cyntra/state .cyntra/runs .cyntra/dynamics
+mkdir -p .workcells
+if [[ ! -f .workcells/.gitignore ]]; then
+  cat > .workcells/.gitignore <<'EOF'
+*
+!.gitignore
+EOF
+fi
+
+if ! git show-ref --verify --quiet refs/heads/main; then
+  if [[ "$auto_fix_main" == "1" ]]; then
+    git branch main HEAD
+    info "created missing local branch 'main' at $(git rev-parse --short HEAD)"
+  else
+    fail "missing branch 'main' (set CYNTRA_AUTO_FIX_MAIN=1 to auto-create)"
+  fi
+fi
+
+free_kb="$(df -Pk "$repo_root" | awk 'NR==2{print $4}')"
+free_gb="$((free_kb / 1024 / 1024))"
+if (( free_gb < min_free_gb )); then
+  fail "low disk headroom: ${free_gb}GiB free, require >= ${min_free_gb}GiB"
+fi
+info "disk headroom OK: ${free_gb}GiB free"
+
+active_wc_count="$(find .workcells -mindepth 1 -maxdepth 1 -type d -name 'wc-*' 2>/dev/null | wc -l | tr -d ' ')"
+if (( active_wc_count > max_active_workcells )); then
+  fail "active workcells ${active_wc_count} exceed limit ${max_active_workcells}; run scripts/cyntra/cleanup.sh"
+fi
+info "active workcells: ${active_wc_count}"
+
+export CYNTRA_STRICT_CONTEXT_MAIN="$strict_context_main"
+
+python3 - <<'PY'
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+issues_path = Path(".beads/issues.jsonl")
+deps_path = Path(".beads/deps.jsonl")
+
+try:
+    issues = [json.loads(line) for line in issues_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    deps = [json.loads(line) for line in deps_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+except Exception as exc:
+    print(f"[preflight] ERROR: failed to parse beads files: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+issue_ids = {str(i.get("id")) for i in issues}
+invalid_deps = []
+for dep in deps:
+    f = str(dep.get("from", dep.get("from_id", "")))
+    t = str(dep.get("to", dep.get("to_id", "")))
+    if f not in issue_ids or t not in issue_ids:
+        invalid_deps.append((f, t))
+
+if invalid_deps:
+    print("[preflight] ERROR: dependency references unknown issue ids:", file=sys.stderr)
+    for f, t in invalid_deps[:10]:
+        print(f"  - {f} -> {t}", file=sys.stderr)
+    sys.exit(1)
+
+context_files = sorted(
+    {
+        str(path)
+        for issue in issues
+        for path in (issue.get("context_files") or [])
+        if isinstance(path, str) and path.strip()
+    }
+)
+
+missing = []
+not_on_main = []
+for rel in context_files:
+    p = Path(rel)
+    if not p.exists():
+        missing.append(rel)
+        continue
+    check = subprocess.run(
+        ["git", "cat-file", "-e", f"main:{rel}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if check.returncode != 0:
+        not_on_main.append(rel)
+
+if missing:
+    print("[preflight] ERROR: context files missing in working tree:", file=sys.stderr)
+    for item in missing:
+        print(f"  - {item}", file=sys.stderr)
+    sys.exit(1)
+
+if not_on_main:
+    strict = os.environ.get("CYNTRA_STRICT_CONTEXT_MAIN", "1") != "0"
+    level = "ERROR" if strict else "WARN"
+    stream = sys.stderr if strict else sys.stdout
+    print(f"[preflight] {level}: context files are not committed on branch 'main':", file=stream)
+    for item in not_on_main:
+        print(f"  - {item}", file=stream)
+    if strict:
+        print("[preflight] Commit required context docs before dispatch for reproducible workcells.", file=stream)
+        sys.exit(1)
+    else:
+        print("[preflight] WARN: continuing with non-reproducible context (strict mode disabled).", file=stream)
+
+ready = sum(1 for issue in issues if issue.get("status") == "ready")
+print(f"[preflight] beads graph OK: issues={len(issues)} deps={len(deps)} ready={ready} context_files={len(context_files)}")
+PY
+
+if [[ "$run_status_check" == "1" ]]; then
+  scripts/cyntra/cyntra.sh status >/dev/null
+  info "kernel status check OK"
+fi
+
+info "preflight checks passed"

@@ -88,3 +88,15 @@ core.*
 # python files
 *.egg-info
 __pycache__
+
+# Cyntra runtime artifacts (keep config files tracked)
+.workcells/
+.cyntra/logs/
+.cyntra/archives/
+.cyntra/state/
+.cyntra/runs/
+.cyntra/dynamics/
+.cyntra/memory/
+.cyntra/ralph/
+.cyntra/strategy/
+.cyntra/config.local.yaml
