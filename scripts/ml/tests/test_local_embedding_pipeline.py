@@ -253,6 +253,81 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(baseline["recall@10"], 0.0)
             self.assertEqual(reranked["recall@10"], 1.0)
 
+    def test_similar_function_query_uses_oversampled_candidates_for_rerank(self) -> None:
+        records: list[FunctionRecord] = [
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.seed.resolve",
+                    "name": "resolve_symbols",
+                    "text": "resolve import symbol thunk table",
+                }
+            ),
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.zz.target.resolve",
+                    "name": "target_candidate",
+                    "text": "resolve import symbol thunk table",
+                    "provenance": {
+                        "source": "test",
+                        "receipt_id": "receipt:test:target",
+                        "record_id": "fn.zz.target.resolve",
+                    },
+                    "evidence_refs": [
+                        {
+                            "kind": "CALLSITE",
+                            "description": "iat thunk resolver callsite evidence",
+                            "uri": "local-index://evidence/fn.zz.target.resolve/callsite",
+                            "confidence": 0.99,
+                        },
+                        {
+                            "kind": "XREF",
+                            "description": "xref links to import thunk table",
+                            "uri": "local-index://evidence/fn.zz.target.resolve/xref",
+                            "confidence": 0.97,
+                        },
+                    ],
+                }
+            ),
+        ]
+        for index in range(10):
+            records.append(
+                FunctionRecord.from_json(
+                    {
+                        "id": f"fn.aa.noise.{index:02d}",
+                        "name": f"noise_{index:02d}",
+                        "text": "resolve import symbol thunk table",
+                    }
+                )
+            )
+
+        pipeline = LocalEmbeddingPipeline(vector_dimension=64)
+        index = pipeline.build_index(records)
+        adapter = BaselineSimilarityAdapter(pipeline, index)
+
+        baseline_service = SemanticSearchQueryService(adapter=adapter, index=index)
+        reranked_service = SemanticSearchQueryService(
+            adapter=adapter,
+            index=index,
+            reranker=EvidenceWeightedReranker(),
+            rerank_candidate_multiplier=4,
+        )
+
+        baseline_ids = [
+            item["function_id"]
+            for item in baseline_service.search_similar_function("fn.seed.resolve", top_k=3).to_json()[
+                "results"
+            ]
+        ]
+        reranked_ids = [
+            item["function_id"]
+            for item in reranked_service.search_similar_function("fn.seed.resolve", top_k=3).to_json()[
+                "results"
+            ]
+        ]
+
+        self.assertNotIn("fn.zz.target.resolve", baseline_ids)
+        self.assertEqual(reranked_ids[0], "fn.zz.target.resolve")
+
     def test_function_record_defaults_provenance_and_evidence_refs(self) -> None:
         record = FunctionRecord.from_json(
             {
