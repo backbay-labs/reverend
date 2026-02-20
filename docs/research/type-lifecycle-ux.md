@@ -503,6 +503,97 @@ try {
 }
 ```
 
+### 5.5 Transaction-Safe Apply/Rollback Adapter
+
+To guarantee receipt linkage and deterministic undo, both `apply` and `rollback` must pass through a single adapter that owns transaction boundaries and snapshot persistence.
+
+```java
+public final class TypeApplyRollbackAdapter {
+    public ApplyResult applyApproved(
+            Program program,
+            List<TypeChange> changes,
+            List<UUID> approvedProposalReceiptIds,
+            String actor) {
+        int ghidraTxId = program.startTransaction("Apply approved type change(s)");
+        UUID applyReceiptId = UUID.randomUUID();
+        try {
+            List<SnapshotEntry> before = snapshotStore.capture(program, changes);
+            for (TypeChange change : changes) {
+                change.apply(program.getDataTypeManager());
+            }
+            List<SnapshotEntry> after = snapshotStore.capture(program, changes);
+
+            UUID txId = receiptStore.insertApplyTransaction(
+                program, ghidraTxId, scopeFor(changes), before, after, applyReceiptId);
+            receiptStore.insertApplyReceipt(applyReceiptId, txId, actor, changes);
+            receiptStore.linkApplyToProposals(applyReceiptId, txId, approvedProposalReceiptIds);
+
+            program.endTransaction(ghidraTxId, true);
+            return ApplyResult.applied(applyReceiptId, txId);
+        } catch (Exception e) {
+            program.endTransaction(ghidraTxId, false);
+            throw e;
+        }
+    }
+
+    public RollbackResult rollbackApplied(Program program, UUID applyReceiptId, String actor) {
+        ApplyTransaction tx = receiptStore.getApplyTransactionByReceipt(applyReceiptId);
+        if (tx.isRolledBack()) {
+            return RollbackResult.idempotent(applyReceiptId, tx.getRollbackReceiptId());
+        }
+
+        int ghidraTxId = program.startTransaction("Rollback applied type change(s)");
+        try {
+            snapshotStore.restore(program, tx.getStateBefore()); // pre-apply state source of truth
+            UUID rollbackReceiptId = receiptStore.insertRollbackReceipt(tx, actor);
+            receiptStore.linkRollbackToApply(rollbackReceiptId, tx.getTransactionId(), applyReceiptId);
+            receiptStore.markRolledBack(tx.getTransactionId(), rollbackReceiptId);
+
+            program.endTransaction(ghidraTxId, true);
+            return RollbackResult.rolledBack(rollbackReceiptId);
+        } catch (Exception e) {
+            program.endTransaction(ghidraTxId, false);
+            throw e;
+        }
+    }
+}
+```
+
+**Adapter guarantees:**
+
+1. Apply receipt and transaction journal row are committed atomically with the Program mutation.
+2. Apply receipt always links to one or more approved proposal receipts.
+3. Rollback receipt always links to the original apply receipt.
+4. Single-change and batch-change rollback both restore the exact pre-apply snapshot.
+5. Repeated rollback calls are idempotent.
+
+### 5.6 Representative Automated Rollback Tests
+
+The adapter test suite must cover both single and batch flows:
+
+| Test | Scenario | Required assertion |
+|---|---|---|
+| `applySingle_recordsTxAndReceiptLinks` | One approved proposal is applied | `apply_transaction` row exists; apply receipt links to proposal receipt |
+| `rollbackSingle_restoresPreApplyState` | Single type change is rolled back | Current datatype equals captured `state_before`; rollback receipt links to apply receipt |
+| `rollbackBatch_restoresPreApplyStateAtomically` | Batch apply (N > 1) then rollback | All N targets revert in one transaction; no partial revert visible |
+| `rollbackIsIdempotent` | Rollback requested twice for same apply receipt | Second request does not mutate state; returns same rollback receipt (or policy-defined no-op) |
+
+JUnit-style sketch:
+
+```java
+@Test
+public void rollbackBatch_restoresPreApplyStateAtomically() {
+    ApplyResult apply = adapter.applyApproved(program, batchChanges, proposalReceipts, "user:alice");
+    Snapshot expectedBefore = fixture.beforeSnapshot();
+
+    RollbackResult rollback = adapter.rollbackApplied(program, apply.applyReceiptId(), "user:alice");
+
+    assertEquals(expectedBefore, snapshotStore.capture(program, batchChanges));
+    assertTrue(receiptStore.hasLink(rollback.rollbackReceiptId(), apply.applyReceiptId(), "ROLLS_BACK_APPLY"));
+    assertTrue(receiptStore.isRolledBack(apply.transactionId()));
+}
+```
+
 ---
 
 ## 6. Propagation Rules
