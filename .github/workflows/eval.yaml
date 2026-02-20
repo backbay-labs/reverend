@@ -22,8 +22,8 @@ on:
 
 jobs:
   smoke:
-    name: Smoke Tests
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: Smoke Tests (per-commit)
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -38,11 +38,11 @@ jobs:
       - name: Run smoke tests
         run: bash eval/run_smoke.sh
 
-      - name: Upload smoke results
+      - name: Upload smoke metrics
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: smoke-results-${{ github.sha }}
+          name: smoke-metrics-${{ github.sha }}
           path: eval/output/smoke/
           retention-days: 30
 
@@ -66,8 +66,15 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Run smoke tests (baseline)
+      - name: Run smoke tests (generate current metrics)
         run: bash eval/run_smoke.sh
+
+      - name: Compare against baseline
+        run: |
+          python3 eval/scripts/compare_baseline.py \
+            --current eval/output/smoke/metrics.json \
+            --baseline eval/snapshots/v0.1.0/metrics.json \
+            --output eval/output/smoke/comparison.json
 
       - name: Upload nightly results
         uses: actions/upload-artifact@v4
@@ -99,6 +106,14 @@ jobs:
 
       - name: Run smoke tests
         run: bash eval/run_smoke.sh
+
+      - name: Compare against baseline (strict)
+        run: |
+          python3 eval/scripts/compare_baseline.py \
+            --current eval/output/smoke/metrics.json \
+            --baseline eval/snapshots/v0.1.0/metrics.json \
+            --tolerance 0.03 \
+            --output eval/output/smoke/comparison.json
 
       - name: Upload release results
         uses: actions/upload-artifact@v4
