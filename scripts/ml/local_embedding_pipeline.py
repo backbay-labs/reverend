@@ -1160,6 +1160,27 @@ class TriageFunctionFeatures:
     evidence_refs: tuple[EvidenceRef, ...]
 
 
+def _triage_source_context_uri(function_id: str) -> str:
+    return f"local-index://function/{function_id}"
+
+
+def _triage_evidence_links(
+    function_id: str,
+    evidence_refs: tuple[EvidenceRef, ...],
+) -> list[dict[str, Any]]:
+    source_context_uri = _triage_source_context_uri(function_id)
+    return [
+        {
+            "evidence_ref_id": ref.evidence_ref_id,
+            "kind": ref.kind,
+            "description": ref.description,
+            "uri": ref.uri,
+            "source_context_uri": source_context_uri,
+        }
+        for ref in evidence_refs
+    ]
+
+
 @dataclass(frozen=True)
 class TriageFinding:
     """Single triage output row containing evidence references."""
@@ -1172,13 +1193,16 @@ class TriageFinding:
     evidence_refs: tuple[EvidenceRef, ...]
 
     def to_json(self) -> dict[str, Any]:
+        source_context_uri = _triage_source_context_uri(self.function_id)
         return {
             "function_id": self.function_id,
             "name": self.name,
             "score": round(self.score, 6),
             "tags": list(self.tags),
             "rationale": list(self.rationale),
+            "source_context_uri": source_context_uri,
             "evidence_refs": [ref.to_json() for ref in self.evidence_refs],
+            "evidence_links": _triage_evidence_links(self.function_id, self.evidence_refs),
         }
 
 
@@ -1201,18 +1225,92 @@ class TriageMissionStageEvent:
 
 
 @dataclass(frozen=True)
+class TriageMapNode:
+    """UI row representing one function in the triage map."""
+
+    function_id: str
+    name: str
+    entrypoint_score: float
+    hotspot_score: float
+    unknown_score: float
+    is_entrypoint: bool
+    is_hotspot: bool
+    is_unknown: bool
+    evidence_count: int
+    tags: tuple[str, ...]
+    rationale: tuple[str, ...]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "function_id": self.function_id,
+            "name": self.name,
+            "source_context_uri": _triage_source_context_uri(self.function_id),
+            "scores": {
+                "entrypoint": round(self.entrypoint_score, 6),
+                "hotspot": round(self.hotspot_score, 6),
+                "unknown": round(self.unknown_score, 6),
+            },
+            "classification": {
+                "entrypoint": self.is_entrypoint,
+                "hotspot": self.is_hotspot,
+                "unknown": self.is_unknown,
+            },
+            "evidence_count": self.evidence_count,
+            "tags": list(self.tags),
+            "rationale": list(self.rationale),
+        }
+
+
+def _triage_ranked_rows(rows: tuple[TriageFinding, ...]) -> list[dict[str, Any]]:
+    ranked: list[dict[str, Any]] = []
+    for rank, finding in enumerate(rows, start=1):
+        row = finding.to_json()
+        row["rank"] = rank
+        ranked.append(row)
+    return ranked
+
+
+@dataclass(frozen=True)
 class TriageMissionReport:
     """Persisted mission summary artifact for deterministic triage runs."""
 
     mission_id: str
     generated_at_utc: str
     stages: tuple[TriageMissionStageEvent, ...]
+    features: tuple[TriageFunctionFeatures, ...]
     feature_count: int
     entrypoints: tuple[TriageFinding, ...]
     hotspots: tuple[TriageFinding, ...]
     unknowns: tuple[TriageFinding, ...]
 
     def to_json(self) -> dict[str, Any]:
+        entrypoint_ids = {finding.function_id for finding in self.entrypoints}
+        hotspot_ids = {finding.function_id for finding in self.hotspots}
+        unknown_ids = {finding.function_id for finding in self.unknowns}
+        triage_nodes = [
+            TriageMapNode(
+                function_id=feature.function_id,
+                name=feature.name,
+                entrypoint_score=feature.entrypoint_score,
+                hotspot_score=feature.hotspot_score,
+                unknown_score=feature.unknown_score,
+                is_entrypoint=feature.function_id in entrypoint_ids,
+                is_hotspot=feature.function_id in hotspot_ids,
+                is_unknown=feature.function_id in unknown_ids,
+                evidence_count=len(feature.evidence_refs),
+                tags=feature.tags,
+                rationale=feature.rationale,
+            ).to_json()
+            for feature in sorted(
+                self.features,
+                key=lambda item: (
+                    -item.hotspot_score,
+                    -item.entrypoint_score,
+                    -item.unknown_score,
+                    item.function_id,
+                ),
+            )
+        ]
         return {
             "schema_version": 1,
             "kind": "triage_mission_summary",
@@ -1225,6 +1323,15 @@ class TriageMissionReport:
             "entrypoints": [finding.to_json() for finding in self.entrypoints],
             "hotspots": [finding.to_json() for finding in self.hotspots],
             "unknowns": [finding.to_json() for finding in self.unknowns],
+            "ranked_hotspots": _triage_ranked_rows(self.hotspots),
+            "triage_map": {
+                "nodes": triage_nodes,
+                "legend": {
+                    "entrypoint": "Functions selected as likely mission entrypoints",
+                    "hotspot": "Ranked hotspot candidates for analyst review",
+                    "unknown": "Functions with low signal requiring manual triage",
+                },
+            },
             "counts": {
                 "entrypoints": len(self.entrypoints),
                 "hotspots": len(self.hotspots),
@@ -1408,6 +1515,7 @@ class DeterministicTriageMission:
             mission_id=resolved_mission_id,
             generated_at_utc=_utc_now(),
             stages=tuple(stage_events),
+            features=features,
             feature_count=len(features),
             entrypoints=entrypoints,
             hotspots=hotspots,
@@ -1543,6 +1651,192 @@ class DeterministicTriageMission:
             rationale=feature.rationale,
             evidence_refs=feature.evidence_refs,
         )
+
+
+def render_triage_panel(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Build panel payload used by the in-tool triage mission UI."""
+    triage_map = report.get("triage_map")
+    if not isinstance(triage_map, Mapping):
+        triage_map = {"nodes": [], "legend": {}}
+    ranked_hotspots = report.get("ranked_hotspots")
+    if not isinstance(ranked_hotspots, list):
+        ranked_hotspots = []
+    entrypoints = report.get("entrypoints")
+    if not isinstance(entrypoints, list):
+        entrypoints = []
+    unknowns = report.get("unknowns")
+    if not isinstance(unknowns, list):
+        unknowns = []
+
+    execution = report.get("execution")
+    feature_count = 0
+    if isinstance(execution, Mapping):
+        try:
+            feature_count = int(execution.get("feature_count") or 0)
+        except (TypeError, ValueError):
+            feature_count = 0
+
+    nodes = triage_map.get("nodes")
+    node_count = len(nodes) if isinstance(nodes, list) else 0
+    return {
+        "schema_version": 1,
+        "kind": "triage_mission_panel",
+        "panel": {
+            "id": "triage-mission",
+            "title": "Triage Mission",
+            "mission_id": str(report.get("mission_id") or ""),
+            "generated_at_utc": str(report.get("generated_at_utc") or ""),
+            "feature_count": feature_count,
+            "map_node_count": node_count,
+            "hotspot_count": len(ranked_hotspots),
+            "entrypoint_count": len(entrypoints),
+            "unknown_count": len(unknowns),
+        },
+        "triage_map": triage_map,
+        "ranked_hotspots": ranked_hotspots,
+        "entrypoints": entrypoints,
+        "unknowns": unknowns,
+        "execution": execution if isinstance(execution, Mapping) else {},
+    }
+
+
+def _markdown_link(label: str, uri: str) -> str:
+    safe_label = label.replace("|", "\\|")
+    if uri:
+        return f"[{safe_label}]({uri})"
+    return safe_label
+
+
+def _triage_report_markdown(report: Mapping[str, Any]) -> str:
+    mission_id = str(report.get("mission_id") or "triage:unknown")
+    generated_at = str(report.get("generated_at_utc") or "")
+    counts = report.get("counts")
+    if not isinstance(counts, Mapping):
+        counts = {}
+    entry_count = int(counts.get("entrypoints") or 0)
+    hotspot_count = int(counts.get("hotspots") or 0)
+    unknown_count = int(counts.get("unknowns") or 0)
+
+    lines: list[str] = [
+        "# Triage Mission Report",
+        "",
+        f"- Mission ID: `{mission_id}`",
+        f"- Generated At (UTC): `{generated_at}`",
+        f"- Entrypoints: `{entry_count}`",
+        f"- Hotspots: `{hotspot_count}`",
+        f"- Unknowns: `{unknown_count}`",
+        "",
+        "## Triage Map",
+        "",
+        "| Function | Entrypoint | Hotspot | Unknown | Evidence Count |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+
+    triage_map = report.get("triage_map")
+    nodes_raw = triage_map.get("nodes") if isinstance(triage_map, Mapping) else []
+    nodes = nodes_raw if isinstance(nodes_raw, list) else []
+    for node in nodes:
+        if not isinstance(node, Mapping):
+            continue
+        function_id = str(node.get("function_id") or "")
+        source_context_uri = str(node.get("source_context_uri") or "")
+        scores = node.get("scores")
+        if not isinstance(scores, Mapping):
+            scores = {}
+        evidence_count = int(node.get("evidence_count") or 0)
+        lines.append(
+            "| "
+            + _markdown_link(function_id, source_context_uri)
+            + " | "
+            + f"{float(scores.get('entrypoint') or 0.0):.3f}"
+            + " | "
+            + f"{float(scores.get('hotspot') or 0.0):.3f}"
+            + " | "
+            + f"{float(scores.get('unknown') or 0.0):.3f}"
+            + " | "
+            + str(evidence_count)
+            + " |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Ranked Hotspots",
+            "",
+            "| Rank | Function | Score | Evidence Links | Source Context |",
+            "| ---: | --- | ---: | --- | --- |",
+        ]
+    )
+
+    ranked_hotspots_raw = report.get("ranked_hotspots")
+    ranked_hotspots = ranked_hotspots_raw if isinstance(ranked_hotspots_raw, list) else []
+    for hotspot in ranked_hotspots:
+        if not isinstance(hotspot, Mapping):
+            continue
+        rank = int(hotspot.get("rank") or 0)
+        function_id = str(hotspot.get("function_id") or "")
+        score = float(hotspot.get("score") or 0.0)
+        source_context_uri = str(hotspot.get("source_context_uri") or "")
+        evidence_links_raw = hotspot.get("evidence_links")
+        evidence_links = evidence_links_raw if isinstance(evidence_links_raw, list) else []
+        rendered_links: list[str] = []
+        for link in evidence_links:
+            if not isinstance(link, Mapping):
+                continue
+            label = str(link.get("evidence_ref_id") or link.get("kind") or "evidence")
+            uri = str(link.get("uri") or "")
+            rendered_links.append(_markdown_link(label, uri))
+        evidence_cell = "<br>".join(rendered_links) if rendered_links else "n/a"
+        lines.append(
+            "| "
+            + str(rank)
+            + " | "
+            + _markdown_link(function_id, source_context_uri)
+            + " | "
+            + f"{score:.3f}"
+            + " | "
+            + evidence_cell
+            + " | "
+            + _markdown_link("open", source_context_uri)
+            + " |"
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+def write_triage_report_artifacts(
+    report: Mapping[str, Any],
+    *,
+    output_dir: Path,
+) -> dict[str, Any]:
+    """Persist triage mission artifacts for UI/report consumers."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_path = output_dir / "triage-summary.json"
+    panel_path = output_dir / "triage-panel.json"
+    markdown_path = output_dir / "triage-report.md"
+    manifest_path = output_dir / "triage-artifacts.json"
+
+    panel = render_triage_panel(report)
+    markdown = _triage_report_markdown(report)
+
+    summary_path.write_text(json.dumps(dict(report), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    panel_path.write_text(json.dumps(panel, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    markdown_path.write_text(markdown, encoding="utf-8")
+
+    manifest = {
+        "schema_version": 1,
+        "kind": "triage_mission_artifacts",
+        "generated_at_utc": _utc_now(),
+        "mission_id": str(report.get("mission_id") or ""),
+        "artifacts": {
+            "summary": str(summary_path),
+            "panel": str(panel_path),
+            "markdown": str(markdown_path),
+        },
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest
 
 
 @dataclass(frozen=True)
@@ -2627,7 +2921,7 @@ def _suggest_types_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _triage_mission_command(args: argparse.Namespace) -> int:
+def _run_triage_mission(args: argparse.Namespace) -> dict[str, Any]:
     records = load_corpus(args.corpus)
     mission = DeterministicTriageMission(
         entrypoint_threshold=args.entrypoint_threshold,
@@ -2635,14 +2929,39 @@ def _triage_mission_command(args: argparse.Namespace) -> int:
         unknown_threshold=args.unknown_threshold,
         hotspot_limit=args.hotspot_limit,
     )
-    report = mission.run(records, mission_id=args.mission_id).to_json()
+    return mission.run(records, mission_id=args.mission_id).to_json()
+
+
+def _triage_mission_command(args: argparse.Namespace) -> int:
+    report = _run_triage_mission(args)
+    wrote_output = False
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"[ml327] wrote {args.output}")
-    else:
+        wrote_output = True
+
+    if args.report_dir:
+        manifest = write_triage_report_artifacts(report, output_dir=args.report_dir)
+        print(f"[ml327] wrote {args.report_dir}")
+        print(json.dumps(manifest, indent=2, sort_keys=True))
+        wrote_output = True
+
+    if not wrote_output:
         print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+def _triage_panel_command(args: argparse.Namespace) -> int:
+    report = _run_triage_mission(args)
+    panel = render_triage_panel(report)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(panel, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml327] wrote {args.output}")
+    else:
+        print(json.dumps(panel, indent=2, sort_keys=True))
     return 0
 
 
@@ -2669,6 +2988,40 @@ def _pullback_reuse_command(args: argparse.Namespace) -> int:
     else:
         print(json.dumps(report, indent=2, sort_keys=True))
     return 0
+
+
+def _add_triage_common_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--corpus", type=Path, required=True, help="Path to corpus JSON")
+    parser.add_argument(
+        "--mission-id",
+        type=str,
+        default=None,
+        help="Optional mission id override for deterministic artifact naming",
+    )
+    parser.add_argument(
+        "--entrypoint-threshold",
+        type=float,
+        default=0.45,
+        help="Score threshold for entrypoint emission",
+    )
+    parser.add_argument(
+        "--hotspot-threshold",
+        type=float,
+        default=0.30,
+        help="Score threshold for hotspot emission",
+    )
+    parser.add_argument(
+        "--unknown-threshold",
+        type=float,
+        default=0.55,
+        help="Score threshold for unknown emission",
+    )
+    parser.add_argument(
+        "--hotspot-limit",
+        type=int,
+        default=10,
+        help="Maximum hotspot rows to include in summary artifact",
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -2890,7 +3243,7 @@ def _parser() -> argparse.ArgumentParser:
         "triage-mission",
         help="Run deterministic triage mission graph and emit summary artifact",
     )
-    triage_parser.add_argument("--corpus", type=Path, required=True, help="Path to corpus JSON")
+    _add_triage_common_args(triage_parser)
     triage_parser.add_argument(
         "--output",
         type=Path,
@@ -2898,36 +3251,25 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional path to write mission summary artifact JSON",
     )
     triage_parser.add_argument(
-        "--mission-id",
-        type=str,
+        "--report-dir",
+        type=Path,
         default=None,
-        help="Optional mission id override for deterministic artifact naming",
-    )
-    triage_parser.add_argument(
-        "--entrypoint-threshold",
-        type=float,
-        default=0.45,
-        help="Score threshold for entrypoint emission",
-    )
-    triage_parser.add_argument(
-        "--hotspot-threshold",
-        type=float,
-        default=0.30,
-        help="Score threshold for hotspot emission",
-    )
-    triage_parser.add_argument(
-        "--unknown-threshold",
-        type=float,
-        default=0.55,
-        help="Score threshold for unknown emission",
-    )
-    triage_parser.add_argument(
-        "--hotspot-limit",
-        type=int,
-        default=10,
-        help="Maximum hotspot rows to include in summary artifact",
+        help="Optional directory for triage summary/panel/markdown export artifacts",
     )
     triage_parser.set_defaults(func=_triage_mission_command)
+
+    triage_panel_parser = subparsers.add_parser(
+        "triage-panel",
+        help="Render triage mission panel payload (map + ranked hotspots)",
+    )
+    _add_triage_common_args(triage_panel_parser)
+    triage_panel_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write triage panel payload JSON",
+    )
+    triage_panel_parser.set_defaults(func=_triage_panel_command)
 
     pullback_parser = subparsers.add_parser(
         "pullback-reuse",

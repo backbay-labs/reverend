@@ -144,13 +144,30 @@ Suggestion reports include:
 python3 scripts/ml/local_embedding_pipeline.py triage-mission \
   --corpus scripts/ml/fixtures/toy_similarity_corpus_slice.json \
   --mission-id triage-smoke \
-  --output /tmp/ml327-triage-summary.json
+  --output /tmp/ml327-triage-summary.json \
+  --report-dir /tmp/ml327-triage-artifacts
 ```
 
 Mission artifacts include:
 - Deterministic stage-graph execution trace
+- Triage map nodes and explicit ranked hotspot rows for UI consumers
 - `entrypoints`, `hotspots`, and `unknowns` rows
-- Evidence references on all emitted triage findings
+- Evidence links with source-context URIs on all emitted triage findings
+
+`--report-dir` exports:
+- `triage-summary.json` (machine-readable summary artifact)
+- `triage-panel.json` (in-plugin panel payload for map + ranked hotspots)
+- `triage-report.md` (versionable report with navigable evidence/source links)
+- `triage-artifacts.json` (artifact manifest)
+
+Render only the UI panel payload:
+
+```bash
+python3 scripts/ml/local_embedding_pipeline.py triage-panel \
+  --corpus scripts/ml/fixtures/toy_similarity_corpus_slice.json \
+  --mission-id triage-smoke \
+  --output /tmp/ml327-triage-panel.json
+```
 
 ## Sync Approved Proposals to Shared Corpus Backend
 
