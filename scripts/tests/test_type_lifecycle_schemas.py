@@ -375,6 +375,20 @@ class TypeLifecycleSchemaTest(unittest.TestCase):
         payload["action"] = "propagate"
         self._assert_valid(self.receipt_validator, payload)
 
+    def test_receipt_evidence_source_link_requires_source_pair(self) -> None:
+        payload = self._base_receipt()
+        payload["evidence"] = [
+            {
+                "evidence_type": "CALLSITE",
+                "source_id": UUID_6,
+                "metadata": {},
+            }
+        ]
+        self._assert_invalid(self.receipt_validator, payload)
+
+        payload["evidence"][0]["source_type"] = "EVIDENCE_REF"
+        self._assert_valid(self.receipt_validator, payload)
+
 
 if __name__ == "__main__":
     unittest.main()
