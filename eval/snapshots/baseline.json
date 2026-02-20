@@ -1,0 +1,65 @@
+{
+  "schema_version": 2,
+  "description": "Stock Ghidra baseline metrics for semantic search and type recovery",
+  "provenance": {
+    "commit_sha": "9cd9bbb1dee22469fc8b157750b9831511f40f56",
+    "commit_short": "9cd9bbb1de",
+    "commit_date": "2026-02-19T22:29:50-07:00",
+    "branch": "wc/1003/20260220T054303Z",
+    "datasets_lock_sha256": "bdb02a18c04a144ddbbdccff3cc780bbef08efa2afae23664301f4dec8cc66ca",
+    "eval_seed": 0,
+    "run_timestamp": "2026-02-20T05:47:44Z"
+  },
+  "thresholds": {
+    "regression_tolerance": 0.05,
+    "description": "Max acceptable metric drop (absolute) before flagging regression"
+  },
+  "metrics": {
+    "similarity": {
+      "description": "Semantic search baseline (stock Ghidra heuristic)",
+      "dataset": "toy-similarity-v1",
+      "method": "jaccard_token",
+      "recall@1": {
+        "value": 1.0,
+        "min_threshold": 0.95,
+        "target": 0.7,
+        "note": "Target from REFuSe-Bench cross-compiler evaluation"
+      },
+      "mrr": {
+        "value": 1.0,
+        "min_threshold": 0.95,
+        "target": 0.75,
+        "note": "Mean reciprocal rank target"
+      },
+      "queries": 3
+    },
+    "type": {
+      "description": "Type recovery baseline (stock Ghidra heuristic)",
+      "dataset": "toy-type-v1",
+      "method": "heuristic_name_pattern",
+      "accuracy": {
+        "value": 1.0,
+        "min_threshold": 0.95,
+        "target": 0.25,
+        "note": "Target: 60% improvement over ~15% Ghidra baseline (SURE 2025)"
+      },
+      "cases": 5
+    },
+    "diff": {
+      "description": "Binary diffing baseline (stock Ghidra heuristic)",
+      "dataset": "toy-diff-v1",
+      "method": "name_match",
+      "match_rate": {
+        "value": 0.666667,
+        "min_threshold": 0.616667,
+        "target": 0.9,
+        "note": "Target: function match rate on PatchCorpus"
+      },
+      "coverage": {
+        "value": 0.666667,
+        "min_threshold": 0.616667
+      },
+      "pairs": 3
+    }
+  }
+}
