@@ -188,6 +188,50 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             self.assertEqual(events[0]["outcome"], "DENY")
             self.assertEqual(events[0]["proposal_id"], "p-denied")
 
+    def test_sync_denies_unauthorized_write_when_no_approved_proposals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+            audit_path = tmp / "audit.jsonl"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-not-approved",
+                        "state": "PROPOSED",
+                        "receipt_id": "r-not-approved",
+                    }
+                ],
+            )
+
+            telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-deny-no-approved",
+                access_context=AccessContext.from_values(
+                    principal="agent:observer",
+                    capabilities={"READ.CORPUS"},
+                ),
+                audit_path=audit_path,
+            )
+
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+            self.assertEqual(telemetry.synced_count, 0)
+            self.assertEqual(telemetry.approved_total, 0)
+            self.assertEqual(telemetry.error_count, 1)
+            self.assertEqual(telemetry.errors[0].proposal_id, "sync-deny-no-approved")
+            self.assertFalse(state_path.exists())
+            self.assertFalse(backend_store.exists())
+            self.assertEqual(events[0]["event_type"], "CAPABILITY_DENIED")
+            self.assertEqual(events[0]["action"], "SYNC")
+            self.assertEqual(events[0]["outcome"], "DENY")
+            self.assertEqual(events[0]["proposal_id"], "sync-deny-no-approved")
+
     def test_sync_resumes_after_partial_failure(self) -> None:
         class FlakyBackend:
             def __init__(self) -> None:
@@ -362,6 +406,31 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             assert artifact is not None
             self.assertEqual(artifact["proposal_id"], "p-readable")
             self.assertEqual(artifact["receipt_id"], "r-readable")
+
+    def test_read_denies_before_backend_lookup_when_capability_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            backend_store = tmp / "backend_store.json"
+            audit_path = tmp / "audit.jsonl"
+            backend_store.write_text("{invalid-json", encoding="utf-8")
+
+            with self.assertRaises(AccessDeniedError) as ctx:
+                run_read_job(
+                    backend_store_path=backend_store,
+                    proposal_id="p-precheck",
+                    access_context=AccessContext.from_values(
+                        principal="agent:writer",
+                        capabilities={"WRITE.CORPUS_SYNC"},
+                    ),
+                    audit_path=audit_path,
+                )
+
+            self.assertIn("lacks capability 'READ.CORPUS'", str(ctx.exception))
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(events[0]["event_type"], "CAPABILITY_DENIED")
+            self.assertEqual(events[0]["action"], "READ")
+            self.assertEqual(events[0]["outcome"], "DENY")
+            self.assertEqual(events[0]["proposal_id"], "p-precheck")
 
     def test_cli_run_writes_telemetry_with_counts_errors_and_latency(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -334,6 +334,31 @@ class AccessPolicy:
             program_id=program_id,
         )
 
+    def authorize_read_capability(self, *, proposal_id: str) -> None:
+        self._check_capability(
+            action="READ",
+            required_capability=READ_CAPABILITY,
+            proposal_id=proposal_id,
+            program_id=None,
+        )
+
+    def authorize_read_scope(self, *, proposal_id: str, program_id: str | None) -> None:
+        self._check_program_scope(
+            action="READ",
+            required_capability=READ_CAPABILITY,
+            proposal_id=proposal_id,
+            program_id=program_id,
+        )
+        self._emit(
+            event_type="ACCESS_GRANTED",
+            severity="INFO",
+            action="READ",
+            outcome="ALLOW",
+            proposal_id=proposal_id,
+            program_id=program_id,
+            required_capability=READ_CAPABILITY,
+        )
+
     def audit_read_miss(self, *, proposal_id: str) -> None:
         self._emit(
             event_type="CORPUS_READ_MISS",
@@ -370,6 +395,36 @@ class AccessPolicy:
         proposal_id: str,
         program_id: str | None,
     ) -> None:
+        self._check_capability(
+            action=action,
+            required_capability=required_capability,
+            proposal_id=proposal_id,
+            program_id=program_id,
+        )
+        self._check_program_scope(
+            action=action,
+            required_capability=required_capability,
+            proposal_id=proposal_id,
+            program_id=program_id,
+        )
+        self._emit(
+            event_type="ACCESS_GRANTED",
+            severity="INFO",
+            action=action,
+            outcome="ALLOW",
+            proposal_id=proposal_id,
+            program_id=program_id,
+            required_capability=required_capability,
+        )
+
+    def _check_capability(
+        self,
+        *,
+        action: str,
+        required_capability: str,
+        proposal_id: str,
+        program_id: str | None,
+    ) -> None:
         if not _capability_granted(self._context.capabilities, required_capability):
             reason = (
                 f"principal '{self._context.principal}' lacks capability '{required_capability}' "
@@ -387,6 +442,14 @@ class AccessPolicy:
             )
             raise AccessDeniedError(reason)
 
+    def _check_program_scope(
+        self,
+        *,
+        action: str,
+        required_capability: str,
+        proposal_id: str,
+        program_id: str | None,
+    ) -> None:
         allowed_program_ids = self._context.allowed_program_ids
         if program_id is not None and allowed_program_ids is not None and program_id not in allowed_program_ids:
             reason = (
@@ -404,16 +467,6 @@ class AccessPolicy:
                 reason=reason,
             )
             raise AccessDeniedError(reason)
-
-        self._emit(
-            event_type="ACCESS_GRANTED",
-            severity="INFO",
-            action=action,
-            outcome="ALLOW",
-            proposal_id=proposal_id,
-            program_id=program_id,
-            required_capability=required_capability,
-        )
 
     def _emit(
         self,
@@ -718,12 +771,40 @@ class CorpusSyncWorker:
         started_at_utc = _utc_now()
         resolved_job_id = job_id or f"corpus-sync-{datetime.now(tz=timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
+        approved = [proposal for proposal in proposals if proposal.state in self._approved_states]
+        skipped_non_approved = len(proposals) - len(approved)
+
+        preflight_id = resolved_job_id
+        preflight_program_id: str | None = None
+        if approved:
+            preflight_id = approved[0].proposal_id
+            preflight_program_id = approved[0].program_id
+        try:
+            self._access_policy.authorize_sync(
+                proposal_id=preflight_id,
+                program_id=preflight_program_id,
+            )
+        except AccessDeniedError as exc:
+            completed_at_utc = _utc_now()
+            errors = (SyncError(proposal_id=preflight_id, error=str(exc)),)
+            return SyncTelemetry(
+                job_id=resolved_job_id,
+                started_at_utc=started_at_utc,
+                completed_at_utc=completed_at_utc,
+                resumed_from_checkpoint=False,
+                scanned_total=len(proposals),
+                approved_total=len(approved),
+                skipped_non_approved=skipped_non_approved,
+                synced_count=0,
+                already_synced_count=0,
+                error_count=len(errors),
+                latency_ms=_elapsed_ms(start_ns),
+                errors=errors,
+            )
+
         checkpoint = self._state_store.load()
         synced_ids = set(checkpoint.synced_proposal_ids)
         resumed_from_checkpoint = bool(synced_ids)
-
-        approved = [proposal for proposal in proposals if proposal.state in self._approved_states]
-        skipped_non_approved = len(proposals) - len(approved)
 
         synced_count = 0
         already_synced_count = 0
@@ -812,12 +893,17 @@ def read_synced_artifact(
         raise ValueError("proposal_id cannot be empty")
 
     resolved_policy = access_policy or AccessPolicy(context=AccessContext.system())
+    resolved_policy.authorize_read_capability(proposal_id=normalized_proposal_id)
+
     artifact = backend.get(normalized_proposal_id)
     program_id: str | None = None
     if artifact is not None:
         program_id = _normalize_program_id(artifact.get("program_id"))
 
-    resolved_policy.authorize_read(proposal_id=normalized_proposal_id, program_id=program_id)
+    resolved_policy.authorize_read_scope(
+        proposal_id=normalized_proposal_id,
+        program_id=program_id,
+    )
 
     if artifact is None:
         resolved_policy.audit_read_miss(proposal_id=normalized_proposal_id)
