@@ -75,15 +75,7 @@
       ],
       "properties": {
         "source_type": {
-          "type": "string",
-          "enum": [
-            "DWARF",
-            "ANALYST",
-            "ML_MODEL",
-            "CONSTRAINT_SOLVER",
-            "HEURISTIC",
-            "GHIDRA_DEFAULT"
-          ]
+          "$ref": "#/$defs/source_type"
         },
         "source_id": {
           "type": "string",
@@ -149,9 +141,38 @@
       "items": {
         "$ref": "#/$defs/review_decision"
       }
+    },
+    "propagation_policy": {
+      "description": "Configured scope-specific propagation modes and deterministic conflict workflow.",
+      "$ref": "#/$defs/propagation_policy"
+    },
+    "propagation_events": {
+      "description": "Applied/proposed/conflict outcomes for each propagation target.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/propagation_event"
+      }
+    },
+    "conflicts": {
+      "description": "Competing type assertions detected during proposal or propagation.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/conflict_record"
+      }
     }
   },
   "$defs": {
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "DWARF",
+        "ANALYST",
+        "ML_MODEL",
+        "CONSTRAINT_SOLVER",
+        "HEURISTIC",
+        "GHIDRA_DEFAULT"
+      ]
+    },
     "lifecycle_state": {
       "type": "string",
       "enum": [
@@ -162,6 +183,730 @@
         "PROPAGATED",
         "DEPRECATED",
         "REJECTED"
+      ]
+    },
+    "propagation_scope": {
+      "type": "string",
+      "enum": [
+        "SAME_PROGRAM",
+        "CROSS_PROGRAM",
+        "CORPUS_KB"
+      ]
+    },
+    "propagation_mode": {
+      "type": "string",
+      "enum": [
+        "AUTO_PROPAGATE",
+        "PROPOSE",
+        "DISABLED"
+      ]
+    },
+    "propagation_rule": {
+      "type": "string",
+      "enum": [
+        "SAME_PROGRAM_DIRECT_DATAFLOW",
+        "SAME_PROGRAM_CALL_SITE_CONSISTENCY",
+        "SAME_PROGRAM_STRUCT_FIELD_ACCESS",
+        "SAME_PROGRAM_RETURN_TYPE",
+        "SAME_PROGRAM_GLOBAL_CONSISTENCY",
+        "CROSS_PROGRAM_EXACT_FUNCTION_MATCH",
+        "CROSS_PROGRAM_HIGH_SIMILARITY_FUNCTION_MATCH",
+        "CROSS_PROGRAM_SAME_NAME_FUNCTION_MATCH",
+        "CROSS_PROGRAM_STRUCTURAL_MATCH",
+        "CORPUS_KB_LAYOUT_FINGERPRINT",
+        "CORPUS_KB_PARTIAL_LAYOUT"
+      ]
+    },
+    "propagation_outcome": {
+      "type": "string",
+      "enum": [
+        "APPLIED",
+        "PROPOSED",
+        "SKIPPED",
+        "CONFLICT",
+        "ROLLED_BACK"
+      ]
+    },
+    "scope_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "min_confidence"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/propagation_mode"
+        },
+        "min_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "confidence_adjustment": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "require_review_on_conflict": {
+          "type": "boolean"
+        },
+        "allow_replace_lower_priority": {
+          "type": "boolean"
+        }
+      }
+    },
+    "propagation_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "same_program",
+        "cross_program",
+        "corpus_kb",
+        "conflict_resolution"
+      ],
+      "properties": {
+        "same_program": {
+          "$ref": "#/$defs/scope_policy"
+        },
+        "cross_program": {
+          "$ref": "#/$defs/scope_policy"
+        },
+        "corpus_kb": {
+          "$ref": "#/$defs/scope_policy"
+        },
+        "conflict_resolution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_priority_order",
+            "confidence_margin",
+            "tie_breaker",
+            "workflow"
+          ],
+          "properties": {
+            "source_priority_order": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/source_type"
+              },
+              "minItems": 6,
+              "maxItems": 6,
+              "uniqueItems": true
+            },
+            "confidence_margin": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tie_breaker": {
+              "type": "string",
+              "enum": [
+                "ASSERTION_ID_ASC",
+                "TARGET_ID_ASC",
+                "RECEIPT_TIMESTAMP_ASC"
+              ]
+            },
+            "workflow": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "const": "SOURCE_PRIORITY"
+                },
+                {
+                  "const": "CONFIDENCE"
+                },
+                {
+                  "const": "TIE_BREAKER"
+                }
+              ],
+              "items": false
+            }
+          }
+        }
+      }
+    },
+    "conflict_category": {
+      "type": "string",
+      "enum": [
+        "PRIMITIVE_TYPE_DISAGREEMENT",
+        "STRUCT_LAYOUT_CONFLICT",
+        "FUNCTION_SIGNATURE_CONFLICT",
+        "TYPEDEF_CHAIN_CONFLICT",
+        "POINTER_DEPTH_CONFLICT",
+        "STRUCT_NAME_CONFLICT"
+      ]
+    },
+    "conflict_status": {
+      "type": "string",
+      "enum": [
+        "OPEN",
+        "AUTO_RESOLVED",
+        "ESCALATED",
+        "RESOLVED",
+        "DROPPED"
+      ]
+    },
+    "conflict_resolution_strategy": {
+      "type": "string",
+      "enum": [
+        "SOURCE_PRIORITY",
+        "HIGHER_CONFIDENCE",
+        "DETERMINISTIC_TIE_BREAK",
+        "MANUAL_REVIEW"
+      ]
+    },
+    "conflict_resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy",
+        "requires_review"
+      ],
+      "properties": {
+        "strategy": {
+          "$ref": "#/$defs/conflict_resolution_strategy"
+        },
+        "requires_review": {
+          "type": "boolean"
+        },
+        "winner_assertion_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "loser_assertion_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "priority_gap": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "confidence_delta": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "tie_breaker": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "ASSERTION_ID_ASC",
+            "TARGET_ID_ASC",
+            "RECEIPT_TIMESTAMP_ASC",
+            null
+          ]
+        },
+        "reviewer_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolved_receipt_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "resolved_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "enum": [
+                  "SOURCE_PRIORITY",
+                  "HIGHER_CONFIDENCE",
+                  "DETERMINISTIC_TIE_BREAK"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "winner_assertion_id",
+              "loser_assertion_id"
+            ],
+            "properties": {
+              "winner_assertion_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "loser_assertion_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "SOURCE_PRIORITY"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "priority_gap"
+            ],
+            "properties": {
+              "priority_gap": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "HIGHER_CONFIDENCE"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "confidence_delta"
+            ],
+            "properties": {
+              "confidence_delta": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "DETERMINISTIC_TIE_BREAK"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "tie_breaker"
+            ],
+            "properties": {
+              "tie_breaker": {
+                "type": "string",
+                "enum": [
+                  "ASSERTION_ID_ASC",
+                  "TARGET_ID_ASC",
+                  "RECEIPT_TIMESTAMP_ASC"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "MANUAL_REVIEW"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "requires_review": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "conflict_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conflict_id",
+        "category",
+        "detected_during",
+        "competing_assertion_id",
+        "competing_source_type",
+        "status",
+        "workflow_version",
+        "queued_at"
+      ],
+      "properties": {
+        "conflict_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "category": {
+          "$ref": "#/$defs/conflict_category"
+        },
+        "detected_during": {
+          "type": "string",
+          "enum": [
+            "PROPOSAL",
+            "PROPAGATION"
+          ]
+        },
+        "competing_assertion_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "competing_source_type": {
+          "$ref": "#/$defs/source_type"
+        },
+        "status": {
+          "$ref": "#/$defs/conflict_status"
+        },
+        "workflow_version": {
+          "type": "string",
+          "const": "source-priority-confidence-tiebreak-v1"
+        },
+        "queue_position": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "similarity_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queued_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "escalation_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/conflict_resolution"
+            }
+          ]
+        },
+        "resolved_receipt_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "resolved_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "AUTO_RESOLVED",
+                  "RESOLVED"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "resolution",
+              "resolved_receipt_id",
+              "resolved_at"
+            ],
+            "properties": {
+              "resolution": {
+                "type": "object"
+              },
+              "resolved_receipt_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resolved_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "AUTO_RESOLVED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resolution": {
+                "properties": {
+                  "requires_review": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "requires_review"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "ESCALATED"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "escalation_reason"
+            ],
+            "properties": {
+              "escalation_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "propagation_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "scope",
+        "rule",
+        "policy_mode",
+        "outcome",
+        "propagated_at"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/propagation_scope"
+        },
+        "rule": {
+          "$ref": "#/$defs/propagation_rule"
+        },
+        "policy_mode": {
+          "$ref": "#/$defs/propagation_mode"
+        },
+        "outcome": {
+          "$ref": "#/$defs/propagation_outcome"
+        },
+        "target_program_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "target_assertion_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "competing_assertion_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "resulting_confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "conflict_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "applied_receipt_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "rollback_receipt_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "propagated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "rolled_back_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "APPLIED"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "applied_receipt_id"
+            ],
+            "properties": {
+              "applied_receipt_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "ROLLED_BACK"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "applied_receipt_id",
+              "rollback_receipt_id",
+              "rolled_back_at"
+            ],
+            "properties": {
+              "applied_receipt_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "rollback_receipt_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "rolled_back_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "CONFLICT"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "conflict_id",
+              "competing_assertion_id"
+            ],
+            "properties": {
+              "conflict_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "competing_assertion_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "policy_mode": {
+                "const": "DISABLED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "SKIPPED"
+              }
+            }
+          }
+        }
       ]
     },
     "review_decision": {
@@ -593,5 +1338,95 @@
         }
       ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "ACCEPTED",
+              "PROPAGATED"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "required": [
+          "propagation_policy"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "PROPAGATED"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "required": [
+          "propagation_events"
+        ],
+        "properties": {
+          "propagation_events": {
+            "type": "array",
+            "minItems": 1,
+            "contains": {
+              "type": "object",
+              "required": [
+                "outcome"
+              ],
+              "properties": {
+                "outcome": {
+                  "const": "APPLIED"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "propagation_events": {
+            "type": "array",
+            "contains": {
+              "type": "object",
+              "required": [
+                "outcome"
+              ],
+              "properties": {
+                "outcome": {
+                  "const": "CONFLICT"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "propagation_events"
+        ]
+      },
+      "then": {
+        "required": [
+          "conflicts"
+        ],
+        "properties": {
+          "conflicts": {
+            "type": "array",
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
 }

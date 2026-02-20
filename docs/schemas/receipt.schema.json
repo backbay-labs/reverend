@@ -218,7 +218,10 @@
             "type": "string",
             "enum": [
               "APPLIES_PROPOSAL",
-              "ROLLS_BACK_APPLY"
+              "ROLLS_BACK_APPLY",
+              "APPLIES_PROPAGATION",
+              "ROLLS_BACK_PROPAGATION",
+              "RESOLVES_TYPE_CONFLICT"
             ]
           }
         }
@@ -276,6 +279,84 @@
       "if": {
         "properties": {
           "action": {
+            "const": "propagate"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "transaction": {
+            "properties": {
+              "phase": {
+                "const": "apply"
+              }
+            },
+            "required": [
+              "phase"
+            ]
+          },
+          "receipt_links": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "link_type": {
+                  "const": "APPLIES_PROPAGATION"
+                }
+              },
+              "required": [
+                "link_type"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "resolve_conflict"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "transaction": {
+            "properties": {
+              "phase": {
+                "const": "apply"
+              }
+            },
+            "required": [
+              "phase"
+            ]
+          },
+          "receipt_links": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "link_type": {
+                  "const": "RESOLVES_TYPE_CONFLICT"
+                }
+              },
+              "required": [
+                "link_type"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
             "enum": [
               "rollback",
               "revert"
@@ -303,13 +384,113 @@
             "items": {
               "properties": {
                 "link_type": {
-                  "const": "ROLLS_BACK_APPLY"
+                  "enum": [
+                    "ROLLS_BACK_APPLY",
+                    "ROLLS_BACK_PROPAGATION"
+                  ]
                 }
               },
               "required": [
                 "link_type"
               ]
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "receipt_links": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "link_type": {
+                  "const": "APPLIES_PROPAGATION"
+                }
+              },
+              "required": [
+                "link_type"
+              ]
+            }
+          }
+        },
+        "required": [
+          "receipt_links"
+        ]
+      },
+      "then": {
+        "properties": {
+          "action": {
+            "const": "propagate"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "receipt_links": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "link_type": {
+                  "const": "ROLLS_BACK_PROPAGATION"
+                }
+              },
+              "required": [
+                "link_type"
+              ]
+            }
+          }
+        },
+        "required": [
+          "receipt_links"
+        ]
+      },
+      "then": {
+        "properties": {
+          "action": {
+            "enum": [
+              "rollback",
+              "revert"
+            ]
+          },
+          "transaction": {
+            "properties": {
+              "phase": {
+                "const": "rollback"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "receipt_links": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "link_type": {
+                  "const": "RESOLVES_TYPE_CONFLICT"
+                }
+              },
+              "required": [
+                "link_type"
+              ]
+            }
+          }
+        },
+        "required": [
+          "receipt_links"
+        ]
+      },
+      "then": {
+        "properties": {
+          "action": {
+            "const": "resolve_conflict"
           }
         }
       }
