@@ -34,10 +34,40 @@ Dynamic analysis produces several distinct categories of evidence. Each has diff
 | **Symbolic Constraint** | `{branch_addr, condition_ast, constraint_smt2, satisfying_input}` | Per-branch | 200B-10KB/constraint | CBRANCH p-code op |
 | **Coverage Map** | `{module_id, block_offset, block_size, hit_count}` | Basic block | 8-12 bytes/entry | BasicBlock in CFG |
 | **API Call Sequence** | `{snap_id, thread_id, callee_addr, args[], retval, caller_addr}` | Per-call | 64-256 bytes/entry | CALL/CALLIND p-code op |
+| **Static Xref Evidence** | `{from_addr, to_addr, xref_type, function_addr}` | Per-xref | 24-48 bytes/entry | Xref + caller/callee Function |
+| **Constant/String Evidence** | `{instruction_addr, operand_index, constant_value, literal_text}` | Per constant use | 16-96 bytes/entry | Instruction operand / decompiler token |
+| **Callsite Evidence** | `{call_addr, caller_func, callee_target, arg_hints}` | Per callsite | 32-160 bytes/entry | CALL/CALLIND + call graph edge |
 | **Network Traffic Capture** | `{snap_id, direction, protocol, src, dst, payload_ref}` | Per-packet | Variable (header 64B + payload ref) | External reference / data label |
 | **Timing Measurement** | `{snap_id, addr_range, cycle_count, wall_ns, iteration}` | Per-function or per-block | 32 bytes/entry | Function or BasicBlock |
 
-### 1.2 Evidence Category Details
+### 1.2 Stable Evidence Reference IDs (Proposal-Safe)
+
+Evidence attached to review proposals must use a stable identifier that survives:
+
+- re-ingestion of traces/symbolic outputs
+- proposal approval and apply
+- proposal rollback/revert
+
+Use a deterministic ID derived from canonical source fields rather than a storage row id:
+
+```
+EvidenceRefIdV1 = "evr_" + hex(sha256(canonical_key))
+
+canonical_key =
+  evidence_type + "|" +
+  program_id + "|" +
+  canonical_source_tuple
+```
+
+Canonical source tuples for UI-219 evidence classes:
+
+- `xref`: `from_addr|to_addr|xref_type`
+- `constant`: `instruction_addr|operand_index|normalized_value|encoding`
+- `callsite`: `call_addr|caller_function_addr|callee_target`
+
+`evidence_ref_id` is immutable. Re-importing the same source tuple must resolve to the same ID, enabling dedup and stable proposal links.
+
+### 1.3 Evidence Category Details
 
 #### Execution Traces
 
@@ -346,8 +376,9 @@ The temporal query model must support these query patterns efficiently:
 The evidence store uses a two-level indexing scheme:
 
 ```
-Primary Index:  B+tree on (entity_id, snap_id)
-    - entity_id: hash of (evidence_type, location)
+Primary Index:  B+tree on (evidence_ref_id, snap_id)
+    - evidence_ref_id: deterministic ID from canonical evidence key
+      (see Section 1.2)
     - snap_id: snapshot number
     - Supports point queries and forward/backward scans
 
@@ -433,8 +464,9 @@ interface EvidenceQuery {
                 |                                 |
     +-----------v-----------+    +----------------v----------------+
     |   B+tree Primary      |    |   Interval R-tree               |
-    |   Key: (entity, snap) |    |   Key: (addr_range, lifespan)   |
-    |   Value: evidence_ref |    |   Value: evidence_ref           |
+    |   Key: (evidence_ref, |    |   Key: (addr_range, lifespan)   |
+    |         snap)         |    |   Value: evidence_ref_id        |
+    |   Value: evidence_row |    |                                 |
     +-----------------------+    +---------------------------------+
                 |                                 |
     +-----------v-----------+    +----------------v----------------+
@@ -443,11 +475,35 @@ interface EvidenceQuery {
     +-----------------------+    +---------------------------------+
 ```
 
-**B+tree on (entity_id, snap_id)**: Handles point-in-time lookups and temporal scans. Entity ID is a composite of evidence type + location (e.g., hash of `("register", "RAX", thread_42)`). This aligns with Ghidra's existing `DBHandle`-based B-tree table infrastructure.
+**B+tree on (evidence_ref_id, snap_id)**: Handles point-in-time lookups and temporal scans. `evidence_ref_id` is a deterministic hash over canonical source fields (e.g., `xref(from,to,type)` or `constant(insn,operand,value)`), so proposal links remain stable across imports, apply, and rollback.
 
 **Interval R-tree on (addr_range, lifespan)**: Handles 2D rectangle queries (address range x time range). Used for "show all evidence for this function in this time window." The R-tree can be approximated with a pair of B+trees (one on address, one on snap) with intersection at query time if R-tree complexity is unwarranted.
 
 **Inverted index on taint labels**: Maps each label ID to a posting list of `(location, snap_range)` pairs. Enables efficient "where did label 7 go?" queries without scanning all taint evidence.
+
+### 3.6 Proposal Evidence Link Persistence
+
+Review proposals reference evidence by stable ID, never by transient row position.
+
+```
+ProposalEvidenceLink {
+    link_id:         UUID              // immutable link record
+    changeset_id:    UUID
+    delta_id:        UUID              // proposal record inside the changeset
+    evidence_ref_id: string            // "evr_<sha256>"
+    evidence_kind:   enum { XREF, CONSTANT, CALLSITE, OTHER }
+    role:            enum { PRIMARY, SUPPORTING, CONTRADICTING }
+    captured_at:     timestamptz
+    metadata:        json
+}
+```
+
+Lifecycle rules:
+
+1. **Capture**: proposal creation writes `ProposalEvidenceLink` rows keyed by `delta_id + evidence_ref_id`.
+2. **Apply**: approval receipts copy link references by ID (no new evidence rows required).
+3. **Rollback**: rollback receipts reference the same `evidence_ref_id` set used at apply time.
+4. **Retention**: links are append-only; rollback marks proposal state but does not delete evidence links.
 
 ---
 
@@ -829,6 +885,21 @@ Listing View with Constraint Annotations
 | Snapshots:   Present in snaps 12, 15, 18-42, 55 |
 +-------------------------------------------------+
 ```
+
+### 6.7 Proposal Evidence Drawer (Review UI)
+
+**Purpose**: Let reviewers inspect exactly which `xref`, `constant/string`, and `callsite` evidence links support a single proposal delta.
+
+**Rendering**:
+- Drawer opens from a selected proposal row in the review panel.
+- Evidence is grouped by `evidence_kind` (`XREF`, `CONSTANT`, `CALLSITE`).
+- Each row shows `evidence_ref_id`, concise rationale, and a deep-link target (`listing`, `decompiler`, or trace snap).
+- Rows remain visible after apply and after rollback because the drawer resolves by `delta_id -> evidence_ref_id`.
+
+**Drawer query path**:
+1. Read `proposal_evidence_link` by `changeset_id + delta_id`.
+2. Join to `evidence_ref` for canonical evidence payload.
+3. Resolve source rows (`xref`, instruction operand, call graph edge) for expanded context.
 
 ---
 
@@ -1365,6 +1436,46 @@ CREATE TABLE network_capture (
     fd             INTEGER,
     PRIMARY KEY (session_id, seq_num)
 );
+
+-- Canonical evidence refs used by proposal/review workflows
+CREATE TABLE evidence_ref (
+    evidence_ref_id CHAR(68) PRIMARY KEY, -- "evr_" + sha256(canonical_key)
+    evidence_type   VARCHAR(32),          -- 'xref', 'constant', 'callsite', ...
+    program_id      VARCHAR(36),
+    canonical_key   TEXT,                 -- normalized tuple encoded as text
+    source_table    VARCHAR(64),          -- 'xref', 'instruction', 'call_edge', ...
+    source_pk       VARCHAR(96),          -- stable PK in source table
+    payload_hash    BLOB,                 -- optional hash of expanded evidence payload
+    metadata        TEXT,
+    created_at      BIGINT,
+    UNIQUE (evidence_type, program_id, canonical_key)
+);
+CREATE INDEX idx_evidence_ref_source ON evidence_ref(source_table, source_pk);
+
+-- Delta-level links used by the review UI evidence drawer
+CREATE TABLE proposal_evidence_link (
+    link_id         VARCHAR(36) PRIMARY KEY,
+    changeset_id    VARCHAR(36),
+    delta_id        VARCHAR(36),
+    evidence_ref_id CHAR(68) REFERENCES evidence_ref(evidence_ref_id),
+    link_role       SMALLINT,             -- 0=PRIMARY, 1=SUPPORTING, 2=CONTRADICTING
+    created_at      BIGINT,
+    detached_at     BIGINT,               -- tombstone for logical detach; keep history
+    metadata        TEXT
+);
+CREATE UNIQUE INDEX idx_proposal_evidence_unique
+    ON proposal_evidence_link(delta_id, evidence_ref_id);
+CREATE INDEX idx_proposal_evidence_changeset
+    ON proposal_evidence_link(changeset_id, delta_id);
+
+-- Apply/rollback receipts reference existing evidence links by ID
+CREATE TABLE receipt_evidence_link (
+    receipt_id      VARCHAR(36),
+    proposal_link_id VARCHAR(36) REFERENCES proposal_evidence_link(link_id),
+    evidence_ref_id CHAR(68) REFERENCES evidence_ref(evidence_ref_id),
+    relationship    SMALLINT,             -- 0=APPLY_SUPPORT, 1=ROLLBACK_SUPPORT
+    PRIMARY KEY (receipt_id, evidence_ref_id)
+);
 ```
 
 ### 8.4 Cross-Boundary Query Examples
@@ -1427,6 +1538,35 @@ LEFT JOIN coverage_entry ce
 WHERE ce.hit_count IS NULL OR ce.hit_count = 0
 ORDER BY xref_count DESC
 LIMIT 50;
+```
+
+#### Query 5: "Render evidence drawer for one proposal delta"
+
+```sql
+SELECT pel.delta_id,
+       er.evidence_ref_id,
+       er.evidence_type,
+       er.source_table,
+       er.source_pk,
+       pel.link_role,
+       er.metadata
+FROM proposal_evidence_link pel
+JOIN evidence_ref er ON er.evidence_ref_id = pel.evidence_ref_id
+WHERE pel.changeset_id = :changeset_id
+  AND pel.delta_id = :delta_id
+  AND pel.detached_at IS NULL
+ORDER BY pel.link_role, er.evidence_type, er.evidence_ref_id;
+```
+
+#### Query 6: "Verify evidence survives apply and rollback"
+
+```sql
+SELECT rel.receipt_id,
+       rel.relationship,
+       rel.evidence_ref_id
+FROM receipt_evidence_link rel
+WHERE rel.receipt_id IN (:apply_receipt_id, :rollback_receipt_id)
+ORDER BY rel.evidence_ref_id, rel.relationship;
 ```
 
 ### 8.5 Query Interface Architecture
