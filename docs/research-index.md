@@ -3,9 +3,12 @@
 ## Scope
 This is the live control document for research outputs in `docs/`. It tracks coverage, verification state, and publication blockers.
 
-## Live Status (2026-02-19)
+## Live Status (2026-02-20)
 | Document | Status | Accuracy Notes |
 |---|---|---|
+| `docs/CHANGELOG-rc1.md` | Working | Versioned changelog for RC1; tracks all epics (E1–E8) and MVP exit-gate status. |
+| `docs/operator-reviewer-runbook.md` | Working | Covers setup, review flow, rollback, incident handling, quality gates, and configuration reference. |
+| `docs/known-limitations.md` | Working | 27 documented limitations across all subsystems with IDs, impact, and workarounds. |
 | `docs/deep-research-report.md` | Draft | Citation artifacts removed; still needs explicit claim-to-source footnoting before final publication. |
 | `docs/sources.md` | Working | Canonical reference list for time-sensitive and high-impact claims. |
 | `docs/claims-ledger.md` | Working | Claim-by-claim verification tracker with status and source mapping. |
