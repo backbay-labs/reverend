@@ -893,6 +893,86 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             self.assertEqual(events[0]["action"], "READ")
             self.assertEqual(events[0]["outcome"], "DENY")
 
+    def test_read_offline_mode_blocks_remote_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            backend_store = tmp / "backend_store.json"
+            audit_path = tmp / "audit.jsonl"
+            backend_store.write_text("{invalid-json", encoding="utf-8")
+
+            policy_config = EndpointPolicyConfig(
+                default_rule=EndpointPolicyRule(
+                    mode="offline",
+                ),
+            )
+
+            with self.assertRaises(AccessDeniedError) as ctx:
+                run_read_job(
+                    backend_store_path=backend_store,
+                    proposal_id="p-read-offline",
+                    project_id="project:read-offline",
+                    audit_path=audit_path,
+                    policy_config=policy_config,
+                    backend_endpoint="https://api.example.com/v1/corpus",
+                )
+
+            self.assertEqual(
+                str(ctx.exception),
+                "policy mode 'offline' blocks destination "
+                "'https://api.example.com/v1/corpus' for project "
+                "'project:read-offline'",
+            )
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(events[0]["event_type"], "EGRESS_BLOCKED")
+            self.assertEqual(events[0]["action"], "READ")
+            self.assertEqual(events[0]["outcome"], "DENY")
+            self.assertEqual(events[0]["policy_mode"], "offline")
+
+    def test_read_cloud_mode_allows_remote_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+            audit_path = tmp / "audit.jsonl"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-read-cloud",
+                        "state": "APPROVED",
+                        "receipt_id": "r-read-cloud",
+                        "project_id": "project:read-cloud",
+                    }
+                ],
+            )
+            sync_telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-before-read-cloud",
+            )
+            self.assertEqual(sync_telemetry.error_count, 0)
+
+            artifact = run_read_job(
+                backend_store_path=backend_store,
+                proposal_id="p-read-cloud",
+                project_id="project:read-cloud",
+                audit_path=audit_path,
+                policy_config=EndpointPolicyConfig(
+                    default_rule=EndpointPolicyRule(mode="cloud"),
+                ),
+                backend_endpoint="https://api.example.com/v1/corpus",
+            )
+
+            self.assertIsNotNone(artifact)
+            assert artifact is not None
+            self.assertEqual(artifact["proposal_id"], "p-read-cloud")
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            blocked = [event for event in events if event.get("event_type") == "EGRESS_BLOCKED"]
+            self.assertEqual(blocked, [])
+
     def test_cli_run_writes_telemetry_with_counts_errors_and_latency(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
