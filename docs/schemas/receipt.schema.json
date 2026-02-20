@@ -81,6 +81,14 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
+        "dependentRequired": {
+          "source_type": [
+            "source_id"
+          ],
+          "source_id": [
+            "source_type"
+          ]
+        },
         "required": [
           "evidence_type",
           "metadata"
