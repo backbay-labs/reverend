@@ -41,6 +41,13 @@ jobs:
       - name: Assert invariant report emitted
         run: test -f eval/output/smoke/invariants/no-direct-agent-write.json
 
+      - name: Collect type suggestion quality metrics
+        run: |
+          mkdir -p eval/output/smoke
+          python3 scripts/ml/local_embedding_pipeline.py suggest-types \
+            --input scripts/ml/fixtures/toy_type_suggestions_slice.json \
+            --output eval/output/smoke/type-suggestion-metrics.json
+
       - name: Upload security invariant report
         uses: actions/upload-artifact@v4
         if: always()

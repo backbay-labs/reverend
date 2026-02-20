@@ -24,7 +24,10 @@ EvidenceWeightedReranker = MODULE.EvidenceWeightedReranker
 FunctionRecord = MODULE.FunctionRecord
 LocalEmbeddingPipeline = MODULE.LocalEmbeddingPipeline
 SemanticSearchQueryService = MODULE.SemanticSearchQueryService
+TypeSuggestionGenerator = MODULE.TypeSuggestionGenerator
+TypeSuggestionPolicy = MODULE.TypeSuggestionPolicy
 evaluate_queries = MODULE.evaluate_queries
+generate_type_suggestion_report = MODULE.generate_type_suggestion_report
 
 
 class LocalEmbeddingPipelineTest(unittest.TestCase):
@@ -278,6 +281,182 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(telemetry_event["kind"], "semantic_search_latency")
             self.assertEqual(telemetry_event["mode"], "intent")
             self.assertGreaterEqual(telemetry_event["latency_ms"], 0.0)
+
+    def test_type_suggestion_generator_emits_confidence_and_evidence_summary(self) -> None:
+        policy = TypeSuggestionPolicy(auto_apply_threshold=0.9, suggest_threshold=0.5)
+        generator = TypeSuggestionGenerator(policy=policy)
+        suggestions = generator.generate(
+            [
+                {
+                    "target_id": "fn.net.open_socket:param.addr",
+                    "target_scope": "PARAMETER",
+                    "suggested_type": "struct sockaddr_in *",
+                    "model_confidence": 0.84,
+                    "consensus_ratio": 0.8,
+                    "pattern_match_score": 1.0,
+                    "evidence_refs": [
+                        {
+                            "kind": "CALLSITE",
+                            "description": "12 callsites pass AF_INET constants",
+                            "uri": "local-index://evidence/fn.net.open_socket/callsite",
+                            "confidence": 0.9,
+                        },
+                        {
+                            "kind": "STRUCT_LAYOUT",
+                            "description": "offset layout matches sockaddr_in",
+                            "uri": "local-index://evidence/fn.net.open_socket/layout",
+                            "confidence": 0.88,
+                        },
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(len(suggestions), 1)
+        suggestion = suggestions[0]
+        self.assertGreaterEqual(suggestion.confidence, 0.0)
+        self.assertLessEqual(suggestion.confidence, 1.0)
+        self.assertIn("evidence refs", suggestion.evidence_summary)
+        self.assertEqual(suggestion.policy_action, "SUGGEST")
+
+    def test_low_confidence_type_suggestions_are_quarantined_by_policy(self) -> None:
+        policy = TypeSuggestionPolicy(auto_apply_threshold=0.95, suggest_threshold=0.7)
+        generator = TypeSuggestionGenerator(policy=policy)
+        suggestions = generator.generate(
+            [
+                {
+                    "target_id": "fn.crypto.sha256_update:local.ctx",
+                    "target_scope": "VARIABLE",
+                    "suggested_type": "AES_CTX *",
+                    "model_confidence": 0.2,
+                    "consensus_ratio": 0.1,
+                    "pattern_match_score": 0.0,
+                    "evidence_refs": [],
+                }
+            ]
+        )
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0].policy_action, "QUARANTINED")
+        self.assertTrue(suggestions[0].quarantined)
+
+    def test_type_suggestion_quality_metrics_are_reported(self) -> None:
+        policy = TypeSuggestionPolicy(auto_apply_threshold=0.9, suggest_threshold=0.5)
+        report = generate_type_suggestion_report(
+            [
+                {
+                    "target_id": "fn.net.open_socket:param.addr",
+                    "target_scope": "PARAMETER",
+                    "suggested_type": "struct sockaddr_in *",
+                    "ground_truth_type": "struct sockaddr_in *",
+                    "model_confidence": 0.86,
+                    "consensus_ratio": 0.9,
+                    "pattern_match_score": 1.0,
+                    "evidence_refs": [
+                        {
+                            "kind": "CALLSITE",
+                            "description": "socket callsite argument typing",
+                            "uri": "local-index://evidence/fn.net.open_socket/callsite",
+                            "confidence": 0.9,
+                        }
+                    ],
+                },
+                {
+                    "target_id": "fn.pe.parse_imports:local.desc",
+                    "target_scope": "VARIABLE",
+                    "suggested_type": "IMAGE_IMPORT_DESCRIPTOR *",
+                    "ground_truth_type": "IMAGE_IMPORT_DESCRIPTOR *",
+                    "model_confidence": 0.83,
+                    "consensus_ratio": 0.7,
+                    "pattern_match_score": 1.0,
+                    "evidence_refs": [
+                        {
+                            "kind": "STRUCT_LAYOUT",
+                            "description": "descriptor offsets match PE import descriptor",
+                            "uri": "local-index://evidence/fn.pe.parse_imports/layout",
+                            "confidence": 0.87,
+                        }
+                    ],
+                },
+                {
+                    "target_id": "fn.crypto.sha256_update:local.ctx",
+                    "target_scope": "VARIABLE",
+                    "suggested_type": "AES_CTX *",
+                    "ground_truth_type": "SHA256_CTX *",
+                    "model_confidence": 0.2,
+                    "consensus_ratio": 0.1,
+                    "pattern_match_score": 0.0,
+                    "evidence_refs": [],
+                },
+            ],
+            policy=policy,
+        )
+
+        metrics = report["metrics"]
+        self.assertEqual(metrics["total_suggestions"], 3)
+        self.assertEqual(metrics["evaluated_with_ground_truth"], 3)
+        self.assertIn("overall_accuracy", metrics)
+        self.assertIn("accepted_precision", metrics)
+        self.assertIn("incorrect_quarantine_recall", metrics)
+        self.assertEqual(metrics["quarantined_count"], 1)
+        self.assertGreater(metrics["overall_accuracy"], 0.0)
+
+    def test_suggest_types_cli_writes_report_and_telemetry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "type_suggestions.json"
+            output_path = Path(tmpdir) / "type_suggestion_report.json"
+            telemetry_path = Path(tmpdir) / "type_suggestion_metrics.jsonl"
+            input_path.write_text(
+                json.dumps(
+                    {
+                        "suggestions": [
+                            {
+                                "target_id": "fn.net.open_socket:param.addr",
+                                "target_scope": "PARAMETER",
+                                "suggested_type": "struct sockaddr_in *",
+                                "ground_truth_type": "struct sockaddr_in *",
+                                "model_confidence": 0.84,
+                                "consensus_ratio": 0.8,
+                                "pattern_match_score": 1.0,
+                                "evidence_refs": [
+                                    {
+                                        "kind": "CALLSITE",
+                                        "description": "socket callsites",
+                                        "uri": "local-index://evidence/fn.net.open_socket/callsite",
+                                        "confidence": 0.9,
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "suggest-types",
+                        "--input",
+                        str(input_path),
+                        "--output",
+                        str(output_path),
+                        "--telemetry-path",
+                        str(telemetry_path),
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            report = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["kind"], "type_suggestion_report")
+            self.assertIn("metrics", report)
+            self.assertEqual(report["metrics"]["total_suggestions"], 1)
+
+            events = telemetry_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(events), 1)
+            telemetry_event = json.loads(events[0])
+            self.assertEqual(telemetry_event["kind"], "type_suggestion_quality")
+            self.assertEqual(telemetry_event["total_suggestions"], 1)
 
 
 if __name__ == "__main__":
