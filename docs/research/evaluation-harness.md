@@ -577,6 +577,25 @@ Generated outputs:
 `dashboard.json` also includes `source_artifacts` (`path`, `run_id`, `timestamp`, `sha256`) so
 the dashboard can be reproduced exactly from saved run inputs.
 
+### 6.5 M12 Exit-Gate Snapshot (Issue 1704)
+
+Release decision evidence for E8-S4 (dated 2026-02-20) is published in:
+- `docs/exit-gate-report.md`
+- `docs/go-no-go-decision.md`
+
+Gate-aligned metrics consolidated for the MVP decision:
+
+| Gate Metric | Target | Measured | Status | Evidence |
+|---|---|---|---|---|
+| Recall@10 delta vs stock | `>= 0.10` | `+1.000` | PASS | `docs/soak-test-report-1701.md` |
+| Search latency p95 | `< 300 ms` | `29.579 ms` (6-run max) | PASS | `docs/soak-test-report-1701.md` |
+| Receipt completeness | `== 1.0` | `1.0` (all soak runs) | PASS | `docs/soak-test-report-1701.md` |
+| Rollback success rate | `== 1.0` | `1.0` (all soak runs) | PASS | `docs/soak-test-report-1701.md` |
+| Entrypoint recall | `>= 0.85` | `1.000000` | PASS | Section 3.4 calibration snapshot |
+| Hotspot recall | `>= 0.85` | `1.000000` | PASS | Section 3.4 calibration snapshot |
+
+Decision outcome: **GO for v0.1.0-rc1 internal release scope**, with open production conditions tracked as `C1-C11` in `docs/go-no-go-decision.md`.
+
 ---
 
 ## 7. Automated Evaluation Pipeline
