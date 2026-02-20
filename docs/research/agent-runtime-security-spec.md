@@ -251,6 +251,27 @@ Layer 4: Network proxy with TLS inspection
   → Content-level filtering for sensitive data in transit
 ```
 
+### 3.1.1 Repository Enforcement Artifacts (SEC-417)
+
+The SEC-417 context artifacts are checked into the repository and can be run
+directly to validate `offline` / `allowlist` / `cloud` behavior:
+
+- `Ghidra/Framework/Generic/src/main/java/ghidra/security/policy/EgressPolicyEnforcer.java`
+- `Ghidra/Framework/Generic/src/test/java/ghidra/security/policy/EgressPolicyEnforcerTest.java`
+- `scripts/ml/tests/test_corpus_sync_worker.py` (runtime sync/read entrypoint integration tests)
+
+Repro commands:
+
+```bash
+javac \
+  Ghidra/Framework/Generic/src/main/java/ghidra/security/policy/EgressPolicyEnforcer.java \
+  Ghidra/Framework/Generic/src/test/java/ghidra/security/policy/EgressPolicyEnforcerTest.java
+java -cp \
+  Ghidra/Framework/Generic/src/main/java:Ghidra/Framework/Generic/src/test/java \
+  ghidra.security.policy.EgressPolicyEnforcerTest
+python3 -m unittest scripts/ml/tests/test_corpus_sync_worker.py
+```
+
 ### 3.2 Allow-List Configuration
 
 ```yaml
