@@ -539,7 +539,10 @@ tracks the four release gates currently wired for CI decision support:
 3. `receipt_completeness` (`== 1.0`)
 4. `rollback_success_rate` (`== 1.0`)
 
-Threshold definitions live in `eval/config/mvp_gate_thresholds.json`.
+Threshold definitions live in `eval/config/mvp_gate_thresholds.json` and include:
+- comparison operator and numeric threshold
+- alert severity (`critical` / `warning` / `info`)
+- an explicit remediation action per gate
 
 Saved per-run artifacts are stored as JSON files under `eval/artifacts/mvp-gates/runs/`:
 
@@ -570,6 +573,9 @@ Generated outputs:
 - `eval/artifacts/mvp-gates/dashboard.json` (machine-readable current + trend values)
 - `eval/artifacts/mvp-gates/dashboard.md` (human-readable dashboard summary)
 - `eval/artifacts/mvp-gates/alerts.json` (actionable threshold breaches)
+
+`dashboard.json` also includes `source_artifacts` (`path`, `run_id`, `timestamp`, `sha256`) so
+the dashboard can be reproduced exactly from saved run inputs.
 
 ---
 

@@ -115,10 +115,17 @@ class MvpGateDashboardTest(unittest.TestCase):
                 dashboard["trend"]["recall_at_10_delta_vs_stock"]["delta"],
                 -0.2,
             )
+            self.assertEqual(
+                dashboard["trend"]["recall_at_10_delta_vs_stock"]["history"][-1]["run_id"],
+                "run-2",
+            )
+            self.assertEqual(len(dashboard["source_artifacts"]), 2)
 
             self.assertEqual(len(alerts["alerts"]), 1)
             self.assertEqual(alerts["alerts"][0]["metric_name"], "recall_at_10_delta_vs_stock")
+            self.assertIn("action", alerts["alerts"][0])
             self.assertIn("Gate Status", markdown)
+            self.assertIn("sha256=", markdown)
 
 
 if __name__ == "__main__":
