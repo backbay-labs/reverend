@@ -4,7 +4,7 @@
 >
 > **Spec under review**: `docs/research/agent-runtime-security-spec.md` (v1, 2026-02-19)
 > **Compliance reference**: `docs/research/legal-compliance-playbook.md` (v1.0, 2026-02-19)
-> **Abuse scenario results**: `docs/security/abuse-scenario-suite.md` (v1.0, 2026-02-20)
+> **Abuse scenario results**: `docs/security/abuse-scenario-suite.md` (v1.1, 2026-02-20)
 > **Review date**: 2026-02-20
 > **Review scope**: E8-S2 — Adversarial abuse scenarios and security signoff (Issue 1702)
 
@@ -85,9 +85,10 @@
 - [x] 8 additional scenarios covering remaining STRIDE threats executed
 - [x] 13 total scenarios with documented outcomes (see abuse-scenario-suite.md)
 - [x] Zero critical findings requiring immediate remediation
-- [x] Four findings with MEDIUM residual risk formally accepted (T1: prompt injection,
-      T3: cloud exfiltration, T5: compromised weights, T9: hallucination)
-- [x] Nine findings with LOW residual risk formally accepted
+- [x] Five findings with MEDIUM residual risk formally accepted (T1: prompt injection,
+      T3: cloud exfiltration, T5: compromised weights, T9: hallucination,
+      T10: plugin/dependency supply chain)
+- [x] Eight findings with LOW residual risk formally accepted
 - [x] OWASP Top 10 for LLM Applications 2025 cross-referenced (9/10 covered, 1 N/A)
 - [x] OWASP Top 10 for Agentic Applications 2026 cross-referenced (10/10 covered)
 
@@ -107,8 +108,8 @@
 
 | Risk Level | Count | Threat IDs | Disposition |
 |------------|-------|------------|-------------|
-| **Low** | 9 | T2, T4, T6, T7, T8, T11, T12, T13 + DoS | Accepted |
-| **Medium** | 4 | T1, T3, T5, T9 | Accepted with justification |
+| **Low** | 8 | T2, T4, T6, T7, T8, T11, T12, T13 | Accepted |
+| **Medium** | 5 | T1, T3, T5, T9, T10 | Accepted with justification |
 | **High** | 0 | — | — |
 | **Critical** | 0 | — | — |
 
@@ -149,7 +150,7 @@ implementation phase gate (E8-S3 or equivalent).
 **Approval basis**: The agent runtime security architecture provides
 comprehensive coverage of identified threats through defense-in-depth.
 All 13 adversarial scenarios have documented mitigations. No unaddressed
-critical or high-severity findings. Four MEDIUM residual risks are
+critical or high-severity findings. Five MEDIUM residual risks are
 formally accepted as inherent to LLM-based systems with appropriate
 compensating controls.
 
@@ -159,7 +160,7 @@ penetration testing before production deployment.
 
 ---
 
-> **Document version**: 1.0
+> **Document version**: 1.1
 > **Classification**: Internal — Security Review
 > **Next review**: At implementation phase gate
-> **Supersedes**: N/A (initial version)
+> **Supersedes**: v1.0 (2026-02-20)
