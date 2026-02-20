@@ -355,6 +355,39 @@ stateDiagram-v2
     Open --> [*] : Author withdraws
 ```
 
+### 4.5 Type PR Review Panel (List + Detail)
+
+The plugin review UI uses a master-detail layout so reviewers can triage quickly in one dockable provider.
+
+**List view (queue):**
+
+| Column | Purpose |
+|---|---|
+| `PR` | Stable ID + title |
+| `Author` | Analyst/agent that submitted the pack |
+| `Status` | `OPEN`, `IN_REVIEW`, `CHANGES_REQUESTED`, `REJECTED`, `APPROVED` |
+| `Assertions` | Count of assertions in the pack |
+| `Conflicts` | Count of unresolved conflicts |
+| `Lowest Confidence` | Fast risk indicator for triage |
+| `Updated` | Last mutation timestamp |
+
+**Detail view (selected PR):**
+
+1. Assertion diff table (target, old type, proposed type, confidence, evidence count)
+2. Per-assertion evidence drawer (xref/callsite/access-pattern cards)
+3. Reviewer form (`decision`, `comment`, `rationale`)
+4. Workflow action bar (`Approve`, `Request Changes`, `Reject`)
+
+**Action semantics (atomic):**
+
+| Action | Lifecycle result | PR status result | Persistence requirements |
+|---|---|---|---|
+| Approve | `UNDER_REVIEW -> ACCEPTED` (only when required approvals reached) | `IN_REVIEW -> APPROVED` then `MERGED` on apply | Persist decision row + transition row + receipt in one transaction |
+| Request Changes | `UNDER_REVIEW -> PROPOSED` | `IN_REVIEW -> CHANGES_REQUESTED` | Persist reviewer comment + rationale and transition reason atomically |
+| Reject | `UNDER_REVIEW -> REJECTED` | `IN_REVIEW -> REJECTED` | Persist reviewer comment + rationale and rejection receipt atomically |
+
+If any part of the write fails (decision record, lifecycle transition, or receipt link), the entire action is rolled back and no state change is visible.
+
 ---
 
 ## 5. Rollback Semantics
@@ -793,24 +826,68 @@ public class TypeReviewPlugin extends Plugin {
             tool.getService(TypeStoreService.class),
             tool.getService(DecompilerService.class)
         );
+
+        reviewPanel.onSelectPR(this::showPRDetail);
+        reviewPanel.onSubmitDecision(this::submitDecision);
     }
 
-    // Display pending type PRs for review
+    // Display pending type PRs for review (list pane)
     public void showPendingReviews() {
-        List<TypePR> pending = prManager.getPendingReviews(currentUser);
+        List<TypePRSummary> pending = prManager.listPendingSummaries(currentUser);
         reviewPanel.displayPRList(pending);
     }
 
-    // Approve a type PR and trigger application
-    public void approvePR(TypePR pr) {
-        prManager.approve(pr, currentUser);
-        // Apply accepted types to program
-        for (TypeAssertion assertion : pr.getAssertions()) {
-            typeStore.applyToProgram(currentProgram, assertion);
-        }
-        // Trigger propagation evaluation
-        typePropagator.evaluatePropagation(pr);
+    // Load selected PR detail (detail pane)
+    private void showPRDetail(UUID prId) {
+        TypePRDetail detail = prManager.getPRDetail(prId, currentUser);
+        reviewPanel.displayPRDetail(detail);
     }
+
+    // Submit approve/reject/request-changes from detail pane
+    private void submitDecision(ReviewDecisionCommand command) {
+        ReviewOutcome outcome = prManager.submitDecision(
+            command.withReviewer(currentUser)
+        );
+        reviewPanel.showOutcome(outcome);
+        showPendingReviews();
+    }
+}
+```
+
+#### TypePRManager Workflow Actions (Atomic)
+
+Review actions are persisted through a single transactional write path:
+
+```java
+public ReviewOutcome submitDecision(ReviewDecisionCommand cmd) {
+    validateCommand(cmd); // comment + rationale required for reject/request-changes
+
+    return reviewStore.inTransaction(tx -> {
+        // Row lock prevents concurrent reviewers from racing this PR.
+        TypePR pr = reviewStore.getTypePRForUpdate(tx, cmd.prId());
+        require(pr.getStatus() == TypePRStatus.IN_REVIEW, "PR is not reviewable");
+
+        UUID receiptId = receiptService.createReviewReceipt(tx, cmd);
+        reviewStore.insertReviewDecision(tx, new ReviewDecision(
+            cmd.prId(),
+            cmd.reviewer(),
+            cmd.decision(),
+            cmd.comment(),
+            cmd.rationale(),
+            receiptId
+        ));
+
+        LifecyclePlan plan = lifecyclePolicy.resolve(pr, cmd.decision());
+        reviewStore.applyAssertionTransitions(tx, plan.assertionTransitions(), receiptId);
+        reviewStore.updateTypePRStatus(tx, pr.getId(), plan.nextPrStatus(), receiptId);
+
+        if (plan.shouldApplyToProgram()) {
+            typeStore.applyAcceptedAssertions(tx, currentProgram, plan.acceptedAssertions());
+            typePropagator.evaluatePropagation(plan.acceptedAssertions());
+        }
+
+        return ReviewOutcome.from(plan);
+    });
 }
 ```
 
@@ -884,6 +961,7 @@ TypeAssertion:
   last_receipt_id: UUID
   evidence_ids: list<UUID> (references evidence rows)
   transition_history: list<TypeAssertionTransition>
+  review_decisions: list<ReviewDecision>
 
 TypeAssertionTransition:
   id: UUID
@@ -891,6 +969,10 @@ TypeAssertionTransition:
   from_state: INFERRED | PROPOSED | UNDER_REVIEW | ACCEPTED | PROPAGATED | DEPRECATED
   to_state: PROPOSED | UNDER_REVIEW | ACCEPTED | PROPAGATED | DEPRECATED | REJECTED
   receipt_id: UUID
+  reviewer: string (nullable)
+  decision: APPROVE | REQUEST_CHANGES | REJECT (nullable)
+  comment: string (nullable)
+  rationale: string (nullable)
   changed_at: timestamp
   reason: string (nullable)
 
@@ -898,18 +980,31 @@ TypePR:
   id: string
   title: string
   author: string
-  status: DRAFT | OPEN | IN_REVIEW | APPROVED | MERGED | REJECTED | CLOSED
+  status: DRAFT | OPEN | IN_REVIEW | CHANGES_REQUESTED | APPROVED | MERGED | REJECTED | CLOSED
   assertions: list<TypeAssertion>
   reviewers: list<ReviewerAssignment>
+  review_decisions: list<ReviewDecision>
   created: timestamp
   merged: timestamp (nullable)
   review_score: float (aggregate rubric score)
+  last_receipt_id: UUID
 
 ReviewerAssignment:
   reviewer: string
   status: PENDING | APPROVED | CHANGES_REQUESTED | REJECTED
   score: float (rubric score)
-  comments: list<ReviewComment>
+  latest_decision_id: UUID (nullable)
+
+ReviewDecision:
+  id: UUID
+  pr_id: string
+  reviewer: string
+  decision: APPROVE | REQUEST_CHANGES | REJECT
+  comment: string (nullable)
+  rationale: string
+  receipt_id: UUID
+  decided_at: timestamp
+  resulting_state: PROPOSED | UNDER_REVIEW | ACCEPTED | REJECTED
 ```
 
 ### 8.4 Integration with Ghidra's Existing Merge System
@@ -931,6 +1026,9 @@ For external tool integration (e.g., custom ML models, CI/CD pipelines), the sys
 | `TypeStoreService.addInferred(func, predictions)` | Submit ML predictions to staging | Plugin / Script |
 | `TypePRService.createPR(title, assertions)` | Create a Type PR programmatically | Plugin / Script / Headless |
 | `TypePRService.autoApprove(pr)` | Auto-approve a PR if policy allows | Plugin / Headless |
+| `TypePRService.listReviewQueue(reviewer, filters)` | Get Type PR list view data for a reviewer | Plugin UI / Headless |
+| `TypePRService.getDetail(prId)` | Get Type PR detail view payload (assertions + evidence refs + prior reviews) | Plugin UI / Headless |
+| `TypePRService.submitReviewDecision(command)` | Persist approve/reject/request-changes + lifecycle mutation atomically | Plugin UI / Headless |
 | `TypePropagationService.propagate(assertion, scope)` | Trigger propagation for accepted type | Plugin / Script |
 | `TypeRollbackService.rollback(assertion)` | Revert a type assertion | Plugin / Script |
 | `TypeMetricsService.getConfidence(assertion)` | Query current confidence (with decay) | Plugin / Script / Headless |

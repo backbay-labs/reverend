@@ -142,6 +142,13 @@
       "items": {
         "$ref": "#/$defs/transition"
       }
+    },
+    "review_decisions": {
+      "description": "Reviewer decisions persisted for Type PR workflows.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/review_decision"
+      }
     }
   },
   "$defs": {
@@ -155,6 +162,134 @@
         "PROPAGATED",
         "DEPRECATED",
         "REJECTED"
+      ]
+    },
+    "review_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_id",
+        "reviewer_id",
+        "decision",
+        "rationale",
+        "receipt_id",
+        "decided_at",
+        "resulting_state"
+      ],
+      "properties": {
+        "review_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reviewer_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "APPROVE",
+            "REQUEST_CHANGES",
+            "REJECT"
+          ]
+        },
+        "comment": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "receipt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "decided_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "resulting_state": {
+          "$ref": "#/$defs/lifecycle_state"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "REQUEST_CHANGES",
+                  "REJECT"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "comment"
+            ],
+            "properties": {
+              "comment": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "APPROVE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resulting_state": {
+                "enum": [
+                  "UNDER_REVIEW",
+                  "ACCEPTED"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "REQUEST_CHANGES"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resulting_state": {
+                "const": "PROPOSED"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "REJECT"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resulting_state": {
+                "const": "REJECTED"
+              }
+            }
+          }
+        }
       ]
     },
     "transition": {
@@ -186,8 +321,145 @@
             "string",
             "null"
           ]
+        },
+        "reviewer_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "APPROVE",
+            "REQUEST_CHANGES",
+            "REJECT",
+            null
+          ]
+        },
+        "comment": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rationale": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "from_state": {
+                "const": "UNDER_REVIEW"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reviewer_id",
+              "decision",
+              "rationale"
+            ],
+            "properties": {
+              "reviewer_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "APPROVE",
+                  "REQUEST_CHANGES",
+                  "REJECT"
+                ]
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "from_state": {
+                "const": "UNDER_REVIEW"
+              },
+              "to_state": {
+                "const": "PROPOSED"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "comment"
+            ],
+            "properties": {
+              "decision": {
+                "const": "REQUEST_CHANGES"
+              },
+              "comment": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "from_state": {
+                "const": "UNDER_REVIEW"
+              },
+              "to_state": {
+                "const": "ACCEPTED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "decision": {
+                "const": "APPROVE"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "from_state": {
+                "const": "UNDER_REVIEW"
+              },
+              "to_state": {
+                "const": "REJECTED"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "comment"
+            ],
+            "properties": {
+              "decision": {
+                "const": "REJECT"
+              },
+              "comment": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ],
       "oneOf": [
         {
           "properties": {

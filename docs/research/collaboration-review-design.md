@@ -708,6 +708,11 @@ public interface ReviewService {
     List<EvidenceRef> getEvidenceForDelta(UUID changesetId, UUID deltaId);
     List<UUID> getReceiptEvidenceLinks(UUID receiptId);
 
+    // Type PR review panel data + actions
+    List<TypePRSummary> listTypePRReviewQueue(AnalystIdentity reviewer, ReviewQueueFilter filter);
+    TypePRDetail getTypePRDetail(UUID typePrId, AnalystIdentity reviewer);
+    ReviewApplyResult submitTypePRDecision(TypePRDecisionCommand command);
+
     // Attribution
     void recordAttribution(AnnotationRecord record);
     List<AnnotationRecord> getAttributionHistory(Address addr, ArtifactType type);
@@ -772,6 +777,62 @@ ghidra_scripts/
     ReviewServiceClient.java          // HTTP client for review server
     ConflictPolicyConfig.java         // Configurable auto-resolution rules
 ```
+
+### Type PR Review Panel and Workflow Actions (E6-S2)
+
+The Type PR reviewer UX is implemented as a single provider with two synchronized panes:
+
+| Pane | Required behavior |
+|---|---|
+| **List pane** | Render reviewer queue (`OPEN`, `IN_REVIEW`, `CHANGES_REQUESTED`) with sortable columns for confidence floor, conflict count, and last update. |
+| **Detail pane** | Render assertion-level diff, evidence drawer, prior review timeline, and decision form (`APPROVE`, `REQUEST_CHANGES`, `REJECT`). |
+
+Action buttons in detail pane call the same backend command path:
+
+```
+TypePRDecisionCommand {
+  type_pr_id: UUID
+  reviewer: AnalystIdentity
+  decision: APPROVE | REQUEST_CHANGES | REJECT
+  comment: String?        // required for REQUEST_CHANGES / REJECT
+  rationale: String       // always required
+  receipt_id: UUID
+}
+```
+
+Server-side apply must be atomic across decision persistence and lifecycle mutation:
+
+```sql
+BEGIN;
+
+SELECT type_pr_id, status
+FROM type_pr
+WHERE type_pr_id = :type_pr_id
+FOR UPDATE;
+
+INSERT INTO type_pr_review_decision (
+  review_id, type_pr_id, reviewer_id, decision, comment, rationale, receipt_id
+) VALUES (
+  gen_random_uuid(), :type_pr_id, :reviewer_id, :decision, :comment, :rationale, :receipt_id
+);
+
+UPDATE type_assertion
+SET lifecycle_state = :target_state,
+    last_receipt_id = :receipt_id,
+    updated_at = now()
+WHERE type_pr_id = :type_pr_id
+  AND lifecycle_state = 'UNDER_REVIEW';
+
+UPDATE type_pr
+SET status = :next_pr_status,
+    last_receipt_id = :receipt_id,
+    updated_at = now()
+WHERE type_pr_id = :type_pr_id;
+
+COMMIT;
+```
+
+If any statement fails (including optimistic/state guards), the transaction is rolled back and neither PR status nor assertion lifecycle is changed.
 
 The plugin would:
 
