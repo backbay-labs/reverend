@@ -3007,7 +3007,7 @@ class SemanticSearchQueryService:
             candidate_k = max(top_k * self._rerank_candidate_multiplier, top_k) + 1
         start = _now_ns()
         raw_hits = self._adapter.top_k(query_text, top_k=candidate_k)
-        filtered_hits = [item for item in raw_hits if item.function_id != function_id][:top_k]
+        filtered_hits = [item for item in raw_hits if item.function_id != function_id]
         reranked_hits = self._rerank_or_fallback(
             query_text=query_text,
             hits=filtered_hits,
