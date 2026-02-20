@@ -322,7 +322,7 @@ CREATE TABLE receipt (
     actor            TEXT NOT NULL,                -- 'user:alice', 'agent:renamer-v2', 'analyzer:fid'
     actor_type       TEXT NOT NULL,                -- 'human', 'agent', 'analyzer', 'system'
     action           TEXT NOT NULL,                -- 'rename', 'retype', 'comment', 'create',
-                                                   -- 'delete', 'merge', 'revert'
+                                                   -- 'delete', 'merge', 'apply', 'rollback', 'revert'
     target_type      TEXT NOT NULL,                -- 'function', 'data_type', 'symbol', etc.
     target_id        UUID NOT NULL,
     program_id       UUID NOT NULL REFERENCES program(program_id) ON DELETE CASCADE,
@@ -335,6 +335,30 @@ CREATE TABLE receipt (
     is_reverted      BOOLEAN NOT NULL DEFAULT FALSE,
     reverted_by      UUID REFERENCES receipt(receipt_id),
     metadata         JSONB DEFAULT '{}'::jsonb
+);
+
+-- Apply/rollback transaction journal (one row per committed apply operation)
+CREATE TABLE apply_transaction (
+    transaction_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    program_id         UUID NOT NULL REFERENCES program(program_id) ON DELETE CASCADE,
+    ghidra_tx_id       BIGINT NOT NULL,             -- Program.startTransaction(...) id
+    scope              TEXT NOT NULL CHECK (scope IN ('single', 'batch')),
+    state_before       JSONB NOT NULL,              -- exact pre-apply snapshot (undo source of truth)
+    state_after        JSONB NOT NULL,              -- post-apply snapshot (audit/debug)
+    apply_receipt_id   UUID NOT NULL UNIQUE REFERENCES receipt(receipt_id) ON DELETE RESTRICT,
+    rollback_receipt_id UUID UNIQUE REFERENCES receipt(receipt_id) ON DELETE RESTRICT,
+    status             TEXT NOT NULL CHECK (status IN ('applied', 'rolled_back')),
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    rolled_back_at     TIMESTAMPTZ
+);
+
+-- Explicit linkage between apply/rollback receipts and their related receipts
+CREATE TABLE receipt_link (
+    from_receipt_id    UUID NOT NULL REFERENCES receipt(receipt_id) ON DELETE CASCADE,
+    to_receipt_id      UUID NOT NULL REFERENCES receipt(receipt_id) ON DELETE RESTRICT,
+    link_type          TEXT NOT NULL CHECK (link_type IN ('APPLIES_PROPOSAL', 'ROLLS_BACK_APPLY')),
+    transaction_id     UUID NOT NULL REFERENCES apply_transaction(transaction_id) ON DELETE CASCADE,
+    PRIMARY KEY (from_receipt_id, to_receipt_id, link_type)
 );
 
 -- Evidence (links receipts to supporting data)
@@ -751,6 +775,7 @@ Receipt {
     action:         enum('rename','retype', -- what happened
                          'comment','create',
                          'delete','merge',
+                         'apply','rollback',
                          'revert','approve',
                          'reject','tag')
     target_type:    text                    -- entity type being changed
@@ -763,9 +788,17 @@ Receipt {
     prompt_hash:    text | null             -- SHA-256 of LLM prompt (for reproducibility)
     confidence:     real | null             -- model confidence [0.0, 1.0]
     evidence:       [Evidence]              -- linked evidence (via evidence table)
+    transaction_id: UUID | null             -- FK to apply_transaction for apply/rollback receipts
+    receipt_links:  [ReceiptLink]           -- explicit apply/rollback linkage to other receipts
     is_reverted:    boolean                 -- whether this receipt has been undone
     reverted_by:    UUID | null             -- receipt that reverted this one
     metadata:       jsonb                   -- extensible payload
+}
+
+ReceiptLink {
+    from_receipt_id: UUID
+    to_receipt_id:   UUID
+    link_type:       enum('APPLIES_PROPOSAL', 'ROLLS_BACK_APPLY')
 }
 ```
 
@@ -777,6 +810,11 @@ Receipt {
 4. Receipts for human actions MAY omit `model_id` and evidence.
 5. `old_value` enables mechanical undo: applying `old_value` reverses the action.
 6. `prompt_hash` enables reproducibility audits: given the same prompt + model, the output should be deterministic (within model tolerances).
+7. Every `apply` action MUST create exactly one `apply_transaction` row capturing `ghidra_tx_id`, `state_before`, and `state_after`.
+8. Every `apply` receipt MUST have at least one `receipt_link(link_type='APPLIES_PROPOSAL')` pointing to the approved proposal receipt(s).
+9. Every `rollback`/`revert` receipt MUST have exactly one `receipt_link(link_type='ROLLS_BACK_APPLY')` pointing to the original apply receipt.
+10. Rollback MUST restore `apply_transaction.state_before` atomically for both single-change and batch-change applies.
+11. Rollback is idempotent: once `apply_transaction.status='rolled_back'`, additional rollback requests are no-op receipts (or rejected by policy).
 
 ### 3.2 Evidence Schema
 
@@ -855,7 +893,33 @@ TypeAssertionTransition {
 3. Lifecycle transitions are validated server-side by `trg_type_assertion_validate_transition` against `type_assertion_lifecycle_rule`.
 4. Type assertions link to evidence through `type_assertion_evidence_link(assertion_id, evidence_id)` and thus retain direct links to receipt-backed evidence records.
 
-### 3.4 Provenance Query Patterns
+### 3.4 Transaction-Safe Apply/Rollback Adapter Contract
+
+Apply and rollback must be executed through a single adapter so provenance and undo state are always written atomically with Ghidra transactions.
+
+**Apply flow (`single` and `batch`):**
+
+1. Start Ghidra transaction: `program.startTransaction(...)`.
+2. Capture `state_before` snapshot for each mutation target.
+3. Apply mutations in-memory to the Program/DTM.
+4. Capture `state_after` snapshot.
+5. Insert apply receipt.
+6. Insert `apply_transaction` row with `ghidra_tx_id`, `scope`, `state_before`, `state_after`, and `apply_receipt_id`.
+7. Insert one or more `receipt_link(..., link_type='APPLIES_PROPOSAL')` rows from apply receipt -> proposal receipt(s).
+8. Commit transaction (`endTransaction(..., true)`).
+
+**Rollback flow (`single` and `batch`):**
+
+1. Resolve apply receipt -> `apply_transaction`.
+2. If status is already `rolled_back`, exit idempotently.
+3. Start new Ghidra transaction for rollback.
+4. Restore `state_before` atomically (reverse order for batch deltas).
+5. Insert rollback receipt.
+6. Insert `receipt_link(..., link_type='ROLLS_BACK_APPLY')` from rollback receipt -> apply receipt.
+7. Mark `apply_transaction.status='rolled_back'`, set `rollback_receipt_id` and `rolled_back_at`.
+8. Commit rollback transaction.
+
+### 3.5 Provenance Query Patterns
 
 **"Why was function X renamed to Y?"**
 

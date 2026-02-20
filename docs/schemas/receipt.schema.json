@@ -11,6 +11,8 @@
     "target",
     "evidence",
     "chain",
+    "transaction",
+    "receipt_links",
     "metadata",
     "hash"
   ],
@@ -149,6 +151,79 @@
         }
       }
     },
+    "transaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transaction_id",
+        "scope",
+        "phase",
+        "program_transaction_id"
+      ],
+      "properties": {
+        "transaction_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "single",
+            "batch"
+          ]
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "apply",
+            "rollback",
+            "other"
+          ]
+        },
+        "program_transaction_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pre_apply_state_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "post_apply_state_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "receipt_links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "receipt_id",
+          "link_type"
+        ],
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "link_type": {
+            "type": "string",
+            "enum": [
+              "APPLIES_PROPOSAL",
+              "ROLLS_BACK_APPLY"
+            ]
+          }
+        }
+      }
+    },
     "metadata": {
       "type": "object"
     },
@@ -156,6 +231,88 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "apply"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "transaction": {
+            "properties": {
+              "phase": {
+                "const": "apply"
+              }
+            },
+            "required": [
+              "phase"
+            ]
+          },
+          "receipt_links": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "link_type": {
+                  "const": "APPLIES_PROPOSAL"
+                }
+              },
+              "required": [
+                "link_type"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "rollback",
+              "revert"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "transaction": {
+            "properties": {
+              "phase": {
+                "const": "rollback"
+              }
+            },
+            "required": [
+              "phase"
+            ]
+          },
+          "receipt_links": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "link_type": {
+                  "const": "ROLLS_BACK_APPLY"
+                }
+              },
+              "required": [
+                "link_type"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
 }
-
