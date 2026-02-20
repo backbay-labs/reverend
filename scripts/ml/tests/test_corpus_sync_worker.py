@@ -117,6 +117,41 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             )
             self.assertEqual(artifact["provenance_head_receipt_id"], "r-3")
 
+    def test_sync_materializes_complete_provenance_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-chain-materialized",
+                        "state": "APPROVED",
+                        "receipt_id": "r-3",
+                        "provenance_chain": ["r-1", "r-2", "r-3"],
+                    }
+                ],
+            )
+
+            telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-chain-materialized",
+            )
+
+            backend = json.loads(backend_store.read_text(encoding="utf-8"))
+            chain = backend["artifacts"]["p-chain-materialized"]["provenance_chain"]
+
+            self.assertEqual(telemetry.synced_count, 1)
+            self.assertEqual(telemetry.error_count, 0)
+            self.assertEqual(chain[0], {"receipt_id": "r-1"})
+            self.assertEqual(chain[1], {"receipt_id": "r-2", "previous_receipt_id": "r-1"})
+            self.assertEqual(chain[2], {"receipt_id": "r-3", "previous_receipt_id": "r-2"})
+
     def test_sync_is_idempotent_and_stateful(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -238,6 +273,51 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             self.assertEqual(events[0]["action"], "SYNC")
             self.assertEqual(events[0]["outcome"], "DENY")
             self.assertEqual(events[0]["proposal_id"], "sync-deny-no-approved")
+
+    def test_sync_denies_scoped_write_when_program_id_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+            audit_path = tmp / "audit.jsonl"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-scoped-no-program",
+                        "state": "APPROVED",
+                        "receipt_id": "r-scoped-no-program",
+                    }
+                ],
+            )
+
+            telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-scoped-no-program",
+                access_context=AccessContext.from_values(
+                    principal="agent:scoped-writer",
+                    capabilities={"WRITE.CORPUS_SYNC"},
+                    allowed_program_ids={"program:alpha"},
+                ),
+                audit_path=audit_path,
+            )
+
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+            self.assertEqual(telemetry.synced_count, 0)
+            self.assertEqual(telemetry.error_count, 1)
+            self.assertEqual(telemetry.errors[0].proposal_id, "p-scoped-no-program")
+            self.assertFalse(backend_store.exists())
+            self.assertFalse(state_path.exists())
+            self.assertEqual(events[0]["event_type"], "ACCESS_DENIED")
+            self.assertEqual(events[0]["action"], "SYNC")
+            self.assertEqual(events[0]["outcome"], "DENY")
+            self.assertEqual(events[0]["proposal_id"], "p-scoped-no-program")
+            self.assertIn("requires scoped program_id", events[0]["reason"])
 
     def test_sync_resumes_after_partial_failure(self) -> None:
         class FlakyBackend:
@@ -438,6 +518,104 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             self.assertEqual(events[0]["action"], "READ")
             self.assertEqual(events[0]["outcome"], "DENY")
             self.assertEqual(events[0]["proposal_id"], "p-precheck")
+
+    def test_read_denies_scoped_request_when_program_id_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+            audit_path = tmp / "audit.jsonl"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-read-scope-missing-program",
+                        "state": "APPROVED",
+                        "receipt_id": "r-read-scope-missing-program",
+                    }
+                ],
+            )
+            sync_telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-before-read-scope-missing-program",
+            )
+            self.assertEqual(sync_telemetry.error_count, 0)
+
+            with self.assertRaises(AccessDeniedError) as ctx:
+                run_read_job(
+                    backend_store_path=backend_store,
+                    proposal_id="p-read-scope-missing-program",
+                    access_context=AccessContext.from_values(
+                        principal="agent:scoped-reader",
+                        capabilities={"READ.CORPUS"},
+                        allowed_program_ids={"program:alpha"},
+                    ),
+                    audit_path=audit_path,
+                )
+            self.assertIn("requires scoped program_id", str(ctx.exception))
+
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(events[0]["event_type"], "ACCESS_DENIED")
+            self.assertEqual(events[0]["action"], "READ")
+            self.assertEqual(events[0]["outcome"], "DENY")
+            self.assertEqual(events[0]["proposal_id"], "p-read-scope-missing-program")
+            self.assertIn("requires scoped program_id", events[0]["reason"])
+
+    def test_read_rejects_incomplete_provenance_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+            audit_path = tmp / "audit.jsonl"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-read-invalid-chain",
+                        "state": "APPROVED",
+                        "receipt_id": "r-3",
+                        "provenance_chain": ["r-1", "r-2", "r-3"],
+                    }
+                ],
+            )
+            sync_telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-before-read-invalid-chain",
+            )
+            self.assertEqual(sync_telemetry.error_count, 0)
+
+            backend_doc = json.loads(backend_store.read_text(encoding="utf-8"))
+            backend_doc["artifacts"]["p-read-invalid-chain"]["provenance_chain"] = [
+                {"receipt_id": "r-1"},
+                {"receipt_id": "r-2"},
+                {"receipt_id": "r-3", "previous_receipt_id": "r-2"},
+            ]
+            backend_store.write_text(json.dumps(backend_doc, indent=2) + "\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                run_read_job(
+                    backend_store_path=backend_store,
+                    proposal_id="p-read-invalid-chain",
+                    audit_path=audit_path,
+                )
+            self.assertIn("missing previous_receipt_id", str(ctx.exception))
+
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(events[0]["event_type"], "ACCESS_GRANTED")
+            self.assertEqual(events[0]["action"], "READ")
+            self.assertEqual(events[0]["outcome"], "ALLOW")
+            self.assertEqual(events[1]["event_type"], "PROVENANCE_CHAIN_INVALID")
+            self.assertEqual(events[1]["action"], "READ")
+            self.assertEqual(events[1]["outcome"], "DENY")
+            self.assertEqual(events[1]["proposal_id"], "p-read-invalid-chain")
 
     def test_sync_policy_modes_are_configurable_per_project(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

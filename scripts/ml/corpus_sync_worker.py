@@ -262,6 +262,27 @@ def _dedupe_provenance_chain(entries: list[dict[str, str]]) -> list[dict[str, st
     return deduped
 
 
+def _materialize_provenance_chain_links(entries: list[dict[str, str]]) -> list[dict[str, str]]:
+    materialized: list[dict[str, str]] = []
+    prior_receipt_id: str | None = None
+    for entry in entries:
+        receipt_id = str(entry.get("receipt_id") or "").strip()
+        if not receipt_id:
+            continue
+
+        normalized = dict(entry)
+        parent = str(normalized.get("previous_receipt_id") or "").strip()
+        if parent:
+            normalized["previous_receipt_id"] = parent
+        elif prior_receipt_id is not None:
+            normalized["previous_receipt_id"] = prior_receipt_id
+        else:
+            normalized.pop("previous_receipt_id", None)
+        materialized.append(normalized)
+        prior_receipt_id = receipt_id
+    return materialized
+
+
 def _extract_provenance_chain(
     raw: Mapping[str, Any],
     *,
@@ -276,7 +297,7 @@ def _extract_provenance_chain(
         _append_provenance_entries(entries, artifact.get("provenance_chain"))
         _append_provenance_entries(entries, artifact.get("provenance"))
 
-    deduped = _dedupe_provenance_chain(entries)
+    deduped = _materialize_provenance_chain_links(_dedupe_provenance_chain(entries))
     if not deduped:
         deduped = [{"receipt_id": receipt_id}]
 
@@ -287,7 +308,7 @@ def _extract_provenance_chain(
             link["previous_receipt_id"] = tail_receipt_id
         deduped.append(link)
 
-    return tuple(dict(entry) for entry in deduped)
+    return tuple(_materialize_provenance_chain_links(deduped))
 
 
 def _validate_provenance_chain(
@@ -311,11 +332,23 @@ def _validate_provenance_chain(
         seen_receipt_ids.add(receipt_id)
 
         parent = str(entry.get("previous_receipt_id") or "").strip()
-        if idx > 0 and parent and parent != previous_receipt_id:
-            raise ValueError(
-                "provenance_chain continuity broken: "
-                f"entry '{receipt_id}' points to '{parent}' instead of '{previous_receipt_id}'"
-            )
+        if idx == 0:
+            if parent:
+                raise ValueError(
+                    "provenance_chain root entry must not declare previous_receipt_id: "
+                    f"entry '{receipt_id}' points to '{parent}'"
+                )
+        else:
+            if not parent:
+                raise ValueError(
+                    "provenance_chain continuity broken: "
+                    f"entry '{receipt_id}' is missing previous_receipt_id"
+                )
+            if parent != previous_receipt_id:
+                raise ValueError(
+                    "provenance_chain continuity broken: "
+                    f"entry '{receipt_id}' points to '{parent}' instead of '{previous_receipt_id}'"
+                )
 
         previous_receipt_id = receipt_id
 
@@ -1051,7 +1084,27 @@ class AccessPolicy:
         program_id: str | None,
     ) -> None:
         allowed_program_ids = self._context.allowed_program_ids
-        if program_id is not None and allowed_program_ids is not None and program_id not in allowed_program_ids:
+        if allowed_program_ids is None:
+            return
+
+        if program_id is None:
+            reason = (
+                f"principal '{self._context.principal}' requires scoped program_id "
+                f"for action '{action}'"
+            )
+            self._emit(
+                event_type="ACCESS_DENIED",
+                severity="WARNING",
+                action=action,
+                outcome="DENY",
+                proposal_id=proposal_id,
+                program_id=program_id,
+                required_capability=required_capability,
+                reason=reason,
+            )
+            raise AccessDeniedError(reason)
+
+        if program_id not in allowed_program_ids:
             reason = (
                 f"principal '{self._context.principal}' cannot access program '{program_id}' "
                 f"for action '{action}'"
