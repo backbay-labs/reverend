@@ -266,6 +266,8 @@ class EvidenceDerivedFeatures:
     evidence_count: int
     evidence_kind_score: float
     confidence_mean: float
+    evidence_diversity: float
+    stable_ref_ratio: float
     query_overlap: float
     receipt_signal: float
 
@@ -289,6 +291,8 @@ class EvidenceWeightedReranker:
         evidence_kind_weight: float = 0.08,
         confidence_weight: float = 0.05,
         evidence_count_weight: float = 0.04,
+        evidence_diversity_weight: float = 0.03,
+        stable_ref_weight: float = 0.02,
         receipt_weight: float = 0.03,
         default_confidence: float = 0.5,
     ):
@@ -296,6 +300,8 @@ class EvidenceWeightedReranker:
         self._evidence_kind_weight = evidence_kind_weight
         self._confidence_weight = confidence_weight
         self._evidence_count_weight = evidence_count_weight
+        self._evidence_diversity_weight = evidence_diversity_weight
+        self._stable_ref_weight = stable_ref_weight
         self._receipt_weight = receipt_weight
         self._default_confidence = default_confidence
 
@@ -337,6 +343,8 @@ class EvidenceWeightedReranker:
                 evidence_count=0,
                 evidence_kind_score=0.0,
                 confidence_mean=0.0,
+                evidence_diversity=0.0,
+                stable_ref_ratio=0.0,
                 query_overlap=0.0,
                 receipt_signal=0.0,
             )
@@ -348,17 +356,25 @@ class EvidenceWeightedReranker:
                 evidence_count=0,
                 evidence_kind_score=0.0,
                 confidence_mean=0.0,
+                evidence_diversity=0.0,
+                stable_ref_ratio=0.0,
                 query_overlap=0.0,
                 receipt_signal=self._receipt_signal(record),
             )
 
         weighted_kind_total = 0.0
         confidence_total = 0.0
+        stable_ref_count = 0
+        evidence_kinds: set[str] = set()
         overlap_scores: list[float] = []
         for ref in record.evidence_refs:
             kind_weight = self._KIND_WEIGHTS.get(ref.kind, self._KIND_WEIGHTS["OTHER"])
             confidence = ref.confidence if ref.confidence is not None else self._default_confidence
             bounded_confidence = min(max(confidence, 0.0), 1.0)
+            evidence_kinds.add(ref.kind)
+            ref_id = str(ref.evidence_ref_id).strip().lower()
+            if ref_id.startswith("evr_") or ref_id.startswith("evidence:"):
+                stable_ref_count += 1
 
             weighted_kind_total += kind_weight * bounded_confidence
             confidence_total += bounded_confidence
@@ -372,11 +388,15 @@ class EvidenceWeightedReranker:
 
         evidence_kind_score = weighted_kind_total / evidence_count
         confidence_mean = confidence_total / evidence_count
+        evidence_diversity = len(evidence_kinds) / min(evidence_count, 3)
+        stable_ref_ratio = stable_ref_count / evidence_count
         query_overlap = max(overlap_scores) if overlap_scores else 0.0
         return EvidenceDerivedFeatures(
             evidence_count=evidence_count,
             evidence_kind_score=evidence_kind_score,
             confidence_mean=confidence_mean,
+            evidence_diversity=evidence_diversity,
+            stable_ref_ratio=stable_ref_ratio,
             query_overlap=query_overlap,
             receipt_signal=self._receipt_signal(record),
         )
@@ -388,16 +408,28 @@ class EvidenceWeightedReranker:
             + self._evidence_kind_weight * features.evidence_kind_score
             + self._confidence_weight * features.confidence_mean
             + self._evidence_count_weight * evidence_count_norm
+            + self._evidence_diversity_weight * features.evidence_diversity
+            + self._stable_ref_weight * features.stable_ref_ratio
             + self._receipt_weight * features.receipt_signal
         )
         return min(max(bonus, 0.0), 0.35)
 
     @staticmethod
     def _receipt_signal(record: FunctionRecord) -> float:
-        receipt_id = dict(record.provenance).get("receipt_id", "")
+        provenance = dict(record.provenance)
+        receipt_id = str(provenance.get("receipt_id", "")).strip()
+        source = str(provenance.get("source", "")).strip()
+        record_id = str(provenance.get("record_id", "")).strip()
+        completeness = sum(1 for value in (receipt_id, source, record_id) if value) / 3.0
         if not receipt_id:
-            return 0.0
-        return 1.0 if receipt_id.startswith("receipt:") and receipt_id.count(":") >= 2 else 0.5
+            return 0.35 * completeness
+        if receipt_id.startswith("receipt:") and receipt_id.count(":") >= 2:
+            structure_score = 1.0
+        elif receipt_id.startswith("receipt:"):
+            structure_score = 0.75
+        else:
+            structure_score = 0.5
+        return min(1.0, 0.6 * structure_score + 0.4 * completeness)
 
 
 @dataclass(frozen=True)

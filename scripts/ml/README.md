@@ -30,6 +30,8 @@ python3 scripts/ml/local_embedding_pipeline.py search \
 ```
 
 Search/panel paths apply an evidence-weighted reranker by default.
+The reranker consumes evidence-derived features (kind/confidence, query overlap,
+evidence diversity, stable evidence-ref IDs) plus receipt-provenance completeness.
 
 Use baseline-only ordering when reranking is unavailable or intentionally disabled:
 
