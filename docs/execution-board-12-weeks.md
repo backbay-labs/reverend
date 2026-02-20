@@ -73,7 +73,7 @@ Ship one vertical slice:
 8. `SEC-417`: Policy mode enforcement and endpoint allowlist controls.
 9. `EVAL-501`: Dataset lock + deterministic baseline pipeline.
 10. `EVAL-529`: CI gates for receipt completeness, rollback, recall, latency.
-11. `EVAL-534`: Artifact-driven MVP gate dashboard (`eval/scripts/mvp_gate_dashboard.py`) with actionable alerts.
+11. `EVAL-534`: Artifact-driven MVP gate dashboard (`eval/scripts/mvp_gate_dashboard.py`) with threshold config (`eval/config/mvp_gate_thresholds.json`), current/trend views, and actionable alerts.
 
 ## 7. Risks and Kill Criteria
 
