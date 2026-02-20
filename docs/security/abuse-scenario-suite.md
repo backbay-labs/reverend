@@ -28,7 +28,7 @@ scenario maps to a threat from the STRIDE analysis (Section 7 of the spec).
 
 ## Scenario 1: Prompt Injection via Crafted ELF Symbol Names
 
-**Threat IDs**: T1, T11
+**Threat ID**: T1
 **STRIDE**: Tampering, Elevation of Privilege
 **Spec reference**: Section 6.1
 
@@ -660,7 +660,7 @@ sophisticated attackers with sustained network visibility.
 
 | Scenario | Threat ID | Finding | Residual Risk | Disposition |
 |----------|-----------|---------|---------------|-------------|
-| 1. Prompt injection via symbols | T1, T11 | Remediated | Medium | Accepted |
+| 1. Prompt injection via symbols | T1 | Remediated | Medium | Accepted |
 | 2. Hallucination incorrect types | T9 | Remediated | Medium | Accepted |
 | 3. Cloud API data exfiltration | T3 | Remediated | Medium | Accepted |
 | 4. Malicious plugin supply chain | T10 | Remediated | Medium | Accepted |
@@ -678,11 +678,11 @@ sophisticated attackers with sustained network visibility.
 have architectural mitigations specified. No unaddressed attack vectors
 identified.
 
-**Findings with MEDIUM residual risk** (4 of 13): These represent inherent
-limitations of LLM-based systems (prompt injection, hallucination, cloud
-data exposure, model supply chain) where defense-in-depth reduces but
-cannot eliminate risk. All are formally accepted with documented
-justification.
+**Findings with MEDIUM residual risk** (5 of 13): `T1`, `T3`, `T5`, `T9`,
+and `T10`. These represent inherent limitations of LLM-based systems
+(prompt injection, hallucination, cloud data exposure, and model/plugin
+supply chain) where defense-in-depth reduces but cannot eliminate risk.
+All are formally accepted with documented justification.
 
 ---
 
@@ -718,6 +718,6 @@ justification.
 
 ---
 
-> **Document version**: 1.0
+> **Document version**: 1.1
 > **Classification**: Internal — Security Review
 > **Next review**: At implementation phase gate (E8-S3 or equivalent)
