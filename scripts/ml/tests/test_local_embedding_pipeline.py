@@ -168,6 +168,131 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         self.assertTrue(comparison["improves_against_baseline"])
         self.assertGreater(comparison["ordering_improved_queries"], 0)
 
+    def test_reranker_prefers_complete_receipt_provenance_on_tied_baseline(self) -> None:
+        records = [
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.a.receipt_incomplete",
+                    "name": "resolver",
+                    "text": "import thunk resolver routine",
+                    "provenance": {
+                        "source": "test",
+                        "record_id": "fn.a.receipt_incomplete",
+                    },
+                    "evidence_refs": [
+                        {
+                            "evidence_ref_id": "evr_receipt_tie",
+                            "kind": "CALLSITE",
+                            "description": "callsite evidence import thunk resolver",
+                            "uri": "local-index://evidence/fn.a.receipt_incomplete/callsite",
+                            "confidence": 0.9,
+                        }
+                    ],
+                }
+            ),
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.z.receipt_complete",
+                    "name": "resolver",
+                    "text": "import thunk resolver routine",
+                    "provenance": {
+                        "source": "test",
+                        "record_id": "fn.z.receipt_complete",
+                        "receipt_id": "receipt:test:fn.z.receipt_complete",
+                    },
+                    "evidence_refs": [
+                        {
+                            "evidence_ref_id": "evr_receipt_tie",
+                            "kind": "CALLSITE",
+                            "description": "callsite evidence import thunk resolver",
+                            "uri": "local-index://evidence/fn.z.receipt_complete/callsite",
+                            "confidence": 0.9,
+                        }
+                    ],
+                }
+            ),
+        ]
+        pipeline = LocalEmbeddingPipeline(vector_dimension=64)
+        index = pipeline.build_index(records)
+        adapter = BaselineSimilarityAdapter(pipeline, index)
+        reranker = EvidenceWeightedReranker()
+
+        hits = adapter.top_k("import thunk resolver routine", top_k=2)
+        baseline_ids = [hit.function_id for hit in hits]
+        reranked = reranker.rerank(
+            query_text="import thunk resolver routine",
+            hits=hits,
+            index=index,
+            top_k=2,
+        )
+        reranked_ids = [hit.function_id for hit in reranked]
+
+        self.assertEqual(baseline_ids, ["fn.a.receipt_incomplete", "fn.z.receipt_complete"])
+        self.assertEqual(reranked_ids[0], "fn.z.receipt_complete")
+
+    def test_reranker_prefers_stable_evidence_ref_ids_on_tied_baseline(self) -> None:
+        records = [
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.a.unstable_ref",
+                    "name": "resolver",
+                    "text": "import thunk resolver routine",
+                    "provenance": {
+                        "source": "test",
+                        "record_id": "fn.a.unstable_ref",
+                        "receipt_id": "receipt:test:fn.a.unstable_ref",
+                    },
+                    "evidence_refs": [
+                        {
+                            "evidence_ref_id": "tmp_ref_unstable",
+                            "kind": "CALLSITE",
+                            "description": "callsite evidence import thunk resolver",
+                            "uri": "local-index://evidence/fn.a.unstable_ref/callsite",
+                            "confidence": 0.9,
+                        }
+                    ],
+                }
+            ),
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.z.stable_ref",
+                    "name": "resolver",
+                    "text": "import thunk resolver routine",
+                    "provenance": {
+                        "source": "test",
+                        "record_id": "fn.z.stable_ref",
+                        "receipt_id": "receipt:test:fn.z.stable_ref",
+                    },
+                    "evidence_refs": [
+                        {
+                            "evidence_ref_id": "evr_ref_stable",
+                            "kind": "CALLSITE",
+                            "description": "callsite evidence import thunk resolver",
+                            "uri": "local-index://evidence/fn.z.stable_ref/callsite",
+                            "confidence": 0.9,
+                        }
+                    ],
+                }
+            ),
+        ]
+        pipeline = LocalEmbeddingPipeline(vector_dimension=64)
+        index = pipeline.build_index(records)
+        adapter = BaselineSimilarityAdapter(pipeline, index)
+        reranker = EvidenceWeightedReranker()
+
+        hits = adapter.top_k("import thunk resolver routine", top_k=2)
+        baseline_ids = [hit.function_id for hit in hits]
+        reranked = reranker.rerank(
+            query_text="import thunk resolver routine",
+            hits=hits,
+            index=index,
+            top_k=2,
+        )
+        reranked_ids = [hit.function_id for hit in reranked]
+
+        self.assertEqual(baseline_ids, ["fn.a.unstable_ref", "fn.z.stable_ref"])
+        self.assertEqual(reranked_ids[0], "fn.z.stable_ref")
+
     def test_reranker_oversampling_can_improve_recall_at_top_k(self) -> None:
         records: list[FunctionRecord] = [
             FunctionRecord.from_json(
