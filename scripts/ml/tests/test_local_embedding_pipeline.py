@@ -18,6 +18,14 @@ MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
+SYNC_MODULE_PATH = Path(__file__).resolve().parents[1] / "corpus_sync_worker.py"
+SYNC_SPEC = importlib.util.spec_from_file_location("e7_corpus_sync_worker_for_pullback", SYNC_MODULE_PATH)
+if SYNC_SPEC is None or SYNC_SPEC.loader is None:
+    raise RuntimeError(f"failed to load module spec from {SYNC_MODULE_PATH}")
+SYNC_MODULE = importlib.util.module_from_spec(SYNC_SPEC)
+sys.modules[SYNC_SPEC.name] = SYNC_MODULE
+SYNC_SPEC.loader.exec_module(SYNC_MODULE)
+
 BaselineSimilarityAdapter = MODULE.BaselineSimilarityAdapter
 DeterministicTriageFeatureExtractor = MODULE.DeterministicTriageFeatureExtractor
 DeterministicTriageMission = MODULE.DeterministicTriageMission
@@ -30,6 +38,7 @@ TypeSuggestionGenerator = MODULE.TypeSuggestionGenerator
 TypeSuggestionPolicy = MODULE.TypeSuggestionPolicy
 evaluate_queries = MODULE.evaluate_queries
 generate_type_suggestion_report = MODULE.generate_type_suggestion_report
+run_sync_job = SYNC_MODULE.run_sync_job
 
 
 class LocalEmbeddingPipelineTest(unittest.TestCase):
@@ -580,6 +589,197 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             telemetry_event = json.loads(events[0])
             self.assertEqual(telemetry_event["kind"], "type_suggestion_quality")
             self.assertEqual(telemetry_event["total_suggestions"], 1)
+
+    def test_pullback_reuse_inserts_proposals_with_receipts(self) -> None:
+        records = [
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.local.parse_imports",
+                    "name": "parse_pe_imports",
+                    "text": "parse pe import table and resolve imported function names",
+                }
+            )
+        ]
+        index = self.pipeline.build_index(records)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            index_dir = tmp / "index"
+            backend_store = tmp / "shared_backend.json"
+            local_store = tmp / "local_store.json"
+            index.save(index_dir)
+
+            backend_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "shared_corpus_backend",
+                        "artifacts": {
+                            "remote-1": {
+                                "proposal_id": "remote-1",
+                                "state": "APPROVED",
+                                "receipt_id": "receipt:remote:1",
+                                "program_id": "program:remote",
+                                "artifact": {
+                                    "function_name": "parse_pe_imports",
+                                    "function_text": "parse pe import table and resolve imported symbol names",
+                                    "reusable_artifacts": [
+                                        {
+                                            "kind": "NAME",
+                                            "target_scope": "FUNCTION",
+                                            "value": "resolve_import_thunks",
+                                            "confidence": 0.95,
+                                        },
+                                        {
+                                            "kind": "TYPE",
+                                            "target_scope": "VARIABLE",
+                                            "target_id": "fn.local.parse_imports:local.desc",
+                                            "value": "IMAGE_IMPORT_DESCRIPTOR *",
+                                            "confidence": 0.9,
+                                        },
+                                        {
+                                            "kind": "ANNOTATION",
+                                            "target_scope": "FUNCTION",
+                                            "value": "Resolves PE imports and thunk targets.",
+                                            "confidence": 0.88,
+                                        },
+                                    ],
+                                },
+                            }
+                        },
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "pullback-reuse",
+                        "--index-dir",
+                        str(index_dir),
+                        "--backend-store",
+                        str(backend_store),
+                        "--local-store",
+                        str(local_store),
+                        "--function-id",
+                        "fn.local.parse_imports",
+                        "--top-k",
+                        "2",
+                        "--program-id",
+                        "program:local",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(report["kind"], "cross_binary_pullback_report")
+            self.assertEqual(report["metrics"]["inserted_count"], 3)
+            self.assertEqual(report["metrics"]["matches"], 1)
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            proposals = local_doc["proposals"]
+            self.assertEqual(len(proposals), 3)
+            self.assertTrue(all(item["state"] == "PROPOSED" for item in proposals))
+            self.assertTrue(all(item["receipt_id"].startswith("receipt:pullback:") for item in proposals))
+            self.assertTrue(all(len(item["provenance_chain"]) >= 2 for item in proposals))
+            self.assertTrue(
+                all(item["artifact"]["kind"] == "cross_binary_reuse_proposal" for item in proposals)
+            )
+            self.assertTrue(all(item["program_id"] == "program:local" for item in proposals))
+
+    def test_pullback_proposals_work_with_accepted_rejected_sync_flow(self) -> None:
+        records = [
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.local.parse_imports",
+                    "name": "parse_pe_imports",
+                    "text": "parse pe import table and resolve imported function names",
+                }
+            )
+        ]
+        index = self.pipeline.build_index(records)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            index_dir = tmp / "index"
+            source_backend = tmp / "source_backend.json"
+            local_store = tmp / "local_store.json"
+            sync_backend = tmp / "sync_backend.json"
+            state_path = tmp / "state.json"
+            index.save(index_dir)
+
+            source_backend.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "shared_corpus_backend",
+                        "artifacts": {
+                            "remote-1": {
+                                "proposal_id": "remote-1",
+                                "state": "APPROVED",
+                                "receipt_id": "receipt:remote:1",
+                                "artifact": {
+                                    "function_name": "parse_pe_imports",
+                                    "reusable_artifacts": [
+                                        {
+                                            "kind": "NAME",
+                                            "target_scope": "FUNCTION",
+                                            "value": "resolve_import_thunks",
+                                        },
+                                        {
+                                            "kind": "ANNOTATION",
+                                            "target_scope": "FUNCTION",
+                                            "value": "Resolves imported functions.",
+                                        },
+                                    ],
+                                },
+                            }
+                        },
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            exit_code = MODULE.main(
+                [
+                    "pullback-reuse",
+                    "--index-dir",
+                    str(index_dir),
+                    "--backend-store",
+                    str(source_backend),
+                    "--local-store",
+                    str(local_store),
+                    "--function-id",
+                    "fn.local.parse_imports",
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            proposals = local_doc["proposals"]
+            self.assertEqual(len(proposals), 2)
+            proposals[0]["state"] = "APPROVED"
+            proposals[1]["state"] = "REJECTED"
+            local_store.write_text(json.dumps(local_doc, indent=2) + "\n", encoding="utf-8")
+
+            telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=sync_backend,
+                state_path=state_path,
+                job_id="pullback-review-flow",
+            )
+
+            synced = json.loads(sync_backend.read_text(encoding="utf-8"))
+            self.assertEqual(telemetry.scanned_total, 2)
+            self.assertEqual(telemetry.approved_total, 1)
+            self.assertEqual(telemetry.synced_count, 1)
+            self.assertEqual(len(synced["artifacts"]), 1)
 
     @staticmethod
     def _triage_fixture_records() -> list[FunctionRecord]:

@@ -167,3 +167,21 @@ Local store input is a JSON object with a `proposals` array. The worker:
 - Checkpoints each successful proposal for resumable retries
 - Skips already-synced proposals for idempotent re-runs
 - Emits per-run telemetry (`counts`, `errors`, `latency_ms`)
+
+## Pull Cross-Binary Reuse into Local Proposal Store
+
+```bash
+python3 scripts/ml/local_embedding_pipeline.py pullback-reuse \
+  --index-dir /tmp/ml301-index \
+  --backend-store /tmp/shared-corpus-backend.json \
+  --local-store /tmp/local-proposals.json \
+  --function-id fn.pe.parse_imports \
+  --top-k 3 \
+  --program-id program:local
+```
+
+`pullback-reuse`:
+- Queries shared-corpus artifacts for cross-binary matches against local session functions
+- Extracts reusable names/types/annotations from matched artifacts
+- Inserts local proposals in `PROPOSED` state with receipt and provenance chain links
+- Leaves accept/reject decisions in the existing local review flow (`PROPOSED` -> `APPROVED` / `REJECTED`)
