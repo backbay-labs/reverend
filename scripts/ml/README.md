@@ -154,6 +154,11 @@ Mission artifacts include:
 - `entrypoints`, `hotspots`, and `unknowns` rows
 - Evidence links with source-context URIs on all emitted triage findings
 
+Default triage thresholds are calibrated from the curated benchmark fixture:
+- `entrypoint_threshold=0.30`
+- `hotspot_threshold=0.25`
+- `unknown_threshold=0.65`
+
 `--report-dir` exports:
 - `triage-summary.json` (machine-readable summary artifact)
 - `triage-panel.json` (in-plugin panel payload for map + ranked hotspots)
@@ -168,6 +173,20 @@ python3 scripts/ml/local_embedding_pipeline.py triage-panel \
   --mission-id triage-smoke \
   --output /tmp/ml327-triage-panel.json
 ```
+
+## Calibrate Triage Scoring Against Curated Benchmark (E5-S3)
+
+```bash
+python3 scripts/ml/local_embedding_pipeline.py triage-calibrate \
+  --benchmark scripts/ml/fixtures/triage_benchmark_v2026_02_1.json \
+  --output /tmp/ml327-triage-calibration.json
+```
+
+Calibration artifact includes:
+- Versioned benchmark metadata (`benchmark_id`, `benchmark_version`)
+- Baseline (`0.45/0.30/0.55`) vs calibrated threshold metrics
+- Before/after deltas for `macro_f1`, `entrypoint_recall`, `hotspot_recall`, and `unknown_precision`
+- Target-threshold checks and pass/fail status
 
 ## Sync Approved Proposals to Shared Corpus Backend
 

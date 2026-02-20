@@ -1078,6 +1078,57 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertGreaterEqual(panel["panel"]["map_node_count"], 3)
             self.assertGreaterEqual(len(panel["ranked_hotspots"]), 1)
 
+    def test_triage_benchmark_fixture_is_versioned(self) -> None:
+        benchmark_path = MODULE_PATH.parent / "fixtures" / "triage_benchmark_v2026_02_1.json"
+        benchmark = MODULE.load_triage_benchmark(benchmark_path)
+
+        self.assertEqual(benchmark["kind"], "triage_scoring_benchmark")
+        self.assertEqual(benchmark["benchmark_id"], "triage-curated")
+        self.assertEqual(benchmark["benchmark_version"], "2026.02.1")
+        self.assertEqual(len(benchmark["cases"]), 12)
+        self.assertIn("macro_f1", benchmark["target_thresholds"])
+
+    def test_triage_calibrate_cli_reports_before_after_improvement(self) -> None:
+        benchmark_path = MODULE_PATH.parent / "fixtures" / "triage_benchmark_v2026_02_1.json"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "triage_calibration.json"
+            exit_code = MODULE.main(
+                [
+                    "triage-calibrate",
+                    "--benchmark",
+                    str(benchmark_path),
+                    "--output",
+                    str(output_path),
+                    "--commit-sha",
+                    "abc123",
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+
+            report = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["kind"], "triage_scoring_calibration")
+            self.assertEqual(report["status"], "passed")
+            self.assertEqual(report["commit_sha"], "abc123")
+            self.assertEqual(report["benchmark"]["benchmark_version"], "2026.02.1")
+            self.assertLess(report["baseline"]["targets_passed"], report["candidate"]["targets_passed"])
+            self.assertGreater(
+                report["candidate"]["metrics"]["macro_f1"],
+                report["baseline"]["metrics"]["macro_f1"],
+            )
+            self.assertEqual(
+                report["candidate"]["thresholds"]["entrypoint"],
+                MODULE.DEFAULT_TRIAGE_ENTRYPOINT_THRESHOLD,
+            )
+            self.assertEqual(
+                report["candidate"]["thresholds"]["hotspot"],
+                MODULE.DEFAULT_TRIAGE_HOTSPOT_THRESHOLD,
+            )
+            self.assertEqual(
+                report["candidate"]["thresholds"]["unknown"],
+                MODULE.DEFAULT_TRIAGE_UNKNOWN_THRESHOLD,
+            )
+            self.assertTrue(all(check["passed"] for check in report["candidate"]["checks"].values()))
+
 
 if __name__ == "__main__":
     unittest.main()
