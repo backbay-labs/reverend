@@ -137,3 +137,19 @@ Suggestion reports include:
 - Evidence summary and evidence references
 - Policy action (`AUTO_APPLY`, `SUGGEST`, `QUARANTINED`)
 - Suggestion quality metrics (accuracy, precision, quarantine rates) for CI artifacts
+
+## Sync Approved Proposals to Shared Corpus Backend
+
+```bash
+python3 scripts/ml/corpus_sync_worker.py \
+  --local-store /tmp/local-proposals.json \
+  --backend-store /tmp/shared-corpus-backend.json \
+  --state-path /tmp/corpus-sync-checkpoint.json \
+  --telemetry-path /tmp/corpus-sync-telemetry.jsonl
+```
+
+Local store input is a JSON object with a `proposals` array. The worker:
+- Syncs only proposals with state `APPROVED` by default
+- Checkpoints each successful proposal for resumable retries
+- Skips already-synced proposals for idempotent re-runs
+- Emits per-run telemetry (`counts`, `errors`, `latency_ms`)
