@@ -234,6 +234,265 @@ class SemanticSearchResponse:
 
 
 @dataclass(frozen=True)
+class TypeSuggestionPolicy:
+    """Confidence threshold policy for type suggestion handling."""
+
+    auto_apply_threshold: float = 0.9
+    suggest_threshold: float = 0.5
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.suggest_threshold <= 1.0:
+            raise ValueError("suggest_threshold must be between 0 and 1")
+        if not 0.0 <= self.auto_apply_threshold <= 1.0:
+            raise ValueError("auto_apply_threshold must be between 0 and 1")
+        if self.auto_apply_threshold < self.suggest_threshold:
+            raise ValueError("auto_apply_threshold must be >= suggest_threshold")
+
+    def classify(self, confidence: float) -> str:
+        if confidence >= self.auto_apply_threshold:
+            return "AUTO_APPLY"
+        if confidence >= self.suggest_threshold:
+            return "SUGGEST"
+        return "QUARANTINED"
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "auto_apply_threshold": round(self.auto_apply_threshold, 6),
+            "suggest_threshold": round(self.suggest_threshold, 6),
+        }
+
+
+@dataclass(frozen=True)
+class TypeSuggestion:
+    """Generated type suggestion with confidence, evidence summary, and policy outcome."""
+
+    target_id: str
+    target_scope: str
+    suggested_type: str
+    confidence: float
+    evidence_summary: str
+    policy_action: str
+    quarantined: bool
+    model_confidence: float
+    evidence_score: float
+    consensus_ratio: float
+    pattern_match_score: float
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+    ground_truth_type: str | None = None
+
+    def is_correct(self) -> bool | None:
+        if self.ground_truth_type is None:
+            return None
+        return self.suggested_type.strip() == self.ground_truth_type.strip()
+
+    def to_json(self) -> dict[str, Any]:
+        doc: dict[str, Any] = {
+            "target_id": self.target_id,
+            "target_scope": self.target_scope,
+            "suggested_type": self.suggested_type,
+            "confidence": round(self.confidence, 6),
+            "evidence_summary": self.evidence_summary,
+            "policy_action": self.policy_action,
+            "quarantined": self.quarantined,
+            "confidence_components": {
+                "model_confidence": round(self.model_confidence, 6),
+                "evidence_score": round(self.evidence_score, 6),
+                "consensus_ratio": round(self.consensus_ratio, 6),
+                "pattern_match_score": round(self.pattern_match_score, 6),
+            },
+            "evidence_refs": [ref.to_json() for ref in self.evidence_refs],
+        }
+        if self.ground_truth_type is not None:
+            doc["ground_truth_type"] = self.ground_truth_type
+            doc["is_correct"] = self.is_correct()
+        return doc
+
+
+def _coerce_confidence(raw: Any, default: float = 0.0) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(0.0, min(1.0, value))
+
+
+def _coerce_pattern_score(raw: Any) -> float:
+    if isinstance(raw, bool):
+        return 1.0 if raw else 0.0
+    return _coerce_confidence(raw, default=0.0)
+
+
+def _evidence_score(evidence_refs: tuple[EvidenceRef, ...]) -> float:
+    if not evidence_refs:
+        return 0.0
+    density = min(len(evidence_refs) / 3.0, 1.0)
+    confidences = [ref.confidence for ref in evidence_refs if ref.confidence is not None]
+    average_confidence = (sum(confidences) / len(confidences)) if confidences else 0.6
+    return max(0.0, min(1.0, 0.6 * density + 0.4 * average_confidence))
+
+
+def _summarize_evidence(evidence_refs: tuple[EvidenceRef, ...]) -> str:
+    if not evidence_refs:
+        return "No evidence attached."
+    kind_counts = Counter(ref.kind for ref in evidence_refs)
+    dominant = max(kind_counts.items(), key=lambda item: (item[1], item[0]))[0]
+    confidences = [ref.confidence for ref in evidence_refs if ref.confidence is not None]
+    if confidences:
+        average_confidence = sum(confidences) / len(confidences)
+        return (
+            f"{len(evidence_refs)} evidence refs; dominant={dominant}; "
+            f"avg_evidence_confidence={average_confidence:.2f}"
+        )
+    return f"{len(evidence_refs)} evidence refs; dominant={dominant}; avg_evidence_confidence=unspecified"
+
+
+class TypeSuggestionGenerator:
+    """Generate confidence-scored type suggestions with threshold-based policy handling."""
+
+    _DEFAULT_SCOPE = "VARIABLE"
+    _SCOPES = {
+        "VARIABLE",
+        "PARAMETER",
+        "RETURN_TYPE",
+        "GLOBAL",
+        "STRUCT_FIELD",
+    }
+
+    def __init__(self, policy: TypeSuggestionPolicy | None = None):
+        self._policy = policy or TypeSuggestionPolicy()
+
+    @property
+    def policy(self) -> TypeSuggestionPolicy:
+        return self._policy
+
+    def generate(self, raw_suggestions: list[Mapping[str, Any]]) -> list[TypeSuggestion]:
+        suggestions: list[TypeSuggestion] = []
+        for idx, raw in enumerate(raw_suggestions):
+            target_id = str(raw.get("target_id") or raw.get("id") or "").strip()
+            if not target_id:
+                raise ValueError(f"suggestion at index {idx} missing required target_id")
+
+            suggested_type = str(raw.get("suggested_type") or raw.get("type") or "").strip()
+            if not suggested_type:
+                raise ValueError(f"suggestion at index {idx} missing required suggested_type")
+
+            target_scope = str(raw.get("target_scope") or self._DEFAULT_SCOPE).strip().upper()
+            if target_scope not in self._SCOPES:
+                raise ValueError(f"suggestion at index {idx} has unsupported target_scope '{target_scope}'")
+
+            evidence_refs = self._parse_evidence_refs(raw.get("evidence_refs"), target_id=target_id)
+            model_confidence = _coerce_confidence(raw.get("model_confidence", raw.get("confidence")), default=0.0)
+            consensus_ratio = _coerce_confidence(raw.get("consensus_ratio"), default=0.0)
+            pattern_match_score = _coerce_pattern_score(raw.get("pattern_match_score", raw.get("pattern_match")))
+            evidence_score = _evidence_score(evidence_refs)
+
+            confidence = max(
+                0.0,
+                min(
+                    1.0,
+                    0.5 * model_confidence
+                    + 0.3 * evidence_score
+                    + 0.15 * consensus_ratio
+                    + 0.05 * pattern_match_score,
+                ),
+            )
+            policy_action = self._policy.classify(confidence)
+
+            ground_truth_raw = raw.get("ground_truth_type")
+            ground_truth_type = str(ground_truth_raw).strip() if ground_truth_raw is not None else None
+            if ground_truth_type == "":
+                ground_truth_type = None
+
+            suggestions.append(
+                TypeSuggestion(
+                    target_id=target_id,
+                    target_scope=target_scope,
+                    suggested_type=suggested_type,
+                    confidence=confidence,
+                    evidence_summary=_summarize_evidence(evidence_refs),
+                    policy_action=policy_action,
+                    quarantined=policy_action == "QUARANTINED",
+                    model_confidence=model_confidence,
+                    evidence_score=evidence_score,
+                    consensus_ratio=consensus_ratio,
+                    pattern_match_score=pattern_match_score,
+                    evidence_refs=evidence_refs,
+                    ground_truth_type=ground_truth_type,
+                )
+            )
+        return suggestions
+
+    def _parse_evidence_refs(self, raw_refs: Any, *, target_id: str) -> tuple[EvidenceRef, ...]:
+        refs: list[EvidenceRef] = []
+        if isinstance(raw_refs, list):
+            for item in raw_refs:
+                if isinstance(item, Mapping):
+                    refs.append(EvidenceRef.from_json(item, function_id=target_id))
+        return tuple(refs)
+
+
+def summarize_type_suggestion_metrics(
+    suggestions: list[TypeSuggestion],
+    *,
+    policy: TypeSuggestionPolicy,
+) -> dict[str, Any]:
+    total = len(suggestions)
+    auto_apply_count = sum(1 for suggestion in suggestions if suggestion.policy_action == "AUTO_APPLY")
+    suggest_count = sum(1 for suggestion in suggestions if suggestion.policy_action == "SUGGEST")
+    quarantined_count = sum(1 for suggestion in suggestions if suggestion.policy_action == "QUARANTINED")
+    avg_confidence = (sum(suggestion.confidence for suggestion in suggestions) / total) if total else 0.0
+
+    evaluated = [suggestion for suggestion in suggestions if suggestion.ground_truth_type is not None]
+    evaluated_total = len(evaluated)
+    correct_total = sum(1 for suggestion in evaluated if suggestion.is_correct() is True)
+    incorrect_total = sum(1 for suggestion in evaluated if suggestion.is_correct() is False)
+
+    accepted = [suggestion for suggestion in evaluated if suggestion.policy_action != "QUARANTINED"]
+    accepted_total = len(accepted)
+    accepted_correct = sum(1 for suggestion in accepted if suggestion.is_correct() is True)
+
+    incorrect_quarantined = sum(
+        1
+        for suggestion in evaluated
+        if suggestion.is_correct() is False and suggestion.policy_action == "QUARANTINED"
+    )
+
+    return {
+        "total_suggestions": total,
+        "average_confidence": round(avg_confidence, 6),
+        "auto_apply_count": auto_apply_count,
+        "suggest_count": suggest_count,
+        "quarantined_count": quarantined_count,
+        "quarantine_rate": round((quarantined_count / total), 6) if total else 0.0,
+        "evaluated_with_ground_truth": evaluated_total,
+        "overall_accuracy": round((correct_total / evaluated_total), 6) if evaluated_total else 0.0,
+        "accepted_precision": round((accepted_correct / accepted_total), 6) if accepted_total else 0.0,
+        "incorrect_quarantine_recall": round((incorrect_quarantined / incorrect_total), 6)
+        if incorrect_total
+        else 0.0,
+        "policy_thresholds": policy.to_json(),
+    }
+
+
+def generate_type_suggestion_report(
+    raw_suggestions: list[Mapping[str, Any]],
+    *,
+    policy: TypeSuggestionPolicy,
+) -> dict[str, Any]:
+    generator = TypeSuggestionGenerator(policy=policy)
+    suggestions = generator.generate(raw_suggestions)
+    metrics = summarize_type_suggestion_metrics(suggestions, policy=policy)
+    return {
+        "schema_version": 1,
+        "kind": "type_suggestion_report",
+        "generated_at_utc": _utc_now(),
+        "policy": policy.to_json(),
+        "suggestions": [suggestion.to_json() for suggestion in suggestions],
+        "metrics": metrics,
+    }
+
+
+@dataclass(frozen=True)
 class IndexBuildStats:
     """Pipeline and index build statistics."""
 
@@ -623,6 +882,26 @@ def _append_latency_metric(telemetry_path: Path | None, metric: SearchLatencyMet
         handle.write(json.dumps(event, sort_keys=True) + "\n")
 
 
+def _append_type_suggestion_metric(
+    telemetry_path: Path | None,
+    *,
+    policy: TypeSuggestionPolicy,
+    metrics: Mapping[str, Any],
+) -> None:
+    if telemetry_path is None:
+        return
+    telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "schema_version": 1,
+        "kind": "type_suggestion_quality",
+        "timestamp_utc": _utc_now(),
+        "policy": policy.to_json(),
+        **dict(metrics),
+    }
+    with telemetry_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+
 def _run_semantic_search(
     *,
     service: SemanticSearchQueryService,
@@ -702,6 +981,19 @@ def evaluate_queries(adapter: BaselineSimilarityAdapter, queries_path: Path, top
     }
 
 
+def load_type_suggestion_inputs(input_path: Path) -> list[Mapping[str, Any]]:
+    doc = json.loads(input_path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict) or not isinstance(doc.get("suggestions"), list):
+        raise ValueError("type suggestion input must contain a 'suggestions' array")
+
+    suggestions: list[Mapping[str, Any]] = []
+    for idx, item in enumerate(doc["suggestions"]):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"suggestion at index {idx} must be an object")
+        suggestions.append(item)
+    return suggestions
+
+
 def _build_command(args: argparse.Namespace) -> int:
     pipeline = LocalEmbeddingPipeline(vector_dimension=args.vector_dimension)
     records = load_corpus(args.corpus)
@@ -761,6 +1053,24 @@ def _evaluate_command(args: argparse.Namespace) -> int:
         print(f"[ml301] wrote {args.output}")
     else:
         print(json.dumps(metrics, indent=2, sort_keys=True))
+    return 0
+
+
+def _suggest_types_command(args: argparse.Namespace) -> int:
+    policy = TypeSuggestionPolicy(
+        auto_apply_threshold=args.auto_apply_threshold,
+        suggest_threshold=args.suggest_threshold,
+    )
+    raw_suggestions = load_type_suggestion_inputs(args.input)
+    report = generate_type_suggestion_report(raw_suggestions, policy=policy)
+    _append_type_suggestion_metric(args.telemetry_path, policy=policy, metrics=report["metrics"])
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
     return 0
 
 
@@ -830,6 +1140,32 @@ def _parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--top-k", type=int, default=10, help="Top-k result count")
     eval_parser.add_argument("--output", type=Path, default=None, help="Optional metrics output JSON")
     eval_parser.set_defaults(func=_evaluate_command)
+
+    suggest_parser = subparsers.add_parser(
+        "suggest-types",
+        help="Generate confidence-scored type suggestions with threshold policy",
+    )
+    suggest_parser.add_argument("--input", type=Path, required=True, help="Path to type suggestion input JSON")
+    suggest_parser.add_argument("--output", type=Path, default=None, help="Optional suggestion report JSON")
+    suggest_parser.add_argument(
+        "--auto-apply-threshold",
+        type=float,
+        default=0.9,
+        help="Confidence threshold for AUTO_APPLY policy action",
+    )
+    suggest_parser.add_argument(
+        "--suggest-threshold",
+        type=float,
+        default=0.5,
+        help="Minimum confidence threshold before suggestions leave quarantine",
+    )
+    suggest_parser.add_argument(
+        "--telemetry-path",
+        type=Path,
+        default=None,
+        help="Optional JSONL path for suggestion-quality telemetry events",
+    )
+    suggest_parser.set_defaults(func=_suggest_types_command)
 
     return parser
 
