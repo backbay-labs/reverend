@@ -19,6 +19,7 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 BaselineSimilarityAdapter = MODULE.BaselineSimilarityAdapter
+DeterministicTriageMission = MODULE.DeterministicTriageMission
 EmbeddingIndex = MODULE.EmbeddingIndex
 EvidenceWeightedReranker = MODULE.EvidenceWeightedReranker
 FunctionRecord = MODULE.FunctionRecord
@@ -578,6 +579,150 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             telemetry_event = json.loads(events[0])
             self.assertEqual(telemetry_event["kind"], "type_suggestion_quality")
             self.assertEqual(telemetry_event["total_suggestions"], 1)
+
+    @staticmethod
+    def _triage_fixture_records() -> list[FunctionRecord]:
+        return [
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.main.dispatch",
+                    "name": "main_dispatch",
+                    "text": "bootstrap main dispatch parses config and opens socket network session",
+                    "evidence_refs": [
+                        {
+                            "kind": "CALLSITE",
+                            "description": "main dispatcher calls parser and network connectors",
+                            "uri": "local-index://evidence/fn.main.dispatch/callsite",
+                            "confidence": 0.92,
+                        },
+                        {
+                            "kind": "XREF",
+                            "description": "xref from entry thunk into dispatch loop",
+                            "uri": "local-index://evidence/fn.main.dispatch/xref",
+                            "confidence": 0.88,
+                        },
+                    ],
+                }
+            ),
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.crypto.decrypt",
+                    "name": "decrypt_payload",
+                    "text": "aes key schedule decrypt routine for encrypted packet payload",
+                    "evidence_refs": [
+                        {
+                            "kind": "CONSTANT",
+                            "description": "AES S-box constants detected",
+                            "uri": "local-index://evidence/fn.crypto.decrypt/constant",
+                            "confidence": 0.95,
+                        }
+                    ],
+                }
+            ),
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.helper.unknown",
+                    "name": "FUN_00401090",
+                    "text": "opaque unknown state machine over unresolved buffer",
+                }
+            ),
+        ]
+
+    def test_triage_mission_uses_fixed_stage_graph_order(self) -> None:
+        mission = DeterministicTriageMission()
+        report = mission.run(self._triage_fixture_records(), mission_id="triage:test").to_json()
+
+        stages = [stage["stage"] for stage in report["execution"]["stage_graph"]]
+        self.assertEqual(
+            stages,
+            [
+                "extract_features",
+                "select_entrypoints",
+                "rank_hotspots",
+                "select_unknowns",
+                "build_summary",
+            ],
+        )
+        transitions = [stage["next_stage"] for stage in report["execution"]["stage_graph"]]
+        self.assertEqual(
+            transitions,
+            [
+                "select_entrypoints",
+                "rank_hotspots",
+                "select_unknowns",
+                "build_summary",
+                None,
+            ],
+        )
+
+    def test_triage_mission_emits_entrypoints_hotspots_unknowns_with_evidence_refs(self) -> None:
+        mission = DeterministicTriageMission()
+        report = mission.run(self._triage_fixture_records()).to_json()
+
+        self.assertGreaterEqual(report["counts"]["entrypoints"], 1)
+        self.assertGreaterEqual(report["counts"]["hotspots"], 1)
+        self.assertGreaterEqual(report["counts"]["unknowns"], 1)
+
+        entrypoint_ids = {row["function_id"] for row in report["entrypoints"]}
+        hotspot_ids = {row["function_id"] for row in report["hotspots"]}
+        unknown_ids = {row["function_id"] for row in report["unknowns"]}
+        self.assertIn("fn.main.dispatch", entrypoint_ids)
+        self.assertIn("fn.crypto.decrypt", hotspot_ids)
+        self.assertIn("fn.helper.unknown", unknown_ids)
+
+        self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["entrypoints"]))
+        self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["hotspots"]))
+        self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["unknowns"]))
+
+    def test_triage_mission_cli_persists_summary_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            corpus_path = tmp / "triage_corpus.json"
+            output_path = tmp / "triage_summary.json"
+            corpus_path.write_text(
+                json.dumps(
+                    {
+                        "functions": [
+                            {
+                                "id": "fn.main.dispatch",
+                                "name": "main_dispatch",
+                                "text": "bootstrap main dispatch parses config and opens socket network session",
+                            },
+                            {
+                                "id": "fn.crypto.decrypt",
+                                "name": "decrypt_payload",
+                                "text": "aes key schedule decrypt routine for encrypted packet payload",
+                            },
+                            {
+                                "id": "fn.helper.unknown",
+                                "name": "FUN_00401090",
+                                "text": "opaque unknown state machine over unresolved buffer",
+                            },
+                        ]
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            exit_code = MODULE.main(
+                [
+                    "triage-mission",
+                    "--corpus",
+                    str(corpus_path),
+                    "--output",
+                    str(output_path),
+                    "--mission-id",
+                    "triage:test",
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            summary = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["kind"], "triage_mission_summary")
+            self.assertEqual(summary["mission_id"], "triage:test")
+            self.assertEqual(len(summary["execution"]["stage_graph"]), 5)
+            self.assertGreaterEqual(summary["counts"]["entrypoints"], 1)
 
 
 if __name__ == "__main__":

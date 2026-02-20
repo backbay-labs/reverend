@@ -138,6 +138,20 @@ Suggestion reports include:
 - Policy action (`AUTO_APPLY`, `SUGGEST`, `QUARANTINED`)
 - Suggestion quality metrics (accuracy, precision, quarantine rates) for CI artifacts
 
+## Run Deterministic Triage Mission Graph (ML-327)
+
+```bash
+python3 scripts/ml/local_embedding_pipeline.py triage-mission \
+  --corpus scripts/ml/fixtures/toy_similarity_corpus_slice.json \
+  --mission-id triage-smoke \
+  --output /tmp/ml327-triage-summary.json
+```
+
+Mission artifacts include:
+- Deterministic stage-graph execution trace
+- `entrypoints`, `hotspots`, and `unknowns` rows
+- Evidence references on all emitted triage findings
+
 ## Sync Approved Proposals to Shared Corpus Backend
 
 ```bash
