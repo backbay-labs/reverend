@@ -15,11 +15,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Protocol
+from urllib.parse import urlparse
 
 SYNC_WRITE_CAPABILITY = "WRITE.CORPUS_SYNC"
 READ_CAPABILITY = "READ.CORPUS"
 DEFAULT_SYSTEM_PRINCIPAL = "system:corpus_sync_worker"
 DEFAULT_SYSTEM_CAPABILITIES = frozenset({"WRITE.*", "READ.*"})
+POLICY_MODE_OFFLINE = "offline"
+POLICY_MODE_ALLOWLIST = "allowlist"
+POLICY_MODE_CLOUD = "cloud"
+_POLICY_MODES = frozenset({POLICY_MODE_OFFLINE, POLICY_MODE_ALLOWLIST, POLICY_MODE_CLOUD})
 
 
 def _utc_now() -> str:
@@ -39,6 +44,90 @@ def _normalize_program_id(value: Any) -> str | None:
         return None
     normalized = str(value).strip()
     return normalized or None
+
+
+def _normalize_project_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _normalize_policy_mode(value: Any) -> str:
+    normalized = str(value or POLICY_MODE_OFFLINE).strip().lower()
+    if not normalized:
+        normalized = POLICY_MODE_OFFLINE
+    if normalized not in _POLICY_MODES:
+        supported = ", ".join(sorted(_POLICY_MODES))
+        raise ValueError(f"policy mode must be one of: {supported}")
+    return normalized
+
+
+def _normalize_endpoint(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _is_remote_endpoint(endpoint: str) -> bool:
+    parsed = urlparse(endpoint)
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+
+
+def _endpoint_matches_allowlist(endpoint: str, allowed_endpoints: frozenset[str]) -> bool:
+    normalized_endpoint = endpoint.strip()
+    if normalized_endpoint in allowed_endpoints:
+        return True
+
+    endpoint_lower = normalized_endpoint.lower()
+    parsed_endpoint = urlparse(normalized_endpoint)
+    endpoint_host = (parsed_endpoint.hostname or "").lower()
+    endpoint_origin = ""
+    if parsed_endpoint.scheme and parsed_endpoint.netloc:
+        endpoint_origin = f"{parsed_endpoint.scheme.lower()}://{parsed_endpoint.netloc.lower()}"
+
+    for allowed in allowed_endpoints:
+        candidate = allowed.strip()
+        if not candidate:
+            continue
+        if candidate == normalized_endpoint:
+            return True
+
+        candidate_lower = candidate.lower()
+        if candidate_lower == endpoint_lower:
+            return True
+
+        parsed_candidate = urlparse(candidate)
+        if parsed_candidate.scheme and parsed_candidate.netloc:
+            candidate_origin = f"{parsed_candidate.scheme.lower()}://{parsed_candidate.netloc.lower()}"
+            if endpoint_origin == candidate_origin:
+                return True
+            if endpoint_lower.startswith(candidate_origin.rstrip("/") + "/"):
+                return True
+            continue
+
+        if "://" not in candidate and "/" not in candidate and endpoint_host:
+            if candidate_lower.startswith("*."):
+                if endpoint_host.endswith(candidate_lower[1:]):
+                    return True
+            elif endpoint_host == candidate_lower:
+                return True
+
+    return False
+
+
+def _coerce_endpoints(raw: Any, *, field_name: str) -> set[str]:
+    if raw is None:
+        return set()
+    if not isinstance(raw, list):
+        raise ValueError(f"{field_name} must be a JSON array")
+    normalized = {
+        endpoint
+        for endpoint in (_normalize_endpoint(item) for item in raw)
+        if endpoint is not None
+    }
+    return normalized
 
 
 def _normalize_capability(value: str) -> str:
@@ -261,7 +350,10 @@ class AuditEvent:
     outcome: str
     proposal_id: str | None = None
     program_id: str | None = None
+    project_id: str | None = None
     required_capability: str | None = None
+    destination: str | None = None
+    policy_mode: str | None = None
     reason: str | None = None
     timestamp_utc: str = field(default_factory=_utc_now)
 
@@ -280,8 +372,14 @@ class AuditEvent:
             payload["proposal_id"] = self.proposal_id
         if self.program_id is not None:
             payload["program_id"] = self.program_id
+        if self.project_id is not None:
+            payload["project_id"] = self.project_id
         if self.required_capability is not None:
             payload["required_capability"] = self.required_capability
+        if self.destination is not None:
+            payload["destination"] = self.destination
+        if self.policy_mode is not None:
+            payload["policy_mode"] = self.policy_mode
         if self.reason is not None:
             payload["reason"] = self.reason
         return payload
@@ -305,6 +403,259 @@ class AuditLogger:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event.to_json(), sort_keys=True) + "\n")
+
+
+@dataclass(frozen=True)
+class EndpointPolicyRule:
+    """Single policy mode and endpoint allowlist rule."""
+
+    mode: str = POLICY_MODE_OFFLINE
+    allowed_endpoints: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mode", _normalize_policy_mode(self.mode))
+        object.__setattr__(
+            self,
+            "allowed_endpoints",
+            frozenset(
+                endpoint
+                for endpoint in (_normalize_endpoint(item) for item in self.allowed_endpoints)
+                if endpoint is not None
+            ),
+        )
+
+    @classmethod
+    def from_values(
+        cls,
+        *,
+        mode: str | None = None,
+        allowed_endpoints: set[str] | None = None,
+    ) -> "EndpointPolicyRule":
+        normalized_endpoints = {
+            endpoint
+            for endpoint in (_normalize_endpoint(item) for item in (allowed_endpoints or set()))
+            if endpoint is not None
+        }
+        return cls(
+            mode=_normalize_policy_mode(mode),
+            allowed_endpoints=frozenset(normalized_endpoints),
+        )
+
+
+@dataclass(frozen=True)
+class EndpointPolicyConfig:
+    """Default + per-project endpoint policy rules."""
+
+    default_rule: EndpointPolicyRule = field(default_factory=EndpointPolicyRule)
+    project_rules: Mapping[str, EndpointPolicyRule] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        normalized: dict[str, EndpointPolicyRule] = {}
+        for raw_project_id, rule in self.project_rules.items():
+            project_id = _normalize_project_id(raw_project_id)
+            if project_id is None:
+                continue
+            if not isinstance(rule, EndpointPolicyRule):
+                raise ValueError("project policy rules must be EndpointPolicyRule values")
+            normalized[project_id] = rule
+        object.__setattr__(self, "project_rules", dict(sorted(normalized.items())))
+
+    @classmethod
+    def from_values(
+        cls,
+        *,
+        default_mode: str | None = None,
+        default_allowed_endpoints: set[str] | None = None,
+        project_modes: Mapping[str, str] | None = None,
+        project_allowed_endpoints: Mapping[str, set[str]] | None = None,
+    ) -> "EndpointPolicyConfig":
+        default_rule = EndpointPolicyRule.from_values(
+            mode=default_mode,
+            allowed_endpoints=default_allowed_endpoints,
+        )
+
+        normalized_modes: dict[str, str] = {}
+        for raw_project_id, raw_mode in (project_modes or {}).items():
+            project_id = _normalize_project_id(raw_project_id)
+            if project_id is None:
+                continue
+            normalized_modes[project_id] = _normalize_policy_mode(raw_mode)
+
+        normalized_allowed: dict[str, set[str]] = {}
+        for raw_project_id, raw_endpoints in (project_allowed_endpoints or {}).items():
+            project_id = _normalize_project_id(raw_project_id)
+            if project_id is None:
+                continue
+            endpoints = {
+                endpoint
+                for endpoint in (_normalize_endpoint(item) for item in raw_endpoints)
+                if endpoint is not None
+            }
+            normalized_allowed[project_id] = endpoints
+
+        project_rules: dict[str, EndpointPolicyRule] = {}
+        for project_id in sorted(set(normalized_modes) | set(normalized_allowed)):
+            mode = normalized_modes.get(project_id, default_rule.mode)
+            allowed_endpoints = normalized_allowed.get(project_id, set(default_rule.allowed_endpoints))
+            project_rules[project_id] = EndpointPolicyRule.from_values(
+                mode=mode,
+                allowed_endpoints=allowed_endpoints,
+            )
+
+        return cls(default_rule=default_rule, project_rules=project_rules)
+
+    @classmethod
+    def from_json(cls, raw: Mapping[str, Any]) -> "EndpointPolicyConfig":
+        if not isinstance(raw, Mapping):
+            raise ValueError("policy config must be a JSON object")
+
+        default_mode = raw.get("default_mode")
+        default_allowed = _coerce_endpoints(raw.get("allowed_endpoints"), field_name="allowed_endpoints")
+
+        project_modes: dict[str, str] = {}
+        project_allowed_endpoints: dict[str, set[str]] = {}
+        projects_raw = raw.get("projects")
+        if projects_raw is not None:
+            if not isinstance(projects_raw, Mapping):
+                raise ValueError("policy config field 'projects' must be a JSON object")
+            for raw_project_id, raw_rule in projects_raw.items():
+                project_id = _normalize_project_id(raw_project_id)
+                if project_id is None:
+                    continue
+                if not isinstance(raw_rule, Mapping):
+                    raise ValueError(f"policy config for project '{project_id}' must be a JSON object")
+
+                if "mode" in raw_rule:
+                    project_modes[project_id] = str(raw_rule.get("mode"))
+                if "allowed_endpoints" in raw_rule:
+                    project_allowed_endpoints[project_id] = _coerce_endpoints(
+                        raw_rule.get("allowed_endpoints"),
+                        field_name=f"projects.{project_id}.allowed_endpoints",
+                    )
+
+        return cls.from_values(
+            default_mode=default_mode,
+            default_allowed_endpoints=default_allowed,
+            project_modes=project_modes,
+            project_allowed_endpoints=project_allowed_endpoints,
+        )
+
+    @classmethod
+    def from_path(cls, path: Path) -> "EndpointPolicyConfig":
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, Mapping):
+            raise ValueError("policy config file must contain a JSON object")
+        return cls.from_json(raw)
+
+    def resolve(self, *, project_id: str | None, program_id: str | None = None) -> EndpointPolicyRule:
+        resolved_project_id = _normalize_project_id(project_id)
+        if resolved_project_id is not None and resolved_project_id in self.project_rules:
+            return self.project_rules[resolved_project_id]
+
+        resolved_program_id = _normalize_program_id(program_id)
+        if resolved_program_id is not None and resolved_program_id in self.project_rules:
+            return self.project_rules[resolved_program_id]
+
+        return self.default_rule
+
+
+class EndpointPolicyEnforcer:
+    """Runtime destination enforcement for sync/read worker paths."""
+
+    def __init__(
+        self,
+        *,
+        context: AccessContext,
+        destination: str,
+        policy_config: EndpointPolicyConfig | None = None,
+        audit_logger: AuditLogger | None = None,
+    ):
+        normalized_destination = _normalize_endpoint(destination)
+        if normalized_destination is None:
+            raise ValueError("destination cannot be empty")
+        self._context = context
+        self._destination = normalized_destination
+        self._policy_config = policy_config or EndpointPolicyConfig()
+        self._audit_logger = audit_logger or AuditLogger()
+
+    def authorize_sync(
+        self,
+        *,
+        proposal_id: str,
+        project_id: str | None,
+        program_id: str | None,
+    ) -> None:
+        self._authorize(
+            action="SYNC",
+            proposal_id=proposal_id,
+            project_id=project_id,
+            program_id=program_id,
+        )
+
+    def authorize_read(
+        self,
+        *,
+        proposal_id: str,
+        project_id: str | None,
+        program_id: str | None,
+    ) -> None:
+        self._authorize(
+            action="READ",
+            proposal_id=proposal_id,
+            project_id=project_id,
+            program_id=program_id,
+        )
+
+    def _authorize(
+        self,
+        *,
+        action: str,
+        proposal_id: str,
+        project_id: str | None,
+        program_id: str | None,
+    ) -> None:
+        resolved_project_id = _normalize_project_id(project_id)
+        resolved_program_id = _normalize_program_id(program_id)
+        scope_id = resolved_project_id or resolved_program_id or "default"
+        rule = self._policy_config.resolve(
+            project_id=resolved_project_id,
+            program_id=resolved_program_id,
+        )
+
+        violation_reason: str | None = None
+        if rule.mode == POLICY_MODE_OFFLINE and _is_remote_endpoint(self._destination):
+            violation_reason = (
+                f"policy mode '{POLICY_MODE_OFFLINE}' blocks destination '{self._destination}' "
+                f"for project '{scope_id}'"
+            )
+        elif rule.mode == POLICY_MODE_ALLOWLIST and not _endpoint_matches_allowlist(
+            self._destination,
+            rule.allowed_endpoints,
+        ):
+            violation_reason = (
+                f"policy mode '{POLICY_MODE_ALLOWLIST}' blocks destination '{self._destination}' "
+                f"for project '{scope_id}': destination is not allowlisted"
+            )
+
+        if violation_reason is None:
+            return
+
+        self._audit_logger.log(
+            AuditEvent(
+                event_type="EGRESS_BLOCKED",
+                severity="WARNING",
+                principal=self._context.principal,
+                action=action,
+                outcome="DENY",
+                proposal_id=proposal_id,
+                program_id=resolved_program_id,
+                project_id=resolved_project_id,
+                destination=self._destination,
+                policy_mode=rule.mode,
+                reason=violation_reason,
+            )
+        )
+        raise AccessDeniedError(violation_reason)
 
 
 class AccessPolicy:
@@ -503,6 +854,7 @@ class ProposalArtifact:
     state: str
     receipt_id: str
     provenance_chain: tuple[Mapping[str, str], ...]
+    project_id: str | None = None
     program_id: str | None = None
     artifact: Mapping[str, Any] | None = None
     updated_at_utc: str | None = None
@@ -521,6 +873,7 @@ class ProposalArtifact:
         if not receipt_id:
             receipt_id = f"receipt:{proposal_id}"
 
+        project_id = _normalize_project_id(raw.get("project_id") or raw.get("project"))
         program_id = _normalize_program_id(raw.get("program_id"))
 
         artifact_raw = raw.get("artifact")
@@ -540,6 +893,7 @@ class ProposalArtifact:
             state=state,
             receipt_id=receipt_id,
             provenance_chain=provenance_chain,
+            project_id=project_id,
             program_id=program_id,
             artifact=artifact,
             updated_at_utc=updated_at_utc,
@@ -559,6 +913,8 @@ class ProposalArtifact:
             ],
             "provenance_head_receipt_id": self.receipt_id,
         }
+        if self.project_id is not None:
+            payload["project_id"] = self.project_id
         if self.program_id is not None:
             payload["program_id"] = self.program_id
         if self.updated_at_utc is not None:
@@ -757,10 +1113,12 @@ class CorpusSyncWorker:
         state_store: SyncStateStore,
         approved_states: set[str] | None = None,
         access_policy: AccessPolicy | None = None,
+        endpoint_policy_enforcer: EndpointPolicyEnforcer | None = None,
     ):
         self._backend = backend
         self._state_store = state_store
         self._access_policy = access_policy or AccessPolicy(context=AccessContext.system())
+        self._endpoint_policy_enforcer = endpoint_policy_enforcer
         normalized = approved_states or {"APPROVED"}
         self._approved_states = {item.strip().upper() for item in normalized if item.strip()}
         if not self._approved_states:
@@ -775,15 +1133,23 @@ class CorpusSyncWorker:
         skipped_non_approved = len(proposals) - len(approved)
 
         preflight_id = resolved_job_id
+        preflight_project_id: str | None = None
         preflight_program_id: str | None = None
         if approved:
             preflight_id = approved[0].proposal_id
+            preflight_project_id = approved[0].project_id
             preflight_program_id = approved[0].program_id
         try:
             self._access_policy.authorize_sync(
                 proposal_id=preflight_id,
                 program_id=preflight_program_id,
             )
+            if self._endpoint_policy_enforcer is not None:
+                self._endpoint_policy_enforcer.authorize_sync(
+                    proposal_id=preflight_id,
+                    project_id=preflight_project_id,
+                    program_id=preflight_program_id,
+                )
         except AccessDeniedError as exc:
             completed_at_utc = _utc_now()
             errors = (SyncError(proposal_id=preflight_id, error=str(exc)),)
@@ -818,6 +1184,12 @@ class CorpusSyncWorker:
                     proposal_id=proposal.proposal_id,
                     program_id=proposal.program_id,
                 )
+                if self._endpoint_policy_enforcer is not None:
+                    self._endpoint_policy_enforcer.authorize_sync(
+                        proposal_id=proposal.proposal_id,
+                        project_id=proposal.project_id,
+                        program_id=proposal.program_id,
+                    )
             except AccessDeniedError as exc:
                 errors.append(SyncError(proposal_id=proposal.proposal_id, error=str(exc)))
                 continue
@@ -887,6 +1259,8 @@ def read_synced_artifact(
     backend: SharedCorpusBackend,
     proposal_id: str,
     access_policy: AccessPolicy | None = None,
+    endpoint_policy_enforcer: EndpointPolicyEnforcer | None = None,
+    project_id: str | None = None,
 ) -> Mapping[str, Any] | None:
     normalized_proposal_id = str(proposal_id).strip()
     if not normalized_proposal_id:
@@ -895,10 +1269,25 @@ def read_synced_artifact(
     resolved_policy = access_policy or AccessPolicy(context=AccessContext.system())
     resolved_policy.authorize_read_capability(proposal_id=normalized_proposal_id)
 
+    if endpoint_policy_enforcer is not None:
+        endpoint_policy_enforcer.authorize_read(
+            proposal_id=normalized_proposal_id,
+            project_id=project_id,
+            program_id=None,
+        )
+
     artifact = backend.get(normalized_proposal_id)
+    artifact_project_id: str | None = None
     program_id: str | None = None
     if artifact is not None:
+        artifact_project_id = _normalize_project_id(artifact.get("project_id"))
         program_id = _normalize_program_id(artifact.get("program_id"))
+        if endpoint_policy_enforcer is not None:
+            endpoint_policy_enforcer.authorize_read(
+                proposal_id=normalized_proposal_id,
+                project_id=artifact_project_id or project_id,
+                program_id=program_id,
+            )
 
     resolved_policy.authorize_read_scope(
         proposal_id=normalized_proposal_id,
@@ -949,6 +1338,15 @@ def read_synced_artifact(
     return dict(artifact)
 
 
+def _resolve_backend_destination(backend_store_path: Path, backend_endpoint: str | None) -> str:
+    if backend_endpoint is not None:
+        normalized = _normalize_endpoint(backend_endpoint)
+        if normalized is None:
+            raise ValueError("backend endpoint cannot be empty")
+        return normalized
+    return backend_store_path.expanduser().resolve().as_uri()
+
+
 def run_sync_job(
     *,
     local_store_path: Path,
@@ -959,19 +1357,30 @@ def run_sync_job(
     job_id: str | None = None,
     access_context: AccessContext | None = None,
     audit_path: Path | None = None,
+    policy_config: EndpointPolicyConfig | None = None,
+    backend_endpoint: str | None = None,
 ) -> SyncTelemetry:
     proposals = load_local_proposals(local_store_path)
     backend = JsonFileCorpusBackend(backend_store_path)
     state_store = SyncStateStore(state_path)
+    resolved_context = access_context or AccessContext.system()
+    audit_logger = AuditLogger(audit_path)
     access_policy = AccessPolicy(
-        context=access_context or AccessContext.system(),
-        audit_logger=AuditLogger(audit_path),
+        context=resolved_context,
+        audit_logger=audit_logger,
+    )
+    endpoint_policy_enforcer = EndpointPolicyEnforcer(
+        context=resolved_context,
+        destination=_resolve_backend_destination(backend_store_path, backend_endpoint),
+        policy_config=policy_config,
+        audit_logger=audit_logger,
     )
     worker = CorpusSyncWorker(
         backend=backend,
         state_store=state_store,
         approved_states=approved_states,
         access_policy=access_policy,
+        endpoint_policy_enforcer=endpoint_policy_enforcer,
     )
     telemetry = worker.sync(proposals, job_id=job_id)
     append_sync_telemetry(telemetry_path, telemetry)
@@ -984,16 +1393,29 @@ def run_read_job(
     proposal_id: str,
     access_context: AccessContext | None = None,
     audit_path: Path | None = None,
+    project_id: str | None = None,
+    policy_config: EndpointPolicyConfig | None = None,
+    backend_endpoint: str | None = None,
 ) -> Mapping[str, Any] | None:
     backend = JsonFileCorpusBackend(backend_store_path)
+    resolved_context = access_context or AccessContext.system()
+    audit_logger = AuditLogger(audit_path)
     access_policy = AccessPolicy(
-        context=access_context or AccessContext.system(),
-        audit_logger=AuditLogger(audit_path),
+        context=resolved_context,
+        audit_logger=audit_logger,
+    )
+    endpoint_policy_enforcer = EndpointPolicyEnforcer(
+        context=resolved_context,
+        destination=_resolve_backend_destination(backend_store_path, backend_endpoint),
+        policy_config=policy_config,
+        audit_logger=audit_logger,
     )
     return read_synced_artifact(
         backend=backend,
         proposal_id=proposal_id,
         access_policy=access_policy,
+        endpoint_policy_enforcer=endpoint_policy_enforcer,
+        project_id=project_id,
     )
 
 
@@ -1044,6 +1466,34 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional allowlist of program_id values. Repeatable.",
     )
+    parser.add_argument(
+        "--policy-config",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSON policy config path with default_mode/allowed_endpoints and "
+            "per-project overrides."
+        ),
+    )
+    parser.add_argument(
+        "--policy-mode",
+        type=str,
+        default=None,
+        choices=sorted(_POLICY_MODES),
+        help="Optional default policy mode override: offline, allowlist, or cloud.",
+    )
+    parser.add_argument(
+        "--allow-endpoint",
+        action="append",
+        default=None,
+        help="Optional default endpoint allowlist entries. Repeatable.",
+    )
+    parser.add_argument(
+        "--backend-endpoint",
+        type=str,
+        default=None,
+        help="Optional explicit destination endpoint used for policy enforcement.",
+    )
     return parser
 
 
@@ -1061,6 +1511,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.allow_program_id is not None:
         allowed_program_ids = {str(item) for item in args.allow_program_id if str(item).strip()}
 
+    policy_config = EndpointPolicyConfig()
+    if args.policy_config is not None:
+        policy_config = EndpointPolicyConfig.from_path(args.policy_config)
+
+    if args.policy_mode is not None or args.allow_endpoint is not None:
+        default_mode = args.policy_mode or policy_config.default_rule.mode
+        if args.allow_endpoint is None:
+            default_allowed_endpoints = set(policy_config.default_rule.allowed_endpoints)
+        else:
+            default_allowed_endpoints = {
+                endpoint
+                for endpoint in (_normalize_endpoint(item) for item in args.allow_endpoint)
+                if endpoint is not None
+            }
+        policy_config = EndpointPolicyConfig(
+            default_rule=EndpointPolicyRule.from_values(
+                mode=default_mode,
+                allowed_endpoints=default_allowed_endpoints,
+            ),
+            project_rules=policy_config.project_rules,
+        )
+
     access_context = AccessContext.from_values(
         principal=args.principal,
         capabilities=capabilities,
@@ -1076,6 +1548,8 @@ def main(argv: list[str] | None = None) -> int:
         job_id=args.job_id,
         access_context=access_context,
         audit_path=args.audit_path,
+        policy_config=policy_config,
+        backend_endpoint=args.backend_endpoint,
     )
     print(json.dumps(telemetry.to_json(), indent=2, sort_keys=True))
     return 0 if telemetry.error_count == 0 else 1

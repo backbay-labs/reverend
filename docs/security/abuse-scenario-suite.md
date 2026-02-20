@@ -179,6 +179,11 @@ confirmation dialog.
 informed analyst consent. T3-T4 data is blocked from cloud APIs by policy,
 reducing risk to LOW for sensitive content.
 
+**Implementation note (SEC-417, 2026-02-20)**: `scripts/ml/corpus_sync_worker.py`
+now enforces per-project `offline` / `allowlist` / `cloud` policy modes in both
+sync and read runtime paths. Non-allowlisted destinations emit deterministic
+`EGRESS_BLOCKED` audit events and the worker denies the operation.
+
 ---
 
 ## Scenario 4: Supply Chain Attack via Malicious Plugin
