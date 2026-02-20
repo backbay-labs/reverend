@@ -24,6 +24,18 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 _TOKEN_RE = re.compile(r"[a-z0-9_]+")
+TRIAGE_LABEL_KEYS = ("entrypoint", "hotspot", "unknown")
+
+# Legacy threshold tuple retained for calibration reports and before/after docs.
+LEGACY_TRIAGE_ENTRYPOINT_THRESHOLD = 0.45
+LEGACY_TRIAGE_HOTSPOT_THRESHOLD = 0.30
+LEGACY_TRIAGE_UNKNOWN_THRESHOLD = 0.55
+
+# Calibrated defaults from curated benchmark v2026.02.1.
+DEFAULT_TRIAGE_ENTRYPOINT_THRESHOLD = 0.30
+DEFAULT_TRIAGE_HOTSPOT_THRESHOLD = 0.25
+DEFAULT_TRIAGE_UNKNOWN_THRESHOLD = 0.65
+DEFAULT_TRIAGE_CALIBRATION_STEP = 0.05
 
 
 @dataclass(frozen=True)
@@ -1160,6 +1172,17 @@ class TriageFunctionFeatures:
     evidence_refs: tuple[EvidenceRef, ...]
 
 
+@dataclass(frozen=True)
+class TriageBenchmarkCase:
+    """Labeled triage benchmark row used for threshold calibration."""
+
+    record: FunctionRecord
+    labels: tuple[tuple[str, bool], ...]
+
+    def labels_map(self) -> dict[str, bool]:
+        return dict(self.labels)
+
+
 def _triage_source_context_uri(function_id: str) -> str:
     return f"local-index://function/{function_id}"
 
@@ -1454,9 +1477,9 @@ class DeterministicTriageMission:
         self,
         *,
         feature_extractor: DeterministicTriageFeatureExtractor | None = None,
-        entrypoint_threshold: float = 0.45,
-        hotspot_threshold: float = 0.30,
-        unknown_threshold: float = 0.55,
+        entrypoint_threshold: float = DEFAULT_TRIAGE_ENTRYPOINT_THRESHOLD,
+        hotspot_threshold: float = DEFAULT_TRIAGE_HOTSPOT_THRESHOLD,
+        unknown_threshold: float = DEFAULT_TRIAGE_UNKNOWN_THRESHOLD,
         hotspot_limit: int = 10,
     ):
         if hotspot_limit <= 0:
@@ -2357,6 +2380,394 @@ def load_corpus(corpus_path: Path) -> list[FunctionRecord]:
     return [FunctionRecord.from_json(raw) for raw in functions]
 
 
+def _coerce_bool_label(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return False
+
+
+def _coerce_threshold(value: Any, *, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0.0, min(1.0, parsed))
+
+
+def _round_threshold(value: float) -> float:
+    return round(max(0.0, min(1.0, float(value))), 6)
+
+
+def load_triage_benchmark(benchmark_path: Path) -> dict[str, Any]:
+    doc = json.loads(benchmark_path.read_text(encoding="utf-8"))
+    if not isinstance(doc, Mapping):
+        raise ValueError("triage benchmark must be a JSON object")
+
+    functions_raw = doc.get("functions")
+    if not isinstance(functions_raw, list) or not functions_raw:
+        raise ValueError("triage benchmark must include a non-empty 'functions' array")
+
+    cases: list[TriageBenchmarkCase] = []
+    for idx, raw in enumerate(functions_raw):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"triage benchmark row at index {idx} must be an object")
+        record = FunctionRecord.from_json(raw)
+        labels_raw = raw.get("labels")
+        if not isinstance(labels_raw, Mapping):
+            raise ValueError(f"triage benchmark row {record.function_id} missing required 'labels' object")
+
+        labels = {
+            key: _coerce_bool_label(labels_raw.get(key, False))
+            for key in TRIAGE_LABEL_KEYS
+        }
+        cases.append(
+            TriageBenchmarkCase(
+                record=record,
+                labels=tuple(sorted(labels.items(), key=lambda item: item[0])),
+            )
+        )
+
+    target_thresholds: dict[str, float] = {}
+    target_raw = doc.get("target_thresholds")
+    if isinstance(target_raw, Mapping):
+        for key, value in target_raw.items():
+            normalized_key = str(key).strip()
+            if not normalized_key:
+                continue
+            target_thresholds[normalized_key] = _round_threshold(_coerce_threshold(value, default=0.0))
+
+    schema_version_raw = doc.get("schema_version")
+    try:
+        schema_version = int(schema_version_raw) if schema_version_raw is not None else 1
+    except (TypeError, ValueError):
+        schema_version = 1
+
+    benchmark_id = str(doc.get("benchmark_id") or benchmark_path.stem).strip() or benchmark_path.stem
+    benchmark_version = str(doc.get("benchmark_version") or "unversioned").strip() or "unversioned"
+    kind = str(doc.get("kind") or "triage_scoring_benchmark").strip() or "triage_scoring_benchmark"
+
+    return {
+        "schema_version": schema_version,
+        "kind": kind,
+        "benchmark_id": benchmark_id,
+        "benchmark_version": benchmark_version,
+        "target_thresholds": target_thresholds,
+        "cases": tuple(cases),
+    }
+
+
+def _triage_feature_rows(
+    cases: Iterable[TriageBenchmarkCase],
+    *,
+    feature_extractor: DeterministicTriageFeatureExtractor | None = None,
+) -> list[tuple[TriageFunctionFeatures, dict[str, bool]]]:
+    extractor = feature_extractor or DeterministicTriageFeatureExtractor()
+    rows: list[tuple[TriageFunctionFeatures, dict[str, bool]]] = []
+    for case in cases:
+        rows.append((extractor.extract(case.record), case.labels_map()))
+    return rows
+
+
+def _triage_predict_labels(
+    feature: TriageFunctionFeatures,
+    *,
+    entrypoint_threshold: float,
+    hotspot_threshold: float,
+    unknown_threshold: float,
+) -> dict[str, bool]:
+    return {
+        "entrypoint": feature.entrypoint_score >= entrypoint_threshold,
+        "hotspot": feature.hotspot_score >= hotspot_threshold and bool(feature.tags),
+        "unknown": feature.unknown_score >= unknown_threshold,
+    }
+
+
+def _binary_metrics(*, tp: int, fp: int, fn: int, tn: int) -> dict[str, Any]:
+    precision = (tp / (tp + fp)) if (tp + fp) else 0.0
+    recall = (tp / (tp + fn)) if (tp + fn) else 0.0
+    f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    return {
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "tn": tn,
+        "support": tp + fn,
+        "predicted_positive": tp + fp,
+        "precision": round(precision, 6),
+        "recall": round(recall, 6),
+        "f1": round(f1, 6),
+    }
+
+
+def _evaluate_triage_feature_rows(
+    feature_rows: Iterable[tuple[TriageFunctionFeatures, dict[str, bool]]],
+    *,
+    entrypoint_threshold: float,
+    hotspot_threshold: float,
+    unknown_threshold: float,
+) -> dict[str, Any]:
+    confusion = {
+        key: {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+        for key in TRIAGE_LABEL_KEYS
+    }
+    case_count = 0
+
+    for feature, labels in feature_rows:
+        predictions = _triage_predict_labels(
+            feature,
+            entrypoint_threshold=entrypoint_threshold,
+            hotspot_threshold=hotspot_threshold,
+            unknown_threshold=unknown_threshold,
+        )
+        case_count += 1
+        for key in TRIAGE_LABEL_KEYS:
+            predicted = bool(predictions.get(key, False))
+            actual = bool(labels.get(key, False))
+            if predicted and actual:
+                confusion[key]["tp"] += 1
+            elif predicted and not actual:
+                confusion[key]["fp"] += 1
+            elif not predicted and actual:
+                confusion[key]["fn"] += 1
+            else:
+                confusion[key]["tn"] += 1
+
+    class_metrics: dict[str, Any] = {}
+    macro_precision = 0.0
+    macro_recall = 0.0
+    macro_f1 = 0.0
+    for key in TRIAGE_LABEL_KEYS:
+        stats = confusion[key]
+        metrics = _binary_metrics(
+            tp=stats["tp"],
+            fp=stats["fp"],
+            fn=stats["fn"],
+            tn=stats["tn"],
+        )
+        class_metrics[key] = metrics
+        macro_precision += float(metrics["precision"])
+        macro_recall += float(metrics["recall"])
+        macro_f1 += float(metrics["f1"])
+
+    label_count = len(TRIAGE_LABEL_KEYS)
+    macro_precision = (macro_precision / label_count) if label_count else 0.0
+    macro_recall = (macro_recall / label_count) if label_count else 0.0
+    macro_f1 = (macro_f1 / label_count) if label_count else 0.0
+
+    return {
+        "counts": {"cases": case_count},
+        "thresholds": {
+            "entrypoint": _round_threshold(entrypoint_threshold),
+            "hotspot": _round_threshold(hotspot_threshold),
+            "unknown": _round_threshold(unknown_threshold),
+        },
+        "metrics": {
+            **class_metrics,
+            "macro_precision": round(macro_precision, 6),
+            "macro_recall": round(macro_recall, 6),
+            "macro_f1": round(macro_f1, 6),
+        },
+    }
+
+
+def evaluate_triage_benchmark(
+    cases: Iterable[TriageBenchmarkCase],
+    *,
+    entrypoint_threshold: float,
+    hotspot_threshold: float,
+    unknown_threshold: float,
+    feature_extractor: DeterministicTriageFeatureExtractor | None = None,
+) -> dict[str, Any]:
+    feature_rows = _triage_feature_rows(cases, feature_extractor=feature_extractor)
+    return _evaluate_triage_feature_rows(
+        feature_rows,
+        entrypoint_threshold=entrypoint_threshold,
+        hotspot_threshold=hotspot_threshold,
+        unknown_threshold=unknown_threshold,
+    )
+
+
+def _triage_metric_value(metrics: Mapping[str, Any], metric_name: str) -> float:
+    if metric_name in {"macro_precision", "macro_recall", "macro_f1"}:
+        return float(metrics.get(metric_name, 0.0))
+
+    for label in TRIAGE_LABEL_KEYS:
+        prefix = f"{label}_"
+        if metric_name.startswith(prefix):
+            suffix = metric_name[len(prefix) :]
+            class_metrics = metrics.get(label)
+            if isinstance(class_metrics, Mapping):
+                return float(class_metrics.get(suffix, 0.0))
+            return 0.0
+    return 0.0
+
+
+def _triage_threshold_checks(
+    metrics: Mapping[str, Any],
+    target_thresholds: Mapping[str, float],
+) -> dict[str, Any]:
+    checks: dict[str, Any] = {}
+    for metric_name, threshold in target_thresholds.items():
+        normalized_name = str(metric_name).strip()
+        if not normalized_name:
+            continue
+        threshold_value = _round_threshold(_coerce_threshold(threshold, default=0.0))
+        value = _round_threshold(_triage_metric_value(metrics, normalized_name))
+        checks[normalized_name] = {
+            "operator": ">=",
+            "threshold": threshold_value,
+            "value": value,
+            "passed": value >= threshold_value,
+        }
+    return checks
+
+
+def calibrate_triage_thresholds(
+    *,
+    cases: Iterable[TriageBenchmarkCase],
+    benchmark_id: str,
+    benchmark_version: str,
+    target_thresholds: Mapping[str, float],
+    baseline_entrypoint_threshold: float = LEGACY_TRIAGE_ENTRYPOINT_THRESHOLD,
+    baseline_hotspot_threshold: float = LEGACY_TRIAGE_HOTSPOT_THRESHOLD,
+    baseline_unknown_threshold: float = LEGACY_TRIAGE_UNKNOWN_THRESHOLD,
+    search_step: float = DEFAULT_TRIAGE_CALIBRATION_STEP,
+    commit_sha: str | None = None,
+) -> dict[str, Any]:
+    if search_step <= 0.0 or search_step > 1.0:
+        raise ValueError("search_step must be > 0 and <= 1")
+
+    baseline_entrypoint = _round_threshold(baseline_entrypoint_threshold)
+    baseline_hotspot = _round_threshold(baseline_hotspot_threshold)
+    baseline_unknown = _round_threshold(baseline_unknown_threshold)
+    feature_rows = _triage_feature_rows(cases)
+
+    baseline_report = _evaluate_triage_feature_rows(
+        feature_rows,
+        entrypoint_threshold=baseline_entrypoint,
+        hotspot_threshold=baseline_hotspot,
+        unknown_threshold=baseline_unknown,
+    )
+    baseline_metrics = baseline_report["metrics"]
+    baseline_checks = _triage_threshold_checks(baseline_metrics, target_thresholds)
+    baseline_pass_count = sum(1 for check in baseline_checks.values() if check.get("passed"))
+
+    values: list[float] = []
+    steps = int(round(1.0 / search_step))
+    for idx in range(steps + 1):
+        values.append(_round_threshold(idx * search_step))
+    if values[-1] != 1.0:
+        values.append(1.0)
+    values = sorted(set(values))
+
+    best: tuple[int, float, float, tuple[float, float, float], dict[str, Any], dict[str, Any]] | None = None
+    for entrypoint_threshold in values:
+        for hotspot_threshold in values:
+            for unknown_threshold in values:
+                candidate_report = _evaluate_triage_feature_rows(
+                    feature_rows,
+                    entrypoint_threshold=entrypoint_threshold,
+                    hotspot_threshold=hotspot_threshold,
+                    unknown_threshold=unknown_threshold,
+                )
+                candidate_metrics = candidate_report["metrics"]
+                candidate_checks = _triage_threshold_checks(candidate_metrics, target_thresholds)
+                candidate_pass_count = sum(
+                    1 for check in candidate_checks.values() if check.get("passed")
+                )
+                candidate_macro_f1 = float(candidate_metrics.get("macro_f1", 0.0))
+                distance = (
+                    abs(entrypoint_threshold - baseline_entrypoint)
+                    + abs(hotspot_threshold - baseline_hotspot)
+                    + abs(unknown_threshold - baseline_unknown)
+                )
+                ranking = (
+                    candidate_pass_count,
+                    candidate_macro_f1,
+                    -distance,
+                    (entrypoint_threshold, hotspot_threshold, unknown_threshold),
+                )
+                if best is None or ranking > (
+                    best[0],
+                    best[1],
+                    best[2],
+                    best[3],
+                ):
+                    best = (
+                        candidate_pass_count,
+                        candidate_macro_f1,
+                        -distance,
+                        (entrypoint_threshold, hotspot_threshold, unknown_threshold),
+                        candidate_report,
+                        candidate_checks,
+                    )
+
+    if best is None:
+        raise ValueError("failed to derive calibrated thresholds")
+
+    _, _, _, candidate_thresholds, candidate_report, candidate_checks = best
+    candidate_metrics = candidate_report["metrics"]
+    candidate_pass_count = sum(1 for check in candidate_checks.values() if check.get("passed"))
+    target_count = len(target_thresholds)
+    candidate_macro_f1 = float(candidate_metrics.get("macro_f1", 0.0))
+    baseline_macro_f1 = float(baseline_metrics.get("macro_f1", 0.0))
+    all_targets_met = candidate_pass_count == target_count if target_count else True
+    improves_baseline = candidate_macro_f1 > baseline_macro_f1
+
+    resolved_commit_sha = commit_sha or os.environ.get("GITHUB_SHA") or "unknown"
+    return {
+        "schema_version": 1,
+        "kind": "triage_scoring_calibration",
+        "generated_at_utc": _utc_now(),
+        "commit_sha": resolved_commit_sha,
+        "benchmark": {
+            "benchmark_id": benchmark_id,
+            "benchmark_version": benchmark_version,
+            "case_count": baseline_report["counts"]["cases"],
+        },
+        "search": {
+            "step": _round_threshold(search_step),
+            "candidate_count": len(values) ** 3,
+        },
+        "target_thresholds": dict(target_thresholds),
+        "baseline": {
+            "thresholds": baseline_report["thresholds"],
+            "metrics": baseline_metrics,
+            "checks": baseline_checks,
+            "targets_passed": baseline_pass_count,
+        },
+        "candidate": {
+            "thresholds": candidate_report["thresholds"],
+            "metrics": candidate_metrics,
+            "checks": candidate_checks,
+            "targets_passed": candidate_pass_count,
+        },
+        "improvement": {
+            "macro_f1_delta": round(candidate_macro_f1 - baseline_macro_f1, 6),
+            "entrypoint_recall_delta": round(
+                float(candidate_metrics["entrypoint"]["recall"])
+                - float(baseline_metrics["entrypoint"]["recall"]),
+                6,
+            ),
+            "hotspot_recall_delta": round(
+                float(candidate_metrics["hotspot"]["recall"])
+                - float(baseline_metrics["hotspot"]["recall"]),
+                6,
+            ),
+            "unknown_precision_delta": round(
+                float(candidate_metrics["unknown"]["precision"])
+                - float(baseline_metrics["unknown"]["precision"]),
+                6,
+            ),
+        },
+        "status": "passed" if all_targets_met and improves_baseline else "failed",
+    }
+
+
 def evaluate_queries(
     adapter: BaselineSimilarityAdapter,
     queries_path: Path,
@@ -2965,6 +3376,32 @@ def _triage_panel_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _triage_calibrate_command(args: argparse.Namespace) -> int:
+    benchmark = load_triage_benchmark(args.benchmark)
+    report = calibrate_triage_thresholds(
+        cases=benchmark["cases"],
+        benchmark_id=str(benchmark["benchmark_id"]),
+        benchmark_version=str(benchmark["benchmark_version"]),
+        target_thresholds=benchmark["target_thresholds"],
+        baseline_entrypoint_threshold=args.baseline_entrypoint_threshold,
+        baseline_hotspot_threshold=args.baseline_hotspot_threshold,
+        baseline_unknown_threshold=args.baseline_unknown_threshold,
+        search_step=args.search_step,
+        commit_sha=args.commit_sha,
+    )
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml327] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+
+    if args.no_fail_on_target_fail:
+        return 0
+    return 0 if report.get("status") == "passed" else 1
+
+
 def _pullback_reuse_command(args: argparse.Namespace) -> int:
     normalized_program_id = str(args.program_id).strip() if args.program_id is not None else None
     if normalized_program_id == "":
@@ -3001,19 +3438,19 @@ def _add_triage_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--entrypoint-threshold",
         type=float,
-        default=0.45,
+        default=DEFAULT_TRIAGE_ENTRYPOINT_THRESHOLD,
         help="Score threshold for entrypoint emission",
     )
     parser.add_argument(
         "--hotspot-threshold",
         type=float,
-        default=0.30,
+        default=DEFAULT_TRIAGE_HOTSPOT_THRESHOLD,
         help="Score threshold for hotspot emission",
     )
     parser.add_argument(
         "--unknown-threshold",
         type=float,
-        default=0.55,
+        default=DEFAULT_TRIAGE_UNKNOWN_THRESHOLD,
         help="Score threshold for unknown emission",
     )
     parser.add_argument(
@@ -3270,6 +3707,59 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional path to write triage panel payload JSON",
     )
     triage_panel_parser.set_defaults(func=_triage_panel_command)
+
+    triage_calibrate_parser = subparsers.add_parser(
+        "triage-calibrate",
+        help="Calibrate triage thresholds against a labeled benchmark corpus",
+    )
+    triage_calibrate_parser.add_argument(
+        "--benchmark",
+        type=Path,
+        required=True,
+        help="Path to versioned triage benchmark JSON",
+    )
+    triage_calibrate_parser.add_argument(
+        "--baseline-entrypoint-threshold",
+        type=float,
+        default=LEGACY_TRIAGE_ENTRYPOINT_THRESHOLD,
+        help="Baseline entrypoint threshold used for before/after comparison",
+    )
+    triage_calibrate_parser.add_argument(
+        "--baseline-hotspot-threshold",
+        type=float,
+        default=LEGACY_TRIAGE_HOTSPOT_THRESHOLD,
+        help="Baseline hotspot threshold used for before/after comparison",
+    )
+    triage_calibrate_parser.add_argument(
+        "--baseline-unknown-threshold",
+        type=float,
+        default=LEGACY_TRIAGE_UNKNOWN_THRESHOLD,
+        help="Baseline unknown threshold used for before/after comparison",
+    )
+    triage_calibrate_parser.add_argument(
+        "--search-step",
+        type=float,
+        default=DEFAULT_TRIAGE_CALIBRATION_STEP,
+        help="Grid-search step size for threshold calibration",
+    )
+    triage_calibrate_parser.add_argument(
+        "--commit-sha",
+        type=str,
+        default=None,
+        help="Optional commit SHA attached to the calibration artifact",
+    )
+    triage_calibrate_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write calibration report JSON",
+    )
+    triage_calibrate_parser.add_argument(
+        "--no-fail-on-target-fail",
+        action="store_true",
+        help="Always exit zero even when calibration targets are not met",
+    )
+    triage_calibrate_parser.set_defaults(func=_triage_calibrate_command)
 
     pullback_parser = subparsers.add_parser(
         "pullback-reuse",

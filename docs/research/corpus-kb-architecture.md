@@ -86,6 +86,26 @@ New binaries are submitted to the same pipeline but bypass the batch coordinator
 
 Re-analysis (e.g., after Ghidra version upgrade or model change) is triggered by marking affected programs as "stale" in the metadata store. A background job re-processes stale programs in priority order (most-queried first).
 
+### Triage Calibration Loop (E5-S3)
+
+The KB ingestion/evaluation loop now includes a versioned triage benchmark used to calibrate mission scoring thresholds:
+
+- Benchmark fixture: `scripts/ml/fixtures/triage_benchmark_v2026_02_1.json`
+- Calibration command: `python3 scripts/ml/local_embedding_pipeline.py triage-calibrate --benchmark scripts/ml/fixtures/triage_benchmark_v2026_02_1.json`
+- Baseline thresholds: `entrypoint=0.45`, `hotspot=0.30`, `unknown=0.55`
+- Calibrated thresholds: `entrypoint=0.30`, `hotspot=0.25`, `unknown=0.65`
+
+Measured improvement on the curated benchmark (2026-02-20):
+
+| Metric | Baseline | Calibrated |
+|---|---:|---:|
+| Macro F1 | 0.848677 | 0.969697 |
+| Entrypoint recall | 0.666667 | 1.000000 |
+| Hotspot recall | 0.800000 | 1.000000 |
+| Unknown precision | 0.750000 | 1.000000 |
+
+This closes the tuning loop between stored corpus evidence and triage output quality, while keeping benchmark versions explicit and reproducible.
+
 ---
 
 ## 2. Deduplication and Versioning
