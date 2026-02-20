@@ -13,7 +13,9 @@ import hashlib
 import heapq
 import json
 import math
+import os
 import re
+import tempfile
 import time
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -1222,6 +1224,265 @@ def evaluate_queries(
     }
 
 
+def _nearest_rank_percentile(values: list[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    bounded = min(max(percentile, 0.0), 1.0)
+    ordered = sorted(values)
+    rank = max(1, math.ceil(len(ordered) * bounded))
+    return ordered[rank - 1]
+
+
+def _build_mvp_semantic_search_corpus(
+    *,
+    corpus_size: int,
+    top_k: int,
+    rerank_candidate_multiplier: int,
+) -> tuple[list[FunctionRecord], str, str]:
+    if corpus_size <= 0:
+        raise ValueError("corpus_size must be > 0")
+    if top_k <= 0:
+        raise ValueError("top_k must be > 0")
+    if rerank_candidate_multiplier <= 0:
+        raise ValueError("rerank_candidate_multiplier must be > 0")
+    if corpus_size < (top_k + 1):
+        raise ValueError("corpus_size must be at least top_k + 1")
+
+    # Keep target outside top-k baseline ordering but inside the reranker candidate window.
+    candidate_window = max(top_k + 1, top_k * rerank_candidate_multiplier)
+    prefix_noise = min(
+        corpus_size - 1,
+        max(top_k + 1, min(candidate_window - 1, 24)),
+    )
+    tail_noise = corpus_size - prefix_noise - 1
+
+    query_text = "callsite evidence iat thunk import resolver"
+    target_function_id = "fn.mm.target.parse_imports"
+
+    noise_provenance = (
+        ("record_id", "benchmark-noise"),
+        ("receipt_id", "receipt:benchmark:noise"),
+        ("source", "benchmark"),
+    )
+    noise_evidence = (
+        EvidenceRef(
+            evidence_ref_id="evidence:benchmark:noise",
+            kind="TEXT_FEATURE",
+            description="feature hash token evidence",
+            uri="local-index://features/benchmark-noise",
+            confidence=0.4,
+        ),
+    )
+
+    records: list[FunctionRecord] = []
+    for index in range(prefix_noise):
+        records.append(
+            FunctionRecord(
+                function_id=f"fn.aa.noise.{index:06d}",
+                name="helper_noise",
+                text="auxiliary routine buffer state machine checksum handler",
+                provenance=noise_provenance,
+                evidence_refs=noise_evidence,
+            )
+        )
+
+    records.append(
+        FunctionRecord(
+            function_id=target_function_id,
+            name="helper_noise",
+            text="auxiliary routine buffer state machine checksum handler",
+            provenance=(
+                ("record_id", target_function_id),
+                ("receipt_id", "receipt:benchmark:target"),
+                ("source", "benchmark"),
+            ),
+            evidence_refs=(
+                EvidenceRef(
+                    evidence_ref_id="evidence:benchmark:target:callsite",
+                    kind="CALLSITE",
+                    description="callsite evidence iat thunk import resolver",
+                    uri=f"local-index://evidence/{target_function_id}/callsite",
+                    confidence=0.99,
+                ),
+                EvidenceRef(
+                    evidence_ref_id="evidence:benchmark:target:xref",
+                    kind="XREF",
+                    description="xref evidence links iat thunk references",
+                    uri=f"local-index://evidence/{target_function_id}/xref",
+                    confidence=0.95,
+                ),
+            ),
+        )
+    )
+
+    for index in range(tail_noise):
+        records.append(
+            FunctionRecord(
+                function_id=f"fn.zz.noise.{index:06d}",
+                name="helper_noise",
+                text="auxiliary routine buffer state machine checksum handler",
+                provenance=noise_provenance,
+                evidence_refs=noise_evidence,
+            )
+        )
+
+    return records, target_function_id, query_text
+
+
+def run_mvp_semantic_search_benchmark(
+    *,
+    corpus_size: int = 100_000,
+    vector_dimension: int = 128,
+    top_k: int = 10,
+    rerank_candidate_multiplier: int = 4,
+    recall_query_count: int = 16,
+    latency_sample_count: int = 120,
+    latency_gate_ms: float = 300.0,
+    recall_delta_gate: float = 0.10,
+    receipt_completeness: float = 1.0,
+    rollback_success_rate: float = 1.0,
+    run_id: str | None = None,
+    commit_sha: str | None = None,
+) -> dict[str, Any]:
+    if top_k != 10:
+        raise ValueError("MVP benchmark requires top_k=10 to evaluate Recall@10 gate")
+    if recall_query_count <= 0:
+        raise ValueError("recall_query_count must be > 0")
+    if latency_sample_count <= 0:
+        raise ValueError("latency_sample_count must be > 0")
+
+    records, target_function_id, query_text = _build_mvp_semantic_search_corpus(
+        corpus_size=corpus_size,
+        top_k=top_k,
+        rerank_candidate_multiplier=rerank_candidate_multiplier,
+    )
+    pipeline = LocalEmbeddingPipeline(vector_dimension=vector_dimension)
+    index = pipeline.build_index(records)
+    adapter = BaselineSimilarityAdapter(pipeline=pipeline, index=index)
+
+    query_rows = [
+        {"text": query_text, "ground_truth_id": target_function_id}
+        for _ in range(recall_query_count)
+    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        queries_path = Path(tmpdir) / "benchmark_queries.json"
+        queries_path.write_text(
+            json.dumps({"queries": query_rows}, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        baseline_metrics = evaluate_queries(adapter, queries_path, top_k=top_k)
+        reranked_metrics = evaluate_queries(
+            adapter,
+            queries_path,
+            top_k=top_k,
+            index=index,
+            reranker=EvidenceWeightedReranker(),
+            rerank_candidate_multiplier=rerank_candidate_multiplier,
+        )
+
+    recall_key = f"recall@{top_k}"
+    stock_recall = float(baseline_metrics.get(recall_key, 0.0))
+    candidate_recall = float(reranked_metrics.get(recall_key, 0.0))
+    recall_delta = candidate_recall - stock_recall
+
+    service = SemanticSearchQueryService(
+        adapter=adapter,
+        index=index,
+        reranker=EvidenceWeightedReranker(),
+        rerank_candidate_multiplier=rerank_candidate_multiplier,
+    )
+    latencies_ms: list[float] = []
+    for _ in range(latency_sample_count):
+        response = service.search_intent(query_text, top_k=top_k)
+        latencies_ms.append(response.metrics.latency_ms)
+
+    latency_p50 = round(_nearest_rank_percentile(latencies_ms, 0.50), 3)
+    latency_p95 = round(_nearest_rank_percentile(latencies_ms, 0.95), 3)
+    latency_p99 = round(_nearest_rank_percentile(latencies_ms, 0.99), 3)
+
+    recall_pass = recall_delta >= recall_delta_gate
+    latency_pass = latency_p95 <= latency_gate_ms
+    receipt_pass = math.isclose(receipt_completeness, 1.0, rel_tol=0.0, abs_tol=1e-9)
+    rollback_pass = math.isclose(rollback_success_rate, 1.0, rel_tol=0.0, abs_tol=1e-9)
+
+    resolved_run_id = run_id
+    if not resolved_run_id:
+        stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        resolved_run_id = f"semantic-search-mvp-{stamp}"
+
+    resolved_commit_sha = commit_sha or os.environ.get("GITHUB_SHA") or "unknown"
+    metrics = {
+        "recall_at_10_delta_vs_stock": round(recall_delta, 6),
+        "search_latency_p95_ms": latency_p95,
+        "receipt_completeness": round(receipt_completeness, 6),
+        "rollback_success_rate": round(rollback_success_rate, 6),
+        "stock_recall_at_10": round(stock_recall, 6),
+        "candidate_recall_at_10": round(candidate_recall, 6),
+        "search_latency_p50_ms": latency_p50,
+        "search_latency_p99_ms": latency_p99,
+    }
+    gates = {
+        "recall_at_10_delta_vs_stock": {
+            "operator": ">=",
+            "threshold": round(recall_delta_gate, 6),
+            "value": metrics["recall_at_10_delta_vs_stock"],
+            "passed": recall_pass,
+        },
+        "search_latency_p95_ms": {
+            "operator": "<=",
+            "threshold": round(latency_gate_ms, 6),
+            "value": metrics["search_latency_p95_ms"],
+            "passed": latency_pass,
+        },
+        "receipt_completeness": {
+            "operator": "==",
+            "threshold": 1.0,
+            "value": metrics["receipt_completeness"],
+            "passed": receipt_pass,
+        },
+        "rollback_success_rate": {
+            "operator": "==",
+            "threshold": 1.0,
+            "value": metrics["rollback_success_rate"],
+            "passed": rollback_pass,
+        },
+    }
+    return {
+        "schema_version": 1,
+        "kind": "semantic_search_mvp_benchmark",
+        "run_id": resolved_run_id,
+        "timestamp": _utc_now(),
+        "commit_sha": resolved_commit_sha,
+        "status": "passed" if all(gate["passed"] for gate in gates.values()) else "failed",
+        "corpus": {
+            "target_size": corpus_size,
+            "actual_size": index.stats.corpus_size,
+            "vector_dimension": vector_dimension,
+        },
+        "query_profile": {
+            "top_k": top_k,
+            "recall_query_count": recall_query_count,
+            "latency_sample_count": latency_sample_count,
+            "rerank_candidate_multiplier": rerank_candidate_multiplier,
+            "query_text": query_text,
+            "ground_truth_id": target_function_id,
+        },
+        "metrics": metrics,
+        "gates": gates,
+        "baseline": {
+            "recall@10": round(stock_recall, 6),
+            "recall@1": float(baseline_metrics.get("recall@1", 0.0)),
+            "mrr": float(baseline_metrics.get("mrr", 0.0)),
+        },
+        "candidate": {
+            "recall@10": round(candidate_recall, 6),
+            "recall@1": float(reranked_metrics.get("recall@1", 0.0)),
+            "mrr": float(reranked_metrics.get("mrr", 0.0)),
+        },
+        "build_stats": asdict(index.stats),
+    }
+
+
 def compare_eval_ordering(
     baseline_metrics: Mapping[str, Any],
     candidate_metrics: Mapping[str, Any],
@@ -1408,6 +1669,34 @@ def _evaluate_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _benchmark_mvp_command(args: argparse.Namespace) -> int:
+    report = run_mvp_semantic_search_benchmark(
+        corpus_size=args.target_corpus_size,
+        vector_dimension=args.vector_dimension,
+        top_k=args.top_k,
+        rerank_candidate_multiplier=max(1, args.rerank_candidate_multiplier),
+        recall_query_count=args.recall_query_count,
+        latency_sample_count=args.latency_sample_count,
+        latency_gate_ms=args.latency_gate_ms,
+        recall_delta_gate=args.recall_delta_gate,
+        receipt_completeness=args.receipt_completeness,
+        rollback_success_rate=args.rollback_success_rate,
+        run_id=args.run_id,
+        commit_sha=args.commit_sha,
+    )
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+
+    if args.no_fail_on_gate_fail:
+        return 0
+    return 0 if report.get("status") == "passed" else 1
+
+
 def _suggest_types_command(args: argparse.Namespace) -> int:
     policy = TypeSuggestionPolicy(
         auto_apply_threshold=args.auto_apply_threshold,
@@ -1525,6 +1814,95 @@ def _parser() -> argparse.ArgumentParser:
         help="When reranker is enabled, retrieve top_k*multiplier candidates before reranking",
     )
     eval_parser.set_defaults(func=_evaluate_command)
+
+    benchmark_parser = subparsers.add_parser(
+        "benchmark-mvp",
+        help="Run deterministic semantic search MVP benchmark and emit gate metrics",
+    )
+    benchmark_parser.add_argument(
+        "--target-corpus-size",
+        type=int,
+        default=100000,
+        help="Deterministic synthetic corpus size used for latency and recall gates",
+    )
+    benchmark_parser.add_argument(
+        "--vector-dimension",
+        type=int,
+        default=128,
+        help="Embedding vector dimension for the benchmark index",
+    )
+    benchmark_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=10,
+        help="Top-k cutoff (MVP gate expects top-k=10)",
+    )
+    benchmark_parser.add_argument(
+        "--recall-query-count",
+        type=int,
+        default=16,
+        help="Number of benchmark queries used to compute recall deltas",
+    )
+    benchmark_parser.add_argument(
+        "--latency-sample-count",
+        type=int,
+        default=120,
+        help="Number of instrumented queries used to estimate latency percentiles",
+    )
+    benchmark_parser.add_argument(
+        "--rerank-candidate-multiplier",
+        type=int,
+        default=4,
+        help="Candidate oversampling multiplier for reranked retrieval",
+    )
+    benchmark_parser.add_argument(
+        "--latency-gate-ms",
+        type=float,
+        default=300.0,
+        help="MVP p95 latency gate in milliseconds",
+    )
+    benchmark_parser.add_argument(
+        "--recall-delta-gate",
+        type=float,
+        default=0.10,
+        help="Minimum Recall@10 delta over stock baseline",
+    )
+    benchmark_parser.add_argument(
+        "--receipt-completeness",
+        type=float,
+        default=1.0,
+        help="Receipt completeness metric included in the MVP gate artifact",
+    )
+    benchmark_parser.add_argument(
+        "--rollback-success-rate",
+        type=float,
+        default=1.0,
+        help="Rollback success-rate metric included in the MVP gate artifact",
+    )
+    benchmark_parser.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Optional deterministic run id for artifact naming",
+    )
+    benchmark_parser.add_argument(
+        "--commit-sha",
+        type=str,
+        default=None,
+        help="Optional commit SHA attached to the benchmark artifact",
+    )
+    benchmark_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write benchmark artifact JSON",
+    )
+    benchmark_parser.add_argument(
+        "--no-fail-on-gate-fail",
+        action="store_true",
+        help="Always exit zero even when one or more gates fail",
+    )
+    benchmark_parser.set_defaults(func=_benchmark_mvp_command)
 
     suggest_parser = subparsers.add_parser(
         "suggest-types",

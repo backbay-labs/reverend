@@ -104,6 +104,23 @@ python3 scripts/ml/local_embedding_pipeline.py evaluate \
 
 Add `--disable-reranker` to evaluate baseline only.
 
+## Benchmark MVP Gates (Recall/Latency)
+
+```bash
+python3 scripts/ml/local_embedding_pipeline.py benchmark-mvp \
+  --target-corpus-size 100000 \
+  --output eval/artifacts/mvp-gates/runs/smoke-$(date -u +%Y%m%dT%H%M%SZ).json
+```
+
+This emits a deterministic artifact containing:
+- `recall_at_10_delta_vs_stock`
+- `search_latency_p95_ms`
+- `receipt_completeness`
+- `rollback_success_rate`
+
+By default, the command exits non-zero if any gate fails. Add
+`--no-fail-on-gate-fail` to force a zero exit status.
+
 ## Generate Type Suggestions (Confidence + Quarantine Policy)
 
 ```bash
