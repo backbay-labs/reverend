@@ -38,6 +38,7 @@ TypeSuggestionGenerator = MODULE.TypeSuggestionGenerator
 TypeSuggestionPolicy = MODULE.TypeSuggestionPolicy
 evaluate_queries = MODULE.evaluate_queries
 generate_type_suggestion_report = MODULE.generate_type_suggestion_report
+render_triage_panel = MODULE.render_triage_panel
 run_sync_job = SYNC_MODULE.run_sync_job
 
 
@@ -874,6 +875,17 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["entrypoints"]))
         self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["hotspots"]))
         self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["unknowns"]))
+        self.assertTrue(all(row["source_context_uri"].startswith("local-index://function/") for row in report["hotspots"]))
+        self.assertTrue(all(len(row["evidence_links"]) >= 1 for row in report["hotspots"]))
+        self.assertEqual(
+            [row["rank"] for row in report["ranked_hotspots"]],
+            list(range(1, len(report["ranked_hotspots"]) + 1)),
+        )
+        self.assertEqual(len(report["triage_map"]["nodes"]), report["execution"]["feature_count"])
+        map_ids = {row["function_id"] for row in report["triage_map"]["nodes"]}
+        self.assertIn("fn.main.dispatch", map_ids)
+        self.assertIn("fn.crypto.decrypt", map_ids)
+        self.assertIn("fn.helper.unknown", map_ids)
 
     def test_triage_feature_extractor_is_order_invariant_for_evidence_refs(self) -> None:
         extractor = DeterministicTriageFeatureExtractor()
@@ -926,11 +938,101 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         report_b.pop("generated_at_utc", None)
         self.assertEqual(report_a, report_b)
 
-    def test_triage_mission_cli_persists_summary_artifact(self) -> None:
+    def test_triage_panel_payload_includes_triage_map_and_ranked_hotspots(self) -> None:
+        mission = DeterministicTriageMission()
+        report = mission.run(self._triage_fixture_records()).to_json()
+        panel = render_triage_panel(report)
+
+        self.assertEqual(panel["kind"], "triage_mission_panel")
+        self.assertEqual(panel["panel"]["id"], "triage-mission")
+        self.assertGreaterEqual(panel["panel"]["map_node_count"], 3)
+        self.assertGreaterEqual(panel["panel"]["hotspot_count"], 1)
+        self.assertIn("triage_map", panel)
+        self.assertGreaterEqual(len(panel["triage_map"]["nodes"]), 3)
+        self.assertGreaterEqual(len(panel["ranked_hotspots"]), 1)
+
+    def test_triage_mission_cli_persists_summary_artifact_and_exports_report_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             corpus_path = tmp / "triage_corpus.json"
             output_path = tmp / "triage_summary.json"
+            report_dir = tmp / "triage_artifacts"
+            corpus_path.write_text(
+                json.dumps(
+                    {
+                        "functions": [
+                            {
+                                "id": "fn.main.dispatch",
+                                "name": "main_dispatch",
+                                "text": "bootstrap main dispatch parses config and opens socket network session",
+                                "evidence_refs": [
+                                    {
+                                        "kind": "CALLSITE",
+                                        "description": "main dispatcher calls parser and network connectors",
+                                        "uri": "local-index://evidence/fn.main.dispatch/callsite",
+                                        "confidence": 0.92,
+                                    }
+                                ],
+                            },
+                            {
+                                "id": "fn.crypto.decrypt",
+                                "name": "decrypt_payload",
+                                "text": "aes key schedule decrypt routine for encrypted packet payload",
+                            },
+                            {
+                                "id": "fn.helper.unknown",
+                                "name": "FUN_00401090",
+                                "text": "opaque unknown state machine over unresolved buffer",
+                            },
+                        ]
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            exit_code = MODULE.main(
+                [
+                    "triage-mission",
+                    "--corpus",
+                    str(corpus_path),
+                    "--output",
+                    str(output_path),
+                    "--mission-id",
+                    "triage:test",
+                    "--report-dir",
+                    str(report_dir),
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            summary = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["kind"], "triage_mission_summary")
+            self.assertEqual(summary["mission_id"], "triage:test")
+            self.assertEqual(len(summary["execution"]["stage_graph"]), 5)
+            self.assertGreaterEqual(summary["counts"]["entrypoints"], 1)
+            self.assertGreaterEqual(len(summary["ranked_hotspots"]), 1)
+            self.assertGreaterEqual(len(summary["triage_map"]["nodes"]), 1)
+
+            panel = json.loads((report_dir / "triage-panel.json").read_text(encoding="utf-8"))
+            self.assertEqual(panel["kind"], "triage_mission_panel")
+            self.assertGreaterEqual(panel["panel"]["map_node_count"], 1)
+            self.assertGreaterEqual(len(panel["ranked_hotspots"]), 1)
+
+            markdown = (report_dir / "triage-report.md").read_text(encoding="utf-8")
+            self.assertIn("## Ranked Hotspots", markdown)
+            self.assertIn("local-index://evidence/fn.main.dispatch/callsite", markdown)
+            self.assertIn("local-index://function/fn.main.dispatch", markdown)
+
+            manifest = json.loads((report_dir / "triage-artifacts.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["kind"], "triage_mission_artifacts")
+            self.assertEqual(manifest["mission_id"], "triage:test")
+
+    def test_triage_panel_cli_emits_ui_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            corpus_path = tmp / "triage_corpus.json"
+            panel_path = tmp / "triage_panel.json"
             corpus_path.write_text(
                 json.dumps(
                     {
@@ -960,21 +1062,21 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
 
             exit_code = MODULE.main(
                 [
-                    "triage-mission",
+                    "triage-panel",
                     "--corpus",
                     str(corpus_path),
                     "--output",
-                    str(output_path),
+                    str(panel_path),
                     "--mission-id",
                     "triage:test",
                 ]
             )
             self.assertEqual(exit_code, 0)
-            summary = json.loads(output_path.read_text(encoding="utf-8"))
-            self.assertEqual(summary["kind"], "triage_mission_summary")
-            self.assertEqual(summary["mission_id"], "triage:test")
-            self.assertEqual(len(summary["execution"]["stage_graph"]), 5)
-            self.assertGreaterEqual(summary["counts"]["entrypoints"], 1)
+            panel = json.loads(panel_path.read_text(encoding="utf-8"))
+            self.assertEqual(panel["kind"], "triage_mission_panel")
+            self.assertEqual(panel["panel"]["mission_id"], "triage:test")
+            self.assertGreaterEqual(panel["panel"]["map_node_count"], 3)
+            self.assertGreaterEqual(len(panel["ranked_hotspots"]), 1)
 
 
 if __name__ == "__main__":
