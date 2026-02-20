@@ -108,10 +108,13 @@ datasets/
 This repository includes a deterministic, repo-local smoke harness (no network, no external deps) backed by `datasets/datasets.lock.json`.
 
 - Run smoke eval: `bash eval/run_smoke.sh` (writes `eval/output/smoke/metrics.json`)
+- Run stock baseline slices + publish comparator artifacts:
+  - `bash eval/run_smoke.sh --slice semantic-search --slice type-recovery --output eval/output/stock-baseline/metrics.json`
+  - `python3 eval/scripts/publish_baseline.py --metrics eval/output/stock-baseline/metrics.json --baseline-out eval/output/stock-baseline/baseline.json --report-out eval/output/stock-baseline/baseline-report.md`
 - Materialize pinned datasets: `python3 eval/scripts/download.py --verify --output-dir datasets/data`
 - Validate checksums: `python3 eval/scripts/validate_checksums.py`
 
-Smoke output contains baseline metrics for similarity (`recall@1`, `recall@3`, `mrr`), type-suggestion quality (`overall_accuracy`, `accepted_precision`), and diffing (`function_match_rate`, `changed_function_detection_rate`, `false_positive_rate`).
+Smoke output contains baseline metrics for similarity (`recall@1`, `mrr`), type recovery (`accuracy`), and diffing (`match_rate`, `coverage`), plus benchmark-slice metadata (`benchmark_slices`) and lockfile-traceable dataset revisions (`dataset_revisions`).
 
 Determinism controls (enforced by `eval/run_smoke.sh` and checked by `eval/scripts/run_smoke.py`):
 - `PYTHONHASHSEED=0`

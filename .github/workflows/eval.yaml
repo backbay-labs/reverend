@@ -24,6 +24,10 @@ permissions:
   contents: read
   actions: read
 
+env:
+  STOCK_BASELINE_OUTPUT_DIR: eval/output/stock-baseline
+  STOCK_BASELINE_SLICES: semantic-search,type-recovery
+
 jobs:
   smoke:
     name: Smoke Tests (per-commit)
@@ -38,6 +42,36 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Run stock baseline slices (semantic search + type recovery)
+        run: |
+          bash eval/run_smoke.sh \
+            --slice semantic-search \
+            --slice type-recovery \
+            --output "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json"
+
+      - name: Publish stock baseline comparator artifacts
+        run: |
+          python3 eval/scripts/publish_baseline.py \
+            --metrics "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json" \
+            --baseline-out "${STOCK_BASELINE_OUTPUT_DIR}/baseline.json" \
+            --report-out "${STOCK_BASELINE_OUTPUT_DIR}/baseline-report.md" \
+            --seed "${EVAL_SEED:-0}"
+
+      - name: Add stock baseline summary
+        if: always()
+        run: |
+          {
+            echo "## Stock Baseline (${GITHUB_JOB})"
+            echo ""
+            echo "Slices: \`${STOCK_BASELINE_SLICES}\`"
+            echo ""
+            if [[ -f "${STOCK_BASELINE_OUTPUT_DIR}/baseline-report.md" ]]; then
+              cat "${STOCK_BASELINE_OUTPUT_DIR}/baseline-report.md"
+            else
+              echo "_baseline report unavailable_"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run smoke tests
         run: bash eval/run_smoke.sh
@@ -56,6 +90,14 @@ jobs:
           name: smoke-metrics-${{ github.sha }}
           path: eval/output/smoke/
           retention-days: 30
+
+      - name: Upload stock baseline artifacts (smoke lane)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stock-baseline-smoke-${{ github.run_id }}
+          path: ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/
+          retention-days: 90
 
   nightly:
     name: Nightly Regression
@@ -76,6 +118,36 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+
+      - name: Run stock baseline slices (semantic search + type recovery)
+        run: |
+          bash eval/run_smoke.sh \
+            --slice semantic-search \
+            --slice type-recovery \
+            --output "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json"
+
+      - name: Publish stock baseline comparator artifacts
+        run: |
+          python3 eval/scripts/publish_baseline.py \
+            --metrics "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json" \
+            --baseline-out "${STOCK_BASELINE_OUTPUT_DIR}/baseline.json" \
+            --report-out "${STOCK_BASELINE_OUTPUT_DIR}/baseline-report.md" \
+            --seed "${EVAL_SEED:-0}"
+
+      - name: Add stock baseline summary
+        if: always()
+        run: |
+          {
+            echo "## Stock Baseline (${GITHUB_JOB})"
+            echo ""
+            echo "Slices: \`${STOCK_BASELINE_SLICES}\`"
+            echo ""
+            if [[ -f "${STOCK_BASELINE_OUTPUT_DIR}/baseline-report.md" ]]; then
+              cat "${STOCK_BASELINE_OUTPUT_DIR}/baseline-report.md"
+            else
+              echo "_baseline report unavailable_"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run smoke tests (generate current metrics)
         run: bash eval/run_smoke.sh
@@ -168,6 +240,14 @@ jobs:
           path: eval/output/
           retention-days: 90
 
+      - name: Upload stock baseline artifacts (nightly lane)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stock-baseline-nightly-${{ github.run_id }}
+          path: ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/
+          retention-days: 90
+
   release:
     name: Release Validation
     if: github.event_name == 'workflow_dispatch' && inputs.suite == 'release'
@@ -188,6 +268,36 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Run stock baseline slices (semantic search + type recovery)
+        run: |
+          bash eval/run_smoke.sh \
+            --slice semantic-search \
+            --slice type-recovery \
+            --output "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json"
+
+      - name: Publish stock baseline comparator artifacts
+        run: |
+          python3 eval/scripts/publish_baseline.py \
+            --metrics "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json" \
+            --baseline-out "${STOCK_BASELINE_OUTPUT_DIR}/baseline.json" \
+            --report-out "${STOCK_BASELINE_OUTPUT_DIR}/baseline-report.md" \
+            --seed "${EVAL_SEED:-0}"
+
+      - name: Add stock baseline summary
+        if: always()
+        run: |
+          {
+            echo "## Stock Baseline (${GITHUB_JOB})"
+            echo ""
+            echo "Slices: \`${STOCK_BASELINE_SLICES}\`"
+            echo ""
+            if [[ -f "${STOCK_BASELINE_OUTPUT_DIR}/baseline-report.md" ]]; then
+              cat "${STOCK_BASELINE_OUTPUT_DIR}/baseline-report.md"
+            else
+              echo "_baseline report unavailable_"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Run smoke tests
         run: bash eval/run_smoke.sh
 
@@ -204,4 +314,12 @@ jobs:
         with:
           name: release-results-${{ github.run_id }}
           path: eval/output/
+          retention-days: 365
+
+      - name: Upload stock baseline artifacts (release lane)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stock-baseline-release-${{ github.run_id }}
+          path: ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/
           retention-days: 365
