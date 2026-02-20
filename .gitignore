@@ -92,6 +92,7 @@ __pycache__
 # Evaluation harness runtime artifacts
 datasets/data/
 eval/output/
+eval/artifacts/
 
 # Cyntra runtime artifacts (keep config files tracked)
 .workcells/
