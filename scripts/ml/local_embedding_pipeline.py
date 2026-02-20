@@ -4487,7 +4487,7 @@ class DeterministicTriageFeatureExtractor:
 
     def extract(self, record: FunctionRecord) -> TriageFunctionFeatures:
         text_tokens = set(_TOKEN_RE.findall(f"{record.name} {record.text}".lower()))
-        canonical_evidence_refs = self._canonicalize_evidence_refs(record.evidence_refs)
+        canonical_evidence_refs = self._canonicalize_evidence_refs(record.function_id, record.evidence_refs)
         evidence_kinds = {ref.kind for ref in canonical_evidence_refs}
 
         entrypoint_hits = sorted(text_tokens & self._ENTRYPOINT_HINTS)
@@ -4553,14 +4553,43 @@ class DeterministicTriageFeatureExtractor:
         )
 
     @staticmethod
-    def _canonicalize_evidence_refs(evidence_refs: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
+    def _canonicalize_evidence_refs(
+        function_id: str,
+        evidence_refs: tuple[EvidenceRef, ...],
+    ) -> tuple[EvidenceRef, ...]:
         unique_refs: dict[tuple[str, str, str, str, float | None], EvidenceRef] = {}
         for ref in evidence_refs:
             key = (ref.evidence_ref_id, ref.kind, ref.uri, ref.description, ref.confidence)
             if key not in unique_refs:
                 unique_refs[key] = ref
-        ordered = sorted(unique_refs.values(), key=lambda item: (item.evidence_ref_id, item.kind, item.uri))
-        return tuple(ordered)
+        ordered = sorted(
+            unique_refs.values(),
+            key=lambda item: (
+                item.evidence_ref_id,
+                item.kind,
+                item.uri,
+                item.description,
+                DeterministicTriageFeatureExtractor._confidence_sort_key(item.confidence),
+            ),
+        )
+        if ordered:
+            return tuple(ordered)
+        return (
+            EvidenceRef.from_json(
+                {
+                    "kind": "TEXT_FEATURE",
+                    "description": f"Deterministic triage fallback evidence for {function_id}",
+                    "uri": f"local-index://features/{function_id}/triage-fallback",
+                },
+                function_id=function_id,
+            ),
+        )
+
+    @staticmethod
+    def _confidence_sort_key(confidence: float | None) -> float:
+        if confidence is None:
+            return -1.0
+        return float(confidence)
 
 
 class DeterministicTriageMission:
