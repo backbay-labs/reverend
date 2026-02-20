@@ -21,6 +21,8 @@ SPEC.loader.exec_module(MODULE)
 AccessContext = MODULE.AccessContext
 AccessDeniedError = MODULE.AccessDeniedError
 CorpusSyncWorker = MODULE.CorpusSyncWorker
+EndpointPolicyConfig = MODULE.EndpointPolicyConfig
+EndpointPolicyRule = MODULE.EndpointPolicyRule
 ProposalArtifact = MODULE.ProposalArtifact
 SyncStateStore = MODULE.SyncStateStore
 run_read_job = MODULE.run_read_job
@@ -431,6 +433,213 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             self.assertEqual(events[0]["action"], "READ")
             self.assertEqual(events[0]["outcome"], "DENY")
             self.assertEqual(events[0]["proposal_id"], "p-precheck")
+
+    def test_sync_policy_modes_are_configurable_per_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+            audit_path = tmp / "audit.jsonl"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-cloud",
+                        "state": "APPROVED",
+                        "receipt_id": "r-cloud",
+                        "project_id": "project:cloud",
+                    },
+                    {
+                        "proposal_id": "p-offline",
+                        "state": "APPROVED",
+                        "receipt_id": "r-offline",
+                        "project_id": "project:offline",
+                    },
+                ],
+            )
+
+            policy_config = EndpointPolicyConfig(
+                default_rule=EndpointPolicyRule(mode="cloud"),
+                project_rules={
+                    "project:cloud": EndpointPolicyRule(mode="cloud"),
+                    "project:offline": EndpointPolicyRule(mode="offline"),
+                },
+            )
+
+            telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-policy-per-project",
+                audit_path=audit_path,
+                policy_config=policy_config,
+                backend_endpoint="https://api.example.com/v1/corpus",
+            )
+
+            backend = json.loads(backend_store.read_text(encoding="utf-8"))
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            blocked = [event for event in events if event["event_type"] == "EGRESS_BLOCKED"]
+
+            self.assertEqual(telemetry.synced_count, 1)
+            self.assertEqual(telemetry.error_count, 1)
+            self.assertEqual(telemetry.errors[0].proposal_id, "p-offline")
+            self.assertEqual(sorted(backend["artifacts"].keys()), ["p-cloud"])
+            self.assertEqual(len(blocked), 1)
+            self.assertEqual(blocked[0]["project_id"], "project:offline")
+            self.assertEqual(blocked[0]["policy_mode"], "offline")
+
+    def test_allowlist_mode_blocks_non_approved_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+            audit_path = tmp / "audit.jsonl"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-allowlist",
+                        "state": "APPROVED",
+                        "receipt_id": "r-allowlist",
+                        "project_id": "project:allowlist",
+                    }
+                ],
+            )
+
+            policy_config = EndpointPolicyConfig(
+                default_rule=EndpointPolicyRule(
+                    mode="allowlist",
+                    allowed_endpoints=frozenset({"https://api.allowed.example"}),
+                ),
+            )
+
+            telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-allowlist-block",
+                audit_path=audit_path,
+                policy_config=policy_config,
+                backend_endpoint="https://api.blocked.example/v1/corpus",
+            )
+
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            blocked = [event for event in events if event["event_type"] == "EGRESS_BLOCKED"]
+
+            self.assertEqual(telemetry.synced_count, 0)
+            self.assertEqual(telemetry.error_count, 1)
+            self.assertEqual(telemetry.errors[0].proposal_id, "p-allowlist")
+            self.assertFalse(backend_store.exists())
+            self.assertFalse(state_path.exists())
+            self.assertEqual(len(blocked), 1)
+            self.assertEqual(blocked[0]["action"], "SYNC")
+            self.assertEqual(blocked[0]["outcome"], "DENY")
+            self.assertEqual(blocked[0]["policy_mode"], "allowlist")
+            self.assertEqual(blocked[0]["destination"], "https://api.blocked.example/v1/corpus")
+
+    def test_policy_violation_mitigation_is_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+            audit_path = tmp / "audit.jsonl"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-deterministic",
+                        "state": "APPROVED",
+                        "receipt_id": "r-deterministic",
+                        "project_id": "project:deterministic",
+                    }
+                ],
+            )
+
+            policy_config = EndpointPolicyConfig(
+                default_rule=EndpointPolicyRule(
+                    mode="allowlist",
+                    allowed_endpoints=frozenset({"https://api.allowed.example"}),
+                ),
+            )
+            blocked_destination = "https://api.blocked.example/v1/corpus"
+            expected_reason = (
+                "policy mode 'allowlist' blocks destination "
+                "'https://api.blocked.example/v1/corpus' for project "
+                "'project:deterministic': destination is not allowlisted"
+            )
+
+            first = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-deterministic-1",
+                audit_path=audit_path,
+                policy_config=policy_config,
+                backend_endpoint=blocked_destination,
+            )
+            second = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-deterministic-2",
+                audit_path=audit_path,
+                policy_config=policy_config,
+                backend_endpoint=blocked_destination,
+            )
+
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            blocked_reasons = [event["reason"] for event in events if event["event_type"] == "EGRESS_BLOCKED"]
+
+            self.assertEqual(first.synced_count, 0)
+            self.assertEqual(second.synced_count, 0)
+            self.assertEqual(first.error_count, 1)
+            self.assertEqual(second.error_count, 1)
+            self.assertEqual(first.errors[0].error, expected_reason)
+            self.assertEqual(second.errors[0].error, expected_reason)
+            self.assertEqual(blocked_reasons, [expected_reason, expected_reason])
+            self.assertFalse(backend_store.exists())
+            self.assertFalse(state_path.exists())
+
+    def test_read_blocks_non_allowlisted_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            backend_store = tmp / "backend_store.json"
+            audit_path = tmp / "audit.jsonl"
+            backend_store.write_text("{invalid-json", encoding="utf-8")
+
+            policy_config = EndpointPolicyConfig(
+                default_rule=EndpointPolicyRule(
+                    mode="allowlist",
+                    allowed_endpoints=frozenset({"https://api.allowed.example"}),
+                ),
+            )
+
+            with self.assertRaises(AccessDeniedError) as ctx:
+                run_read_job(
+                    backend_store_path=backend_store,
+                    proposal_id="p-read-policy",
+                    project_id="project:read-policy",
+                    audit_path=audit_path,
+                    policy_config=policy_config,
+                    backend_endpoint="https://api.blocked.example/v1/corpus",
+                )
+
+            self.assertEqual(
+                str(ctx.exception),
+                "policy mode 'allowlist' blocks destination "
+                "'https://api.blocked.example/v1/corpus' for project "
+                "'project:read-policy': destination is not allowlisted",
+            )
+            events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(events[0]["event_type"], "EGRESS_BLOCKED")
+            self.assertEqual(events[0]["action"], "READ")
+            self.assertEqual(events[0]["outcome"], "DENY")
 
     def test_cli_run_writes_telemetry_with_counts_errors_and_latency(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
