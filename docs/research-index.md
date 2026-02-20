@@ -6,13 +6,13 @@ This is the live control document for research outputs in `docs/`. It tracks cov
 ## Live Status (2026-02-20)
 | Document | Status | Accuracy Notes |
 |---|---|---|
-| `docs/CHANGELOG-rc1.md` | Working | Versioned changelog for RC1; tracks all epics (E1–E8) and MVP exit-gate status. |
-| `docs/operator-reviewer-runbook.md` | Working | Covers setup, review flow, rollback, incident handling, quality gates, and configuration reference. |
-| `docs/known-limitations.md` | Working | 27 documented limitations across all subsystems with IDs, impact, and workarounds. |
+| `docs/CHANGELOG-rc1.md` | Published | Versioned changelog for RC1 (`0.1.0-rc1`), includes packaging command (`gradle buildGhidra`), artifact path (`build/dist/ghidra_*.zip`), and checksum step. |
+| `docs/operator-reviewer-runbook.md` | Published | Covers setup, review flow, rollback, incident handling, quality gates, and configuration reference for operators/reviewers. |
+| `docs/known-limitations.md` | Published | 27 documented limitations across all subsystems with IDs, impact, and workarounds. |
 | `docs/deep-research-report.md` | Draft | Citation artifacts removed; still needs explicit claim-to-source footnoting before final publication. |
 | `docs/sources.md` | Working | Canonical reference list for time-sensitive and high-impact claims. |
 | `docs/claims-ledger.md` | Working | Claim-by-claim verification tracker with status and source mapping. |
-| `docs/execution-board-12-weeks.md` | Working | Concrete 12-week implementation board with owner lanes, milestones, and exit gates aligned to research specs. |
+| `docs/execution-board-12-weeks.md` | Published | Concrete 12-week implementation board with owner lanes, milestones, exit gates, and Week 12 RC publication evidence links. |
 | `docs/backlog-jira-linear.md` | Working | Jira/Linear-ready epic/story backlog mapped to Cyntra bead IDs and dependency graph. |
 | `docs/cyntra-kernel-runbook.md` | Working | Operational runbook for executing the roadmap in Cyntra against `.beads/` graph files. |
 | `docs/research/INDEX.md` | Draft | Good map; depends on per-topic docs for claim-level verification. |
@@ -37,6 +37,7 @@ This is the live control document for research outputs in `docs/`. It tracks cov
 | `docs/research/python-integration-ops-matrix.md` | Draft | High practical value; version/platform claims are high churn and need near-publication recheck. |
 
 ## Current QA Snapshot
+- RC1 release-doc bundle is explicit and cross-linked: `docs/CHANGELOG-rc1.md`, `docs/operator-reviewer-runbook.md`, `docs/known-limitations.md`.
 - `docs/deep-research-report.md`: unresolved citation artifacts removed; verify claim-to-source mapping via companion docs before publication.
 - `docs/research/*.md`: `0` unresolved citation artifacts; explicit links present.
 - Local markdown links across `docs/`: no broken local links detected in this pass.

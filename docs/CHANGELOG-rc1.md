@@ -99,6 +99,27 @@ First release candidate for the Ghidra "Alien-Tech" MVP vertical slice. This RC 
 
 ---
 
+## Release Candidate Package
+
+RC1 packaging is tied to the version `0.1.0-rc1` and published with its release documentation bundle.
+
+```bash
+# Build installable distribution archive(s)
+gradle buildGhidra
+
+# Select the packaged archive and compute checksum for release notes/signoff
+artifact="$(ls -1 build/dist/ghidra_*.zip | head -n 1)"
+shasum -a 256 "${artifact}"
+```
+
+Release bundle contents:
+- Installable archive: `build/dist/ghidra_*.zip`
+- Versioned changelog: `docs/CHANGELOG-rc1.md`
+- Operator/reviewer runbook: `docs/operator-reviewer-runbook.md`
+- Known limitations: `docs/known-limitations.md`
+
+---
+
 ## Known Limitations
 
 See [`docs/known-limitations.md`](known-limitations.md) for the full list.

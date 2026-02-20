@@ -1,6 +1,6 @@
 # 12-Week Execution Board: Ghidra "Alien-Tech" MVP
 
-As-of: 2026-02-19  
+As-of: 2026-02-20
 Scope: Deliver a production-credible MVP that turns binary analysis into an evidence-backed, reviewable, and continuously improving workflow.
 
 ## 1. Target Outcome (Week 12)
@@ -61,7 +61,14 @@ Ship one vertical slice:
 | 11 | Fix bottlenecks from pilot; finalize APIs | UX polish + reviewer shortcuts | Triage/type quality tuning | Pen-test style abuse scenarios | Full regression + soak run | `M11`: release candidate cut |
 | 12 | Freeze schema/API; release packaging | Operator and reviewer runbook UI links | Final model/config lock | Security sign-off checklist | Exit-gate validation report | `M12`: MVP release decision |
 
-## 6. Backlog Items (Ticket Seeds)
+## 6. Week 12 Release Deliverables (Published)
+
+- [x] Versioned RC changelog: `docs/CHANGELOG-rc1.md` (`0.1.0-rc1`)
+- [x] RC packaging instructions + artifact/checksum command: `docs/CHANGELOG-rc1.md`
+- [x] Operator and reviewer runbook: `docs/operator-reviewer-runbook.md`
+- [x] Explicit known limitations catalog: `docs/known-limitations.md`
+
+## 7. Backlog Items (Ticket Seeds)
 
 1. `BE-101`: Receipt append-only store with hash-chain verification.
 2. `BE-118`: Proposal apply/rollback transaction adapter for Ghidra.
@@ -75,7 +82,7 @@ Ship one vertical slice:
 10. `EVAL-529`: CI gates for receipt completeness, rollback, recall, latency.
 11. `EVAL-534`: Artifact-driven MVP gate dashboard (`eval/scripts/mvp_gate_dashboard.py`) with threshold config (`eval/config/mvp_gate_thresholds.json`), current/trend views, and actionable alerts.
 
-## 7. Risks and Kill Criteria
+## 8. Risks and Kill Criteria
 
 - **Risk:** Search quality fails to beat stock baseline by Week 8.  
   **Action:** Drop advanced embedding work; ship deterministic feature retrieval only.
@@ -86,14 +93,14 @@ Ship one vertical slice:
 - **Risk:** Type PR quality too low by Week 10.  
   **Action:** Limit type automation to high-confidence primitives + signatures.
 
-## 8. Operating Rhythm
+## 9. Operating Rhythm
 
 1. Weekly planning: lock scope for next 7 days, no mid-week epic switches.
 2. Mid-week checkpoint: metric trend + blocker review (30 minutes).
 3. End-week demo: show one artifact, one metric delta, one risk update.
 4. Weekly decision log: capture defer/kill/ship calls with rationale.
 
-## 9. Source Alignment
+## 10. Source Alignment
 
 This board operationalizes:
 - `docs/deep-research-report.md`
