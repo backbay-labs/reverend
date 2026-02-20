@@ -10,7 +10,7 @@ This repository is pre-wired for Cyntra with:
 Ghidra is large. Cyntra workcells are git worktrees (not full `.git` clones), but each workcell still checks out files and can consume substantial disk.
 
 Defaults in this repo intentionally reduce footprint:
-- `max_concurrent_workcells: 1`
+- `max_concurrent_workcells: 3`
 - speculation disabled
 - preflight disk guard + branch/context checks before dispatch
 
@@ -30,7 +30,7 @@ scripts/cyntra/preflight.sh
 
 Preflight validates:
 - disk headroom (`CYNTRA_MIN_FREE_GB`, default `35`)
-- active workcell count limit (`CYNTRA_MAX_ACTIVE_WORKCELLS`, default `1`)
+- active workcell count limit (`CYNTRA_MAX_ACTIVE_WORKCELLS`, defaults to configured `max_concurrent_workcells`)
 - `.beads` integrity
 - `context_files` exist and are committed on `main`
 - kernel status command succeeds via `uv tool run`

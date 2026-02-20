@@ -6,7 +6,7 @@ cd "$repo_root"
 
 kernel_path="${CYNTRA_KERNEL_PATH:-/Users/connor/Medica/backbay/platform/kernel}"
 min_free_gb="${CYNTRA_MIN_FREE_GB:-35}"
-max_active_workcells="${CYNTRA_MAX_ACTIVE_WORKCELLS:-1}"
+max_active_workcells="${CYNTRA_MAX_ACTIVE_WORKCELLS:-}"
 auto_fix_main="${CYNTRA_AUTO_FIX_MAIN:-1}"
 run_status_check="${CYNTRA_PREFLIGHT_STATUS_CHECK:-1}"
 strict_context_main="${CYNTRA_STRICT_CONTEXT_MAIN:-1}"
@@ -25,6 +25,34 @@ command -v uv >/dev/null 2>&1 || fail "uv is required but not found in PATH"
 [[ -f .beads/issues.jsonl ]] || fail "missing .beads/issues.jsonl"
 [[ -f .beads/deps.jsonl ]] || fail "missing .beads/deps.jsonl"
 [[ -f .cyntra/config.yaml ]] || fail "missing .cyntra/config.yaml"
+
+if [[ -z "$max_active_workcells" ]]; then
+  max_active_workcells="$(
+    python3 - <<'PY'
+import sys
+from pathlib import Path
+try:
+    import yaml
+except Exception:
+    print(3)
+    sys.exit(0)
+path = Path(".cyntra/config.yaml")
+if not path.exists():
+    print(3)
+    sys.exit(0)
+try:
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+except Exception:
+    print(3)
+    sys.exit(0)
+val = ((data.get("scheduling") or {}).get("max_concurrent_workcells"))
+try:
+    print(int(val))
+except Exception:
+    print(3)
+PY
+  )"
+fi
 
 mkdir -p .cyntra/logs .cyntra/archives .cyntra/state .cyntra/runs .cyntra/dynamics
 mkdir -p .workcells
@@ -55,7 +83,7 @@ active_wc_count="$(find .workcells -mindepth 1 -maxdepth 1 -type d -name 'wc-*' 
 if (( active_wc_count > max_active_workcells )); then
   fail "active workcells ${active_wc_count} exceed limit ${max_active_workcells}; run scripts/cyntra/cleanup.sh"
 fi
-info "active workcells: ${active_wc_count}"
+info "active workcells: ${active_wc_count} (limit ${max_active_workcells})"
 
 export CYNTRA_STRICT_CONTEXT_MAIN="$strict_context_main"
 

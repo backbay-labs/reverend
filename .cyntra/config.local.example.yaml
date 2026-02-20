@@ -3,9 +3,8 @@
 
 scheduling:
   # Raise only if disk/headroom allows.
-  max_concurrent_workcells: 2
+  max_concurrent_workcells: 4
 
 speculation:
   # Keep disabled unless you intentionally want parallel candidate workcells.
   enabled: false
-
