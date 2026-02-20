@@ -43,6 +43,20 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Run no-direct-agent-write security regression suite (blocking)
+        run: |
+          python3 scripts/tests/no_direct_agent_write_invariant.py \
+            --output-dir scripts/tests/artifacts/no-direct-agent-write
+          python3 -m unittest scripts/tests/test_no_direct_agent_write_invariant.py
+
+      - name: Upload no-direct-agent-write invariant artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: no-direct-agent-write-invariant-${{ github.sha }}
+          path: scripts/tests/artifacts/no-direct-agent-write/
+          retention-days: 30
+
       - name: Run stock baseline slices (semantic search + type recovery)
         run: |
           bash eval/run_smoke.sh \
