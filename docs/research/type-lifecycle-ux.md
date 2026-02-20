@@ -1053,6 +1053,9 @@ TypeAssertion:
   evidence_ids: list<UUID> (references evidence rows)
   transition_history: list<TypeAssertionTransition>
   review_decisions: list<ReviewDecision>
+  propagation_policy: PropagationPolicy (required once state >= ACCEPTED)
+  propagation_events: list<PropagationEvent> (required when state == PROPAGATED)
+  conflicts: list<TypeConflict> (required when any propagation event outcome == CONFLICT)
 
 TypeAssertionTransition:
   id: UUID
@@ -1096,6 +1099,42 @@ ReviewDecision:
   receipt_id: UUID
   decided_at: timestamp
   resulting_state: PROPOSED | UNDER_REVIEW | ACCEPTED | REJECTED
+
+PropagationPolicy:
+  same_program: ScopePolicy
+  cross_program: ScopePolicy
+  corpus_kb: ScopePolicy
+  conflict_resolution:
+    source_priority_order: [DWARF, ANALYST, CONSTRAINT_SOLVER, ML_MODEL, HEURISTIC, GHIDRA_DEFAULT]
+    confidence_margin: float (same-tier tie threshold)
+    tie_breaker: ASSERTION_ID_ASC | TARGET_ID_ASC | RECEIPT_TIMESTAMP_ASC
+    workflow: [SOURCE_PRIORITY, CONFIDENCE, TIE_BREAKER]
+
+PropagationEvent:
+  id: UUID
+  scope: SAME_PROGRAM | CROSS_PROGRAM | CORPUS_KB
+  rule: propagation-rule-id
+  policy_mode: AUTO_PROPAGATE | PROPOSE | DISABLED
+  outcome: APPLIED | PROPOSED | SKIPPED | CONFLICT | ROLLED_BACK
+  applied_receipt_id: UUID (required when outcome == APPLIED or ROLLED_BACK)
+  rollback_receipt_id: UUID (required when outcome == ROLLED_BACK)
+  conflict_id: UUID (required when outcome == CONFLICT)
+  propagated_at: timestamp
+  rolled_back_at: timestamp (nullable)
+
+TypeConflict:
+  id: UUID
+  category: PRIMITIVE_TYPE_DISAGREEMENT | STRUCT_LAYOUT_CONFLICT | FUNCTION_SIGNATURE_CONFLICT | TYPEDEF_CHAIN_CONFLICT | POINTER_DEPTH_CONFLICT | STRUCT_NAME_CONFLICT
+  workflow_version: source-priority-confidence-tiebreak-v1
+  status: OPEN | AUTO_RESOLVED | ESCALATED | RESOLVED | DROPPED
+  competing_assertion_id: UUID
+  competing_source_type: DWARF | ANALYST | ML_MODEL | CONSTRAINT_SOLVER | HEURISTIC | GHIDRA_DEFAULT
+  resolution:
+    strategy: SOURCE_PRIORITY | HIGHER_CONFIDENCE | DETERMINISTIC_TIE_BREAK | MANUAL_REVIEW
+    requires_review: boolean
+    winner_assertion_id: UUID (nullable)
+    loser_assertion_id: UUID (nullable)
+    resolved_receipt_id: UUID (nullable)
 ```
 
 ### 8.4 Integration with Ghidra's Existing Merge System
