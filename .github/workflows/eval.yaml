@@ -38,6 +38,17 @@ jobs:
       - name: Run smoke tests
         run: bash eval/run_smoke.sh
 
+      - name: Assert invariant report emitted
+        run: test -f eval/output/smoke/invariants/no-direct-agent-write.json
+
+      - name: Upload security invariant report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-invariant-${{ github.sha }}
+          path: eval/output/smoke/invariants/no-direct-agent-write.json
+          retention-days: 30
+
       - name: Upload smoke metrics
         uses: actions/upload-artifact@v4
         if: always()
@@ -68,6 +79,17 @@ jobs:
 
       - name: Run smoke tests (generate current metrics)
         run: bash eval/run_smoke.sh
+
+      - name: Assert invariant report emitted
+        run: test -f eval/output/smoke/invariants/no-direct-agent-write.json
+
+      - name: Upload security invariant report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-invariant-nightly-${{ github.run_id }}
+          path: eval/output/smoke/invariants/no-direct-agent-write.json
+          retention-days: 90
 
       - name: Compare against baseline
         run: |
@@ -106,6 +128,17 @@ jobs:
 
       - name: Run smoke tests
         run: bash eval/run_smoke.sh
+
+      - name: Assert invariant report emitted
+        run: test -f eval/output/smoke/invariants/no-direct-agent-write.json
+
+      - name: Upload security invariant report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-invariant-release-${{ github.run_id }}
+          path: eval/output/smoke/invariants/no-direct-agent-write.json
+          retention-days: 365
 
       - name: Compare against baseline (strict)
         run: |
