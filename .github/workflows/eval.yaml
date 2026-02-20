@@ -1,0 +1,109 @@
+name: Evaluation Pipeline
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Test suite to run'
+        type: choice
+        options:
+          - smoke
+          - nightly
+          - release
+          - weekly
+        default: nightly
+
+jobs:
+  smoke:
+    name: Smoke Tests
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run smoke tests
+        run: bash eval/run_smoke.sh
+
+      - name: Upload smoke results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-results-${{ github.sha }}
+          path: eval/output/smoke/
+          retention-days: 30
+
+  nightly:
+    name: Nightly Regression
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Run smoke tests (baseline)
+        run: bash eval/run_smoke.sh
+
+      - name: Upload nightly results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-results-${{ github.run_id }}
+          path: eval/output/
+          retention-days: 90
+
+  release:
+    name: Release Validation
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Run smoke tests
+        run: bash eval/run_smoke.sh
+
+      - name: Upload release results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-results-${{ github.run_id }}
+          path: eval/output/
+          retention-days: 365
