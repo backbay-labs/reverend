@@ -4860,6 +4860,10 @@ def _markdown_link(label: str, uri: str) -> str:
     return safe_label
 
 
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _triage_report_markdown(report: Mapping[str, Any]) -> str:
     mission_id = str(report.get("mission_id") or "triage:unknown")
     generated_at = str(report.get("generated_at_utc") or "")
@@ -4938,7 +4942,11 @@ def _triage_report_markdown(report: Mapping[str, Any]) -> str:
                 continue
             label = str(link.get("evidence_ref_id") or link.get("kind") or "evidence")
             uri = str(link.get("uri") or "")
-            rendered_links.append(_markdown_link(label, uri))
+            link_source_context_uri = str(link.get("source_context_uri") or source_context_uri)
+            rendered = _markdown_link(label, uri)
+            if link_source_context_uri:
+                rendered += f" ({_markdown_link('context', link_source_context_uri)})"
+            rendered_links.append(rendered)
         evidence_cell = "<br>".join(rendered_links) if rendered_links else "n/a"
         lines.append(
             "| "
@@ -4977,16 +4985,30 @@ def write_triage_report_artifacts(
     panel_path.write_text(json.dumps(panel, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     markdown_path.write_text(markdown, encoding="utf-8")
 
+    artifact_paths = {
+        "summary": summary_path.name,
+        "panel": panel_path.name,
+        "markdown": markdown_path.name,
+    }
+    artifact_checksums = {
+        "summary": _sha256_file(summary_path),
+        "panel": _sha256_file(panel_path),
+        "markdown": _sha256_file(markdown_path),
+    }
+    artifact_bytes = {
+        "summary": summary_path.stat().st_size,
+        "panel": panel_path.stat().st_size,
+        "markdown": markdown_path.stat().st_size,
+    }
+
     manifest = {
         "schema_version": 1,
         "kind": "triage_mission_artifacts",
         "generated_at_utc": _utc_now(),
         "mission_id": str(report.get("mission_id") or ""),
-        "artifacts": {
-            "summary": str(summary_path),
-            "panel": str(panel_path),
-            "markdown": str(markdown_path),
-        },
+        "artifacts": artifact_paths,
+        "artifact_checksums": artifact_checksums,
+        "artifact_bytes": artifact_bytes,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
