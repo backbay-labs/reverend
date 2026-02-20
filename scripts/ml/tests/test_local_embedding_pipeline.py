@@ -19,6 +19,7 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 BaselineSimilarityAdapter = MODULE.BaselineSimilarityAdapter
+DeterministicTriageFeatureExtractor = MODULE.DeterministicTriageFeatureExtractor
 DeterministicTriageMission = MODULE.DeterministicTriageMission
 EmbeddingIndex = MODULE.EmbeddingIndex
 EvidenceWeightedReranker = MODULE.EvidenceWeightedReranker
@@ -673,6 +674,57 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["entrypoints"]))
         self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["hotspots"]))
         self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["unknowns"]))
+
+    def test_triage_feature_extractor_is_order_invariant_for_evidence_refs(self) -> None:
+        extractor = DeterministicTriageFeatureExtractor()
+        evidence_a = {
+            "evidence_ref_id": "evr:a",
+            "kind": "CALLSITE",
+            "description": "entrypoint thunk callsite",
+            "uri": "local-index://evidence/fn.test/a",
+            "confidence": 0.9,
+        }
+        evidence_b = {
+            "evidence_ref_id": "evr:b",
+            "kind": "XREF",
+            "description": "entry xref",
+            "uri": "local-index://evidence/fn.test/b",
+            "confidence": 0.8,
+        }
+        record_a = FunctionRecord.from_json(
+            {
+                "id": "fn.test",
+                "name": "main_dispatch",
+                "text": "bootstrap entry dispatcher",
+                "evidence_refs": [evidence_a, evidence_b],
+            }
+        )
+        record_b = FunctionRecord.from_json(
+            {
+                "id": "fn.test",
+                "name": "main_dispatch",
+                "text": "bootstrap entry dispatcher",
+                "evidence_refs": [evidence_b, evidence_a],
+            }
+        )
+
+        extracted_a = extractor.extract(record_a)
+        extracted_b = extractor.extract(record_b)
+        self.assertEqual(extracted_a, extracted_b)
+        self.assertEqual(
+            [ref.evidence_ref_id for ref in extracted_a.evidence_refs],
+            ["evr:a", "evr:b"],
+        )
+
+    def test_triage_mission_output_is_order_invariant_for_input_records(self) -> None:
+        mission = DeterministicTriageMission()
+        records = self._triage_fixture_records()
+        report_a = mission.run(records).to_json()
+        report_b = mission.run(list(reversed(records))).to_json()
+
+        report_a.pop("generated_at_utc", None)
+        report_b.pop("generated_at_utc", None)
+        self.assertEqual(report_a, report_b)
 
     def test_triage_mission_cli_persists_summary_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

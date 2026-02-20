@@ -746,7 +746,8 @@ class DeterministicTriageFeatureExtractor:
 
     def extract(self, record: FunctionRecord) -> TriageFunctionFeatures:
         text_tokens = set(_TOKEN_RE.findall(f"{record.name} {record.text}".lower()))
-        evidence_kinds = {ref.kind for ref in record.evidence_refs}
+        canonical_evidence_refs = self._canonicalize_evidence_refs(record.evidence_refs)
+        evidence_kinds = {ref.kind for ref in canonical_evidence_refs}
 
         entrypoint_hits = sorted(text_tokens & self._ENTRYPOINT_HINTS)
         entrypoint_score = min(len(entrypoint_hits) / 3.0, 1.0)
@@ -772,7 +773,7 @@ class DeterministicTriageFeatureExtractor:
         category_coverage = (
             len(tags) / len(self._CATEGORY_HINTS) if self._CATEGORY_HINTS else 0.0
         )
-        evidence_signal = min(len(record.evidence_refs), 4) / 4.0
+        evidence_signal = min(len(canonical_evidence_refs), 4) / 4.0
         hotspot_score = min(
             1.0,
             0.6 * category_signal + 0.25 * category_coverage + 0.15 * evidence_signal,
@@ -784,7 +785,7 @@ class DeterministicTriageFeatureExtractor:
         if lowered_name.startswith(self._OPAQUE_NAME_PREFIXES):
             opaque_name = 1.0
         missing_domain_tags = 1.0 if not tags else 0.0
-        weak_evidence = 1.0 if len(record.evidence_refs) <= 1 else 0.0
+        weak_evidence = 1.0 if len(canonical_evidence_refs) <= 1 else 0.0
         unknown_score = min(
             1.0,
             0.4 * (1.0 if unknown_hits else 0.0)
@@ -805,10 +806,20 @@ class DeterministicTriageFeatureExtractor:
             entrypoint_score=entrypoint_score,
             hotspot_score=hotspot_score,
             unknown_score=unknown_score,
-            tags=tuple(tags),
+            tags=tuple(sorted(tags)),
             rationale=tuple(sorted(set(rationale))),
-            evidence_refs=record.evidence_refs,
+            evidence_refs=canonical_evidence_refs,
         )
+
+    @staticmethod
+    def _canonicalize_evidence_refs(evidence_refs: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
+        unique_refs: dict[tuple[str, str, str, str, float | None], EvidenceRef] = {}
+        for ref in evidence_refs:
+            key = (ref.evidence_ref_id, ref.kind, ref.uri, ref.description, ref.confidence)
+            if key not in unique_refs:
+                unique_refs[key] = ref
+        ordered = sorted(unique_refs.values(), key=lambda item: (item.evidence_ref_id, item.kind, item.uri))
+        return tuple(ordered)
 
 
 class DeterministicTriageMission:
