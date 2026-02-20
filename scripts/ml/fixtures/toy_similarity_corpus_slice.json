@@ -18,7 +18,28 @@
     {
       "id": "fn.pe.parse_imports",
       "name": "parse_pe_imports",
-      "text": "parse PE import table and resolve imported function names from sections"
+      "text": "parse PE import table and resolve imported function names from sections",
+      "provenance": {
+        "source": "toy_similarity_v1",
+        "receipt_id": "receipt:toy:fn.pe.parse_imports",
+        "record_id": "fn.pe.parse_imports"
+      },
+      "evidence_refs": [
+        {
+          "evidence_ref_id": "evr_pe_import_callsite",
+          "kind": "CALLSITE",
+          "description": "callsite evidence maps iat thunk targets to imported symbol dispatch",
+          "uri": "local-index://evidence/fn.pe.parse_imports/callsite/iat-thunk",
+          "confidence": 0.97
+        },
+        {
+          "evidence_ref_id": "evr_pe_import_xref",
+          "kind": "XREF",
+          "description": "xref evidence links thunk stubs to import address table entries",
+          "uri": "local-index://evidence/fn.pe.parse_imports/xref/import-address-table",
+          "confidence": 0.91
+        }
+      ]
     }
   ]
 }

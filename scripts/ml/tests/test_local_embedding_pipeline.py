@@ -20,6 +20,7 @@ SPEC.loader.exec_module(MODULE)
 
 BaselineSimilarityAdapter = MODULE.BaselineSimilarityAdapter
 EmbeddingIndex = MODULE.EmbeddingIndex
+EvidenceWeightedReranker = MODULE.EvidenceWeightedReranker
 FunctionRecord = MODULE.FunctionRecord
 LocalEmbeddingPipeline = MODULE.LocalEmbeddingPipeline
 SemanticSearchQueryService = MODULE.SemanticSearchQueryService
@@ -127,6 +128,30 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertIn("mrr", metrics)
             self.assertEqual(len(metrics["results"]), 2)
 
+    def test_evidence_weighted_reranker_improves_eval_slice(self) -> None:
+        corpus_path = MODULE_PATH.parent / "fixtures" / "toy_similarity_corpus_slice.json"
+        queries_path = MODULE_PATH.parent / "fixtures" / "toy_similarity_queries_slice.json"
+
+        pipeline = LocalEmbeddingPipeline(vector_dimension=128)
+        corpus_records = MODULE.load_corpus(corpus_path)
+        index = pipeline.build_index(corpus_records)
+        adapter = BaselineSimilarityAdapter(pipeline, index)
+
+        baseline = evaluate_queries(adapter, queries_path, top_k=3)
+        reranked = evaluate_queries(
+            adapter,
+            queries_path,
+            top_k=3,
+            index=index,
+            reranker=EvidenceWeightedReranker(),
+        )
+
+        self.assertGreater(reranked["mrr"], baseline["mrr"])
+        self.assertGreater(reranked["recall@1"], baseline["recall@1"])
+        comparison = MODULE.compare_eval_ordering(baseline, reranked, top_k=3)
+        self.assertTrue(comparison["improves_against_baseline"])
+        self.assertGreater(comparison["ordering_improved_queries"], 0)
+
     def test_function_record_defaults_provenance_and_evidence_refs(self) -> None:
         record = FunctionRecord.from_json(
             {
@@ -162,6 +187,56 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         self.assertTrue(
             all(item["function_id"] != "fn.net.open_socket" for item in similar_doc["results"])
         )
+
+    def test_semantic_search_falls_back_on_reranker_failure(self) -> None:
+        class ExplodingReranker:
+            def rerank(self, **_: object) -> list[object]:
+                raise RuntimeError("reranker unavailable")
+
+        index = self.pipeline.build_index(self.records)
+        adapter = BaselineSimilarityAdapter(self.pipeline, index)
+        baseline_service = SemanticSearchQueryService(adapter=adapter, index=index)
+        fallback_service = SemanticSearchQueryService(
+            adapter=adapter,
+            index=index,
+            reranker=ExplodingReranker(),
+        )
+
+        baseline_doc = baseline_service.search_intent("socket host connect", top_k=2).to_json()
+        fallback_doc = fallback_service.search_intent("socket host connect", top_k=2).to_json()
+        baseline_ids = [item["function_id"] for item in baseline_doc["results"]]
+        fallback_ids = [item["function_id"] for item in fallback_doc["results"]]
+        self.assertEqual(fallback_ids, baseline_ids)
+
+    def test_evaluate_command_can_disable_reranker(self) -> None:
+        corpus_path = MODULE_PATH.parent / "fixtures" / "toy_similarity_corpus_slice.json"
+        queries_path = MODULE_PATH.parent / "fixtures" / "toy_similarity_queries_slice.json"
+
+        corpus_records = MODULE.load_corpus(corpus_path)
+        index = self.pipeline.build_index(corpus_records)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir) / "index"
+            index.save(index_dir)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "evaluate",
+                        "--index-dir",
+                        str(index_dir),
+                        "--queries",
+                        str(queries_path),
+                        "--top-k",
+                        "3",
+                        "--disable-reranker",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            metrics = json.loads(stdout.getvalue())
+            self.assertEqual(metrics["reranker"]["enabled"], False)
+            self.assertEqual(metrics["reranker"]["status"], "disabled")
+            self.assertNotIn("comparison", metrics)
 
     def test_panel_output_includes_ranked_results_and_latency_telemetry(self) -> None:
         index = self.pipeline.build_index(self.records)

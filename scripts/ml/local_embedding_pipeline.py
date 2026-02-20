@@ -162,6 +162,147 @@ class SearchResult:
 
 
 @dataclass(frozen=True)
+class EvidenceDerivedFeatures:
+    """Evidence/receipt-derived feature vector used by the reranker."""
+
+    evidence_count: int
+    evidence_kind_score: float
+    confidence_mean: float
+    query_overlap: float
+    receipt_signal: float
+
+
+class EvidenceWeightedReranker:
+    """Deterministic reranker that boosts hits backed by stronger evidence."""
+
+    _KIND_WEIGHTS = {
+        "CALLSITE": 1.0,
+        "XREF": 0.9,
+        "CONSTANT": 0.8,
+        "STRING": 0.75,
+        "TEXT_FEATURE": 0.45,
+        "OTHER": 0.4,
+    }
+
+    def __init__(
+        self,
+        *,
+        query_overlap_weight: float = 0.18,
+        evidence_kind_weight: float = 0.08,
+        confidence_weight: float = 0.05,
+        evidence_count_weight: float = 0.04,
+        receipt_weight: float = 0.03,
+        default_confidence: float = 0.5,
+    ):
+        self._query_overlap_weight = query_overlap_weight
+        self._evidence_kind_weight = evidence_kind_weight
+        self._confidence_weight = confidence_weight
+        self._evidence_count_weight = evidence_count_weight
+        self._receipt_weight = receipt_weight
+        self._default_confidence = default_confidence
+
+    def rerank(
+        self,
+        *,
+        query_text: str,
+        hits: list[SearchResult],
+        index: "EmbeddingIndex",
+        top_k: int,
+    ) -> list[SearchResult]:
+        if top_k <= 0 or not hits:
+            return []
+
+        reranked: list[SearchResult] = []
+        for hit in hits:
+            record = index.get_record(hit.function_id)
+            features = self._derive_features(query_text=query_text, record=record)
+            rerank_score = hit.score + self._feature_bonus(features)
+            reranked.append(
+                SearchResult(
+                    function_id=hit.function_id,
+                    name=hit.name,
+                    score=rerank_score,
+                )
+            )
+
+        reranked.sort(key=lambda item: (-item.score, item.function_id))
+        return reranked[: min(top_k, len(reranked))]
+
+    def _derive_features(
+        self,
+        *,
+        query_text: str,
+        record: FunctionRecord | None,
+    ) -> EvidenceDerivedFeatures:
+        if record is None:
+            return EvidenceDerivedFeatures(
+                evidence_count=0,
+                evidence_kind_score=0.0,
+                confidence_mean=0.0,
+                query_overlap=0.0,
+                receipt_signal=0.0,
+            )
+
+        query_tokens = set(_TOKEN_RE.findall(query_text.lower()))
+        evidence_count = len(record.evidence_refs)
+        if evidence_count == 0:
+            return EvidenceDerivedFeatures(
+                evidence_count=0,
+                evidence_kind_score=0.0,
+                confidence_mean=0.0,
+                query_overlap=0.0,
+                receipt_signal=self._receipt_signal(record),
+            )
+
+        weighted_kind_total = 0.0
+        confidence_total = 0.0
+        overlap_scores: list[float] = []
+        for ref in record.evidence_refs:
+            kind_weight = self._KIND_WEIGHTS.get(ref.kind, self._KIND_WEIGHTS["OTHER"])
+            confidence = ref.confidence if ref.confidence is not None else self._default_confidence
+            bounded_confidence = min(max(confidence, 0.0), 1.0)
+
+            weighted_kind_total += kind_weight * bounded_confidence
+            confidence_total += bounded_confidence
+
+            if query_tokens:
+                evidence_tokens = set(
+                    _TOKEN_RE.findall(f"{ref.kind} {ref.description} {ref.uri}".lower())
+                )
+                if evidence_tokens:
+                    overlap_scores.append(len(query_tokens & evidence_tokens) / len(query_tokens))
+
+        evidence_kind_score = weighted_kind_total / evidence_count
+        confidence_mean = confidence_total / evidence_count
+        query_overlap = max(overlap_scores) if overlap_scores else 0.0
+        return EvidenceDerivedFeatures(
+            evidence_count=evidence_count,
+            evidence_kind_score=evidence_kind_score,
+            confidence_mean=confidence_mean,
+            query_overlap=query_overlap,
+            receipt_signal=self._receipt_signal(record),
+        )
+
+    def _feature_bonus(self, features: EvidenceDerivedFeatures) -> float:
+        evidence_count_norm = min(features.evidence_count, 4) / 4.0
+        bonus = (
+            self._query_overlap_weight * features.query_overlap
+            + self._evidence_kind_weight * features.evidence_kind_score
+            + self._confidence_weight * features.confidence_mean
+            + self._evidence_count_weight * evidence_count_norm
+            + self._receipt_weight * features.receipt_signal
+        )
+        return min(max(bonus, 0.0), 0.35)
+
+    @staticmethod
+    def _receipt_signal(record: FunctionRecord) -> float:
+        receipt_id = dict(record.provenance).get("receipt_id", "")
+        if not receipt_id:
+            return 0.0
+        return 1.0 if receipt_id.startswith("receipt:") and receipt_id.count(":") >= 2 else 0.5
+
+
+@dataclass(frozen=True)
 class RankedSearchResult:
     """Ranked semantic search hit enriched with provenance and evidence."""
 
@@ -511,20 +652,31 @@ class SemanticSearchQueryService:
     MODE_INTENT = "intent"
     MODE_SIMILAR_FUNCTION = "similar-function"
 
-    def __init__(self, adapter: BaselineSimilarityAdapter, index: EmbeddingIndex):
+    def __init__(
+        self,
+        adapter: BaselineSimilarityAdapter,
+        index: EmbeddingIndex,
+        reranker: EvidenceWeightedReranker | None = None,
+    ):
         self._adapter = adapter
         self._index = index
+        self._reranker = reranker
 
     def search_intent(self, query_text: str, top_k: int = 5) -> SemanticSearchResponse:
         normalized = query_text.strip()
         start = _now_ns()
         hits = self._adapter.top_k(normalized, top_k=top_k)
+        reranked_hits = self._rerank_or_fallback(
+            query_text=normalized,
+            hits=hits,
+            top_k=top_k,
+        )
         latency_ms = _ms(start, _now_ns())
         return self._build_response(
             mode=self.MODE_INTENT,
             query_text=normalized,
             top_k=top_k,
-            raw_hits=hits,
+            raw_hits=reranked_hits,
             latency_ms=latency_ms,
             seed_function_id=None,
         )
@@ -538,15 +690,39 @@ class SemanticSearchQueryService:
         start = _now_ns()
         raw_hits = self._adapter.top_k(query_text, top_k=top_k + 1)
         filtered_hits = [item for item in raw_hits if item.function_id != function_id][:top_k]
+        reranked_hits = self._rerank_or_fallback(
+            query_text=query_text,
+            hits=filtered_hits,
+            top_k=top_k,
+        )
         latency_ms = _ms(start, _now_ns())
         return self._build_response(
             mode=self.MODE_SIMILAR_FUNCTION,
             query_text=query_text,
             top_k=top_k,
-            raw_hits=filtered_hits,
+            raw_hits=reranked_hits,
             latency_ms=latency_ms,
             seed_function_id=function_id,
         )
+
+    def _rerank_or_fallback(
+        self,
+        *,
+        query_text: str,
+        hits: list[SearchResult],
+        top_k: int,
+    ) -> list[SearchResult]:
+        if self._reranker is None or not hits:
+            return hits[: min(top_k, len(hits))]
+        try:
+            return self._reranker.rerank(
+                query_text=query_text,
+                hits=hits,
+                index=self._index,
+                top_k=top_k,
+            )
+        except Exception:
+            return hits[: min(top_k, len(hits))]
 
     def _build_response(
         self,
@@ -652,7 +828,14 @@ def load_corpus(corpus_path: Path) -> list[FunctionRecord]:
     return [FunctionRecord.from_json(raw) for raw in functions]
 
 
-def evaluate_queries(adapter: BaselineSimilarityAdapter, queries_path: Path, top_k: int) -> dict[str, Any]:
+def evaluate_queries(
+    adapter: BaselineSimilarityAdapter,
+    queries_path: Path,
+    top_k: int,
+    *,
+    index: EmbeddingIndex | None = None,
+    reranker: EvidenceWeightedReranker | None = None,
+) -> dict[str, Any]:
     doc = json.loads(queries_path.read_text(encoding="utf-8"))
     if not isinstance(doc, dict) or not isinstance(doc.get("queries"), list):
         raise ValueError("queries document must contain a 'queries' array")
@@ -667,6 +850,11 @@ def evaluate_queries(adapter: BaselineSimilarityAdapter, queries_path: Path, top
         text = str(query.get("text") or "")
         gt = str(query.get("ground_truth_id") or "")
         hits = adapter.top_k(text, top_k=top_k)
+        if reranker is not None and index is not None:
+            try:
+                hits = reranker.rerank(query_text=text, hits=hits, index=index, top_k=top_k)
+            except Exception:
+                hits = hits[: min(top_k, len(hits))]
 
         total += 1
         ranked_ids = [item.function_id for item in hits]
@@ -702,6 +890,68 @@ def evaluate_queries(adapter: BaselineSimilarityAdapter, queries_path: Path, top
     }
 
 
+def compare_eval_ordering(
+    baseline_metrics: Mapping[str, Any],
+    candidate_metrics: Mapping[str, Any],
+    *,
+    top_k: int,
+) -> dict[str, Any]:
+    baseline_results = baseline_metrics.get("results")
+    candidate_results = candidate_metrics.get("results")
+    if not isinstance(baseline_results, list) or not isinstance(candidate_results, list):
+        raise ValueError("evaluate metrics missing list-valued 'results'")
+
+    baseline_by_query = {
+        str(item.get("query")): item for item in baseline_results if isinstance(item, Mapping)
+    }
+    candidate_by_query = {
+        str(item.get("query")): item for item in candidate_results if isinstance(item, Mapping)
+    }
+
+    improved = 0
+    worsened = 0
+    unchanged = 0
+    rank_deltas: list[float] = []
+
+    for query_text, baseline_row in baseline_by_query.items():
+        candidate_row = candidate_by_query.get(query_text)
+        if candidate_row is None:
+            continue
+
+        baseline_rank = baseline_row.get("rank")
+        candidate_rank = candidate_row.get("rank")
+        baseline_rank_num = int(baseline_rank) if isinstance(baseline_rank, int) else top_k + 1
+        candidate_rank_num = int(candidate_rank) if isinstance(candidate_rank, int) else top_k + 1
+
+        delta = baseline_rank_num - candidate_rank_num
+        rank_deltas.append(float(delta))
+        if delta > 0:
+            improved += 1
+        elif delta < 0:
+            worsened += 1
+        else:
+            unchanged += 1
+
+    total = improved + worsened + unchanged
+    mrr_delta = float(candidate_metrics.get("mrr", 0.0)) - float(baseline_metrics.get("mrr", 0.0))
+    recall_delta = float(candidate_metrics.get("recall@1", 0.0)) - float(
+        baseline_metrics.get("recall@1", 0.0)
+    )
+
+    return {
+        "queries_compared": total,
+        "ordering_improved_queries": improved,
+        "ordering_worsened_queries": worsened,
+        "ordering_unchanged_queries": unchanged,
+        "mean_rank_delta": round((sum(rank_deltas) / total), 6) if total else 0.0,
+        "mrr_delta": round(mrr_delta, 6),
+        "recall@1_delta": round(recall_delta, 6),
+        "improves_against_baseline": bool(
+            total > 0 and improved > 0 and worsened == 0 and mrr_delta >= 0.0 and recall_delta >= 0.0
+        ),
+    }
+
+
 def _build_command(args: argparse.Namespace) -> int:
     pipeline = LocalEmbeddingPipeline(vector_dimension=args.vector_dimension)
     records = load_corpus(args.corpus)
@@ -717,7 +967,8 @@ def _search_command(args: argparse.Namespace) -> int:
     index = EmbeddingIndex.load(args.index_dir)
     pipeline = LocalEmbeddingPipeline(vector_dimension=index.vector_dimension)
     adapter = BaselineSimilarityAdapter(pipeline=pipeline, index=index)
-    service = SemanticSearchQueryService(adapter=adapter, index=index)
+    reranker = None if args.disable_reranker else EvidenceWeightedReranker()
+    service = SemanticSearchQueryService(adapter=adapter, index=index, reranker=reranker)
     response = _run_semantic_search(
         service=service,
         mode=args.mode,
@@ -734,7 +985,8 @@ def _panel_command(args: argparse.Namespace) -> int:
     index = EmbeddingIndex.load(args.index_dir)
     pipeline = LocalEmbeddingPipeline(vector_dimension=index.vector_dimension)
     adapter = BaselineSimilarityAdapter(pipeline=pipeline, index=index)
-    service = SemanticSearchQueryService(adapter=adapter, index=index)
+    reranker = None if args.disable_reranker else EvidenceWeightedReranker()
+    service = SemanticSearchQueryService(adapter=adapter, index=index, reranker=reranker)
     response = _run_semantic_search(
         service=service,
         mode=args.mode,
@@ -752,7 +1004,35 @@ def _evaluate_command(args: argparse.Namespace) -> int:
     index = EmbeddingIndex.load(args.index_dir)
     pipeline = LocalEmbeddingPipeline(vector_dimension=index.vector_dimension)
     adapter = BaselineSimilarityAdapter(pipeline=pipeline, index=index)
-    metrics = evaluate_queries(adapter, args.queries, top_k=args.top_k)
+    baseline_metrics = evaluate_queries(adapter, args.queries, top_k=args.top_k)
+    if args.disable_reranker:
+        metrics = dict(baseline_metrics)
+        metrics["reranker"] = {
+            "enabled": False,
+            "name": "evidence_weighted_v1",
+            "status": "disabled",
+        }
+    else:
+        reranker = EvidenceWeightedReranker()
+        reranked_metrics = evaluate_queries(
+            adapter,
+            args.queries,
+            top_k=args.top_k,
+            index=index,
+            reranker=reranker,
+        )
+        metrics = dict(reranked_metrics)
+        metrics["baseline"] = baseline_metrics
+        metrics["comparison"] = compare_eval_ordering(
+            baseline_metrics,
+            reranked_metrics,
+            top_k=args.top_k,
+        )
+        metrics["reranker"] = {
+            "enabled": True,
+            "name": "evidence_weighted_v1",
+            "status": "applied",
+        }
     metrics["build_stats"] = asdict(adapter.build_stats)
 
     if args.output:
@@ -797,6 +1077,11 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional JSONL path for latency telemetry events",
     )
+    search_parser.add_argument(
+        "--disable-reranker",
+        action="store_true",
+        help="Skip evidence-weighted reranking and return baseline ordering only",
+    )
     search_parser.set_defaults(func=_search_command)
 
     panel_parser = subparsers.add_parser("panel", help="Render semantic search panel payload")
@@ -822,6 +1107,11 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional JSONL path for latency telemetry events",
     )
+    panel_parser.add_argument(
+        "--disable-reranker",
+        action="store_true",
+        help="Skip evidence-weighted reranking and return baseline ordering only",
+    )
     panel_parser.set_defaults(func=_panel_command)
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate retrieval metrics against query set")
@@ -829,6 +1119,11 @@ def _parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--queries", type=Path, required=True, help="Path to queries JSON")
     eval_parser.add_argument("--top-k", type=int, default=10, help="Top-k result count")
     eval_parser.add_argument("--output", type=Path, default=None, help="Optional metrics output JSON")
+    eval_parser.add_argument(
+        "--disable-reranker",
+        action="store_true",
+        help="Skip evidence-weighted reranking and evaluate baseline only",
+    )
     eval_parser.set_defaults(func=_evaluate_command)
 
     return parser

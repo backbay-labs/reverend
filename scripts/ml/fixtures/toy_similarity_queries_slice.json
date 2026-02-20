@@ -9,7 +9,7 @@
       "ground_truth_id": "fn.net.open_socket"
     },
     {
-      "text": "load PE imports from binary",
+      "text": "callsite evidence iat thunk",
       "ground_truth_id": "fn.pe.parse_imports"
     }
   ]

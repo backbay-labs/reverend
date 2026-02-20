@@ -29,6 +29,19 @@ python3 scripts/ml/local_embedding_pipeline.py search \
   --top-k 3
 ```
 
+Search/panel paths apply an evidence-weighted reranker by default.
+
+Use baseline-only ordering when reranking is unavailable or intentionally disabled:
+
+```bash
+python3 scripts/ml/local_embedding_pipeline.py search \
+  --index-dir /tmp/ml301-index \
+  --mode intent \
+  --query "socket connect host" \
+  --top-k 3 \
+  --disable-reranker
+```
+
 Similar-function query from a known function id:
 
 ```bash
@@ -72,3 +85,7 @@ python3 scripts/ml/local_embedding_pipeline.py evaluate \
   --top-k 3 \
   --output /tmp/ml301-metrics.json
 ```
+
+`evaluate` emits reranked metrics plus a baseline comparison block (`mrr_delta`,
+`recall@1_delta`, and per-query ordering deltas). Add `--disable-reranker` to
+evaluate baseline only.
