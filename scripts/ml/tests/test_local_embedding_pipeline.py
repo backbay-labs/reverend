@@ -1230,6 +1230,257 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(by_id["p-2"]["state"], "APPROVED")
             self.assertEqual(by_id["p-3"]["state"], "PROPOSED")
 
+    def test_type_pr_list_and_detail_views_emit_panel_payloads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_store = Path(tmpdir) / "local_store.json"
+            local_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "local_proposal_store",
+                        "proposals": [],
+                        "type_prs": [
+                            {
+                                "type_pr_id": "tp-1",
+                                "title": "Recover socket parameter types",
+                                "author": "user:analyst",
+                                "status": "IN_REVIEW",
+                                "updated_at_utc": "2026-02-20T12:00:00Z",
+                                "reviewers": [
+                                    {"reviewer_id": "user:reviewer", "status": "PENDING"}
+                                ],
+                                "assertions": [
+                                    {
+                                        "assertion_id": "a-1",
+                                        "lifecycle_state": "UNDER_REVIEW",
+                                        "confidence": 0.88,
+                                        "conflict_count": 1,
+                                        "evidence_ids": ["ev-1"],
+                                    },
+                                    {
+                                        "assertion_id": "a-2",
+                                        "lifecycle_state": "UNDER_REVIEW",
+                                        "confidence": 0.94,
+                                        "conflict_count": 0,
+                                        "evidence_ids": ["ev-2"],
+                                    },
+                                ],
+                                "review_decisions": [
+                                    {
+                                        "review_id": "review-prior-1",
+                                        "reviewer_id": "user:reviewer",
+                                        "decision": "APPROVE",
+                                        "rationale": "looks consistent",
+                                        "receipt_id": "receipt:type_pr_review:prior",
+                                        "decided_at_utc": "2026-02-20T11:00:00Z",
+                                        "resulting_state": "UNDER_REVIEW",
+                                    }
+                                ],
+                            },
+                            {
+                                "type_pr_id": "tp-2",
+                                "title": "Closed PR should not appear in queue",
+                                "author": "user:analyst",
+                                "status": "CLOSED",
+                                "updated_at_utc": "2026-02-20T13:00:00Z",
+                                "reviewers": [
+                                    {"reviewer_id": "user:reviewer", "status": "PENDING"}
+                                ],
+                                "assertions": [
+                                    {
+                                        "assertion_id": "a-3",
+                                        "lifecycle_state": "REJECTED",
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "type-pr-list",
+                        "--local-store",
+                        str(local_store),
+                        "--reviewer-id",
+                        "user:reviewer",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            list_payload = json.loads(stdout.getvalue())
+            self.assertEqual(list_payload["kind"], "type_pr_review_list_panel")
+            self.assertEqual(list_payload["panel"]["view"], "list")
+            self.assertEqual(list_payload["metrics"]["matched_total"], 1)
+            self.assertEqual(list_payload["rows"][0]["type_pr_id"], "tp-1")
+            self.assertEqual(list_payload["rows"][0]["confidence_floor"], 0.88)
+            self.assertEqual(list_payload["rows"][0]["conflict_count"], 1)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "type-pr-detail",
+                        "--local-store",
+                        str(local_store),
+                        "--type-pr-id",
+                        "tp-1",
+                        "--reviewer-id",
+                        "user:reviewer",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            detail_payload = json.loads(stdout.getvalue())
+            self.assertEqual(detail_payload["kind"], "type_pr_review_detail_panel")
+            self.assertEqual(detail_payload["panel"]["view"], "detail")
+            self.assertEqual(detail_payload["type_pr"]["type_pr_id"], "tp-1")
+            self.assertEqual(detail_payload["type_pr"]["assertion_count"], 2)
+            self.assertEqual(detail_payload["type_pr"]["confidence_floor"], 0.88)
+            self.assertIn("REQUEST_CHANGES", detail_payload["decision_form"]["supported_decisions"])
+            self.assertEqual(len(detail_payload["review_timeline"]), 1)
+
+    def test_type_pr_review_decision_updates_lifecycle_atomically_and_persists_rationale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_store = Path(tmpdir) / "local_store.json"
+            local_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "local_proposal_store",
+                        "proposals": [],
+                        "type_prs": [
+                            {
+                                "type_pr_id": "tp-atomic",
+                                "title": "Atomic review path",
+                                "author": "user:analyst",
+                                "status": "IN_REVIEW",
+                                "reviewers": [{"reviewer_id": "user:reviewer", "status": "PENDING"}],
+                                "assertions": [
+                                    {
+                                        "assertion_id": "a-1",
+                                        "lifecycle_state": "UNDER_REVIEW",
+                                        "confidence": 0.9,
+                                    },
+                                    {
+                                        "assertion_id": "a-2",
+                                        "lifecycle_state": "UNDER_REVIEW",
+                                        "confidence": 0.85,
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "type-pr-review",
+                        "--local-store",
+                        str(local_store),
+                        "--type-pr-id",
+                        "tp-atomic",
+                        "--reviewer-id",
+                        "user:reviewer",
+                        "--decision",
+                        "REQUEST_CHANGES",
+                        "--rationale",
+                        "evidence quality below threshold",
+                        "--comment",
+                        "missing callsite proof",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(report["kind"], "type_pr_review_decision_report")
+            self.assertEqual(report["next_pr_status"], "CHANGES_REQUESTED")
+            self.assertEqual(report["target_assertion_state"], "PROPOSED")
+            self.assertTrue(report["transaction"]["atomic"])
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            type_pr = local_doc["type_prs"][0]
+            self.assertEqual(type_pr["status"], "CHANGES_REQUESTED")
+            pr_decision = type_pr["review_decisions"][-1]
+            self.assertEqual(pr_decision["decision"], "REQUEST_CHANGES")
+            self.assertEqual(pr_decision["rationale"], "evidence quality below threshold")
+            self.assertEqual(pr_decision["comment"], "missing callsite proof")
+            self.assertEqual(pr_decision["receipt_id"], report["receipt_id"])
+
+            for assertion in type_pr["assertions"]:
+                self.assertEqual(assertion["lifecycle_state"], "PROPOSED")
+                transition = assertion["transition_history"][-1]
+                self.assertEqual(transition["decision"], "REQUEST_CHANGES")
+                self.assertEqual(transition["rationale"], "evidence quality below threshold")
+                self.assertEqual(transition["comment"], "missing callsite proof")
+                self.assertEqual(transition["receipt_id"], report["receipt_id"])
+                assertion_decision = assertion["review_decisions"][-1]
+                self.assertEqual(assertion_decision["rationale"], "evidence quality below threshold")
+                self.assertEqual(assertion_decision["comment"], "missing callsite proof")
+
+    def test_type_pr_review_decision_preserves_store_when_preconditions_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_store = Path(tmpdir) / "local_store.json"
+            local_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "local_proposal_store",
+                        "proposals": [],
+                        "type_prs": [
+                            {
+                                "type_pr_id": "tp-fail",
+                                "title": "Atomic guard test",
+                                "author": "user:analyst",
+                                "status": "IN_REVIEW",
+                                "assertions": [
+                                    {"assertion_id": "a-1", "lifecycle_state": "UNDER_REVIEW"},
+                                    {"assertion_id": "a-2", "lifecycle_state": "PROPOSED"},
+                                ],
+                            }
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            before = json.loads(local_store.read_text(encoding="utf-8"))
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "type-pr-review",
+                        "--local-store",
+                        str(local_store),
+                        "--type-pr-id",
+                        "tp-fail",
+                        "--reviewer-id",
+                        "user:reviewer",
+                        "--decision",
+                        "APPROVE",
+                        "--rationale",
+                        "all checks green",
+                    ]
+                )
+            self.assertEqual(exit_code, 1)
+            error_payload = json.loads(stdout.getvalue())
+            self.assertEqual(error_payload["kind"], "type_pr_review_decision_error")
+            self.assertIn("all assertions must be UNDER_REVIEW", error_payload["error"])
+
+            after = json.loads(local_store.read_text(encoding="utf-8"))
+            self.assertEqual(after, before)
+
     @staticmethod
     def _triage_fixture_records() -> list[FunctionRecord]:
         return [

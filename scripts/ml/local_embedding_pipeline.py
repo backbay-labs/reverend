@@ -65,6 +65,61 @@ PROPOSAL_REVIEW_ACTION_TO_STATE = {
     PROPOSAL_REVIEW_ACTION_REJECT: PROPOSAL_STATE_REJECTED,
 }
 
+TYPE_ASSERTION_STATE_PROPOSED = "PROPOSED"
+TYPE_ASSERTION_STATE_UNDER_REVIEW = "UNDER_REVIEW"
+TYPE_ASSERTION_STATE_ACCEPTED = "ACCEPTED"
+TYPE_ASSERTION_STATE_REJECTED = "REJECTED"
+TYPE_ASSERTION_ALLOWED_STATES = (
+    TYPE_ASSERTION_STATE_PROPOSED,
+    TYPE_ASSERTION_STATE_UNDER_REVIEW,
+    TYPE_ASSERTION_STATE_ACCEPTED,
+    TYPE_ASSERTION_STATE_REJECTED,
+)
+
+TYPE_PR_STATUS_DRAFT = "DRAFT"
+TYPE_PR_STATUS_OPEN = "OPEN"
+TYPE_PR_STATUS_IN_REVIEW = "IN_REVIEW"
+TYPE_PR_STATUS_CHANGES_REQUESTED = "CHANGES_REQUESTED"
+TYPE_PR_STATUS_APPROVED = "APPROVED"
+TYPE_PR_STATUS_MERGED = "MERGED"
+TYPE_PR_STATUS_REJECTED = "REJECTED"
+TYPE_PR_STATUS_CLOSED = "CLOSED"
+TYPE_PR_ALLOWED_STATUSES = (
+    TYPE_PR_STATUS_DRAFT,
+    TYPE_PR_STATUS_OPEN,
+    TYPE_PR_STATUS_IN_REVIEW,
+    TYPE_PR_STATUS_CHANGES_REQUESTED,
+    TYPE_PR_STATUS_APPROVED,
+    TYPE_PR_STATUS_MERGED,
+    TYPE_PR_STATUS_REJECTED,
+    TYPE_PR_STATUS_CLOSED,
+)
+TYPE_PR_QUEUE_STATUSES = (
+    TYPE_PR_STATUS_OPEN,
+    TYPE_PR_STATUS_IN_REVIEW,
+    TYPE_PR_STATUS_CHANGES_REQUESTED,
+)
+TYPE_PR_REVIEWABLE_STATUSES = frozenset(TYPE_PR_QUEUE_STATUSES)
+
+TYPE_PR_DECISION_APPROVE = "APPROVE"
+TYPE_PR_DECISION_REQUEST_CHANGES = "REQUEST_CHANGES"
+TYPE_PR_DECISION_REJECT = "REJECT"
+TYPE_PR_DECISION_TO_PR_STATUS = {
+    TYPE_PR_DECISION_APPROVE: TYPE_PR_STATUS_APPROVED,
+    TYPE_PR_DECISION_REQUEST_CHANGES: TYPE_PR_STATUS_CHANGES_REQUESTED,
+    TYPE_PR_DECISION_REJECT: TYPE_PR_STATUS_REJECTED,
+}
+TYPE_PR_DECISION_TO_ASSERTION_STATE = {
+    TYPE_PR_DECISION_APPROVE: TYPE_ASSERTION_STATE_ACCEPTED,
+    TYPE_PR_DECISION_REQUEST_CHANGES: TYPE_ASSERTION_STATE_PROPOSED,
+    TYPE_PR_DECISION_REJECT: TYPE_ASSERTION_STATE_REJECTED,
+}
+TYPE_PR_DECISION_TO_REVIEWER_STATUS = {
+    TYPE_PR_DECISION_APPROVE: "APPROVED",
+    TYPE_PR_DECISION_REQUEST_CHANGES: "CHANGES_REQUESTED",
+    TYPE_PR_DECISION_REJECT: "REJECTED",
+}
+
 
 @dataclass(frozen=True)
 class EvidenceRef:
@@ -951,6 +1006,7 @@ def _load_local_proposal_store(local_store_path: Path) -> dict[str, Any]:
             "schema_version": 1,
             "kind": "local_proposal_store",
             "proposals": [],
+            "type_prs": [],
         }
 
     doc = json.loads(local_store_path.read_text(encoding="utf-8"))
@@ -966,13 +1022,34 @@ def _load_local_proposal_store(local_store_path: Path) -> dict[str, Any]:
         for normalized_item in (_normalize_local_proposal(item),)
         if normalized_item
     ]
+    type_prs_raw = doc.get("type_prs")
+    if type_prs_raw is None:
+        type_prs_raw = []
+    if not isinstance(type_prs_raw, list):
+        raise ValueError("local store 'type_prs' value must be an array when provided")
+    normalized_type_prs = [
+        normalized_item
+        for item in type_prs_raw
+        if isinstance(item, Mapping)
+        for normalized_item in (_normalize_local_type_pr(item),)
+        if normalized_item
+    ]
     resolved = dict(doc)
     resolved["proposals"] = normalized
+    resolved["type_prs"] = normalized_type_prs
     return resolved
 
 
 def _proposal_id_from_doc(proposal: Mapping[str, Any]) -> str:
     return str(proposal.get("proposal_id") or proposal.get("id") or "").strip()
+
+
+def _type_pr_id_from_doc(type_pr: Mapping[str, Any]) -> str:
+    return str(type_pr.get("type_pr_id") or type_pr.get("pr_id") or type_pr.get("id") or "").strip()
+
+
+def _type_assertion_id_from_doc(assertion: Mapping[str, Any]) -> str:
+    return str(assertion.get("assertion_id") or assertion.get("id") or "").strip()
 
 
 def _normalize_proposal_state(
@@ -1249,6 +1326,282 @@ def _normalize_local_proposal(raw: Mapping[str, Any]) -> dict[str, Any]:
     return proposal
 
 
+def _normalize_type_pr_status(
+    raw_status: Any,
+    *,
+    default: str = TYPE_PR_STATUS_OPEN,
+) -> str:
+    normalized = str(raw_status or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if not normalized:
+        return default
+    return normalized
+
+
+def _normalize_type_assertion_state(
+    raw_state: Any,
+    *,
+    default: str = TYPE_ASSERTION_STATE_PROPOSED,
+) -> str:
+    normalized = str(raw_state or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if not normalized:
+        return default
+    return normalized
+
+
+def _normalize_type_pr_decision(raw_decision: Any) -> str:
+    normalized = str(raw_decision or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if normalized == "APPROVED":
+        return TYPE_PR_DECISION_APPROVE
+    return normalized
+
+
+def _new_type_assertion_transition(
+    *,
+    from_state: str | None,
+    to_state: str,
+    receipt_id: str,
+    changed_at_utc: str | None = None,
+    reviewer_id: str | None = None,
+    decision: str | None = None,
+    comment: str | None = None,
+    rationale: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    transition: dict[str, Any] = {
+        "from_state": from_state,
+        "to_state": to_state,
+        "receipt_id": receipt_id,
+        "changed_at_utc": changed_at_utc or _utc_now(),
+    }
+    if reviewer_id:
+        transition["reviewer_id"] = reviewer_id
+    if decision:
+        transition["decision"] = decision
+    if comment:
+        transition["comment"] = comment
+    if rationale:
+        transition["rationale"] = rationale
+    if reason:
+        transition["reason"] = reason
+    return transition
+
+
+def _new_type_pr_status_transition(
+    *,
+    from_status: str | None,
+    to_status: str,
+    receipt_id: str,
+    changed_at_utc: str | None = None,
+    reviewer_id: str | None = None,
+    decision: str | None = None,
+    comment: str | None = None,
+    rationale: str | None = None,
+) -> dict[str, Any]:
+    transition: dict[str, Any] = {
+        "from_status": from_status,
+        "to_status": to_status,
+        "receipt_id": receipt_id,
+        "changed_at_utc": changed_at_utc or _utc_now(),
+    }
+    if reviewer_id:
+        transition["reviewer_id"] = reviewer_id
+    if decision:
+        transition["decision"] = decision
+    if comment:
+        transition["comment"] = comment
+    if rationale:
+        transition["rationale"] = rationale
+    return transition
+
+
+def _normalize_type_pr_review_decision(
+    raw: Mapping[str, Any],
+    *,
+    type_pr_id: str,
+    decided_at_default: str,
+) -> dict[str, Any]:
+    decision = _normalize_type_pr_decision(raw.get("decision"))
+    if decision not in TYPE_PR_DECISION_TO_PR_STATUS:
+        return {}
+
+    rationale = str(raw.get("rationale") or "").strip()
+    if not rationale:
+        return {}
+
+    reviewer_id = str(raw.get("reviewer_id") or raw.get("reviewer") or "").strip()
+    if not reviewer_id:
+        return {}
+
+    decision_doc: dict[str, Any] = {
+        "review_id": str(raw.get("review_id") or raw.get("id") or uuid.uuid4()),
+        "type_pr_id": type_pr_id,
+        "reviewer_id": reviewer_id,
+        "decision": decision,
+        "rationale": rationale,
+        "receipt_id": str(raw.get("receipt_id") or "").strip(),
+        "decided_at_utc": str(raw.get("decided_at_utc") or raw.get("decided_at") or decided_at_default).strip()
+        or decided_at_default,
+        "resulting_state": _normalize_type_assertion_state(
+            raw.get("resulting_state"),
+            default=TYPE_PR_DECISION_TO_ASSERTION_STATE[decision],
+        ),
+    }
+    comment = str(raw.get("comment") or "").strip()
+    if comment:
+        decision_doc["comment"] = comment
+    return decision_doc
+
+
+def _normalize_type_pr_assertion(raw: Mapping[str, Any]) -> dict[str, Any]:
+    assertion = dict(raw)
+    assertion_id = _type_assertion_id_from_doc(assertion)
+    if not assertion_id:
+        return {}
+
+    assertion["assertion_id"] = assertion_id
+    assertion["lifecycle_state"] = _normalize_type_assertion_state(
+        assertion.get("lifecycle_state") or assertion.get("state"),
+        default=TYPE_ASSERTION_STATE_UNDER_REVIEW,
+    )
+
+    updated_at_utc = str(assertion.get("updated_at_utc") or assertion.get("updated_at") or "").strip()
+    if not updated_at_utc:
+        updated_at_utc = _utc_now()
+    assertion["updated_at_utc"] = updated_at_utc
+
+    confidence_raw = assertion.get("confidence")
+    if confidence_raw is not None:
+        try:
+            assertion["confidence"] = float(confidence_raw)
+        except (TypeError, ValueError):
+            assertion["confidence"] = 0.0
+
+    evidence_ids_raw = assertion.get("evidence_ids")
+    if isinstance(evidence_ids_raw, list):
+        assertion["evidence_ids"] = [str(item).strip() for item in evidence_ids_raw if str(item).strip()]
+
+    conflicts_raw = assertion.get("conflicts")
+    conflicts = [dict(item) for item in conflicts_raw if isinstance(item, Mapping)] if isinstance(conflicts_raw, list) else []
+    if conflicts:
+        assertion["conflicts"] = conflicts
+    if "conflict_count" not in assertion:
+        assertion["conflict_count"] = len(conflicts)
+
+    transitions_raw = (
+        assertion.get("transition_history")
+        or assertion.get("transitions")
+        or assertion.get("lifecycle_transitions")
+    )
+    transitions = [dict(item) for item in transitions_raw if isinstance(item, Mapping)] if isinstance(transitions_raw, list) else []
+    if not transitions:
+        transitions = [
+            _new_type_assertion_transition(
+                from_state=None,
+                to_state=assertion["lifecycle_state"],
+                receipt_id=str(assertion.get("last_receipt_id") or "").strip(),
+                changed_at_utc=updated_at_utc,
+                reason="initial_state",
+            )
+        ]
+    assertion["transition_history"] = transitions
+
+    decisions_raw = assertion.get("review_decisions")
+    if isinstance(decisions_raw, list):
+        assertion["review_decisions"] = [
+            decision
+            for item in decisions_raw
+            if isinstance(item, Mapping)
+            for decision in (
+                _normalize_type_pr_review_decision(
+                    item,
+                    type_pr_id=str(assertion.get("type_pr_id") or ""),
+                    decided_at_default=updated_at_utc,
+                ),
+            )
+            if decision
+        ]
+    else:
+        assertion["review_decisions"] = []
+
+    return assertion
+
+
+def _normalize_local_type_pr(raw: Mapping[str, Any]) -> dict[str, Any]:
+    type_pr = dict(raw)
+    type_pr_id = _type_pr_id_from_doc(type_pr)
+    if not type_pr_id:
+        return {}
+
+    type_pr["type_pr_id"] = type_pr_id
+    type_pr["status"] = _normalize_type_pr_status(type_pr.get("status") or type_pr.get("state"))
+
+    created_at_utc = str(type_pr.get("created_at_utc") or type_pr.get("created_at") or "").strip()
+    if not created_at_utc:
+        created_at_utc = _utc_now()
+    updated_at_utc = str(type_pr.get("updated_at_utc") or type_pr.get("updated_at") or "").strip()
+    if not updated_at_utc:
+        updated_at_utc = created_at_utc
+    type_pr["created_at_utc"] = created_at_utc
+    type_pr["updated_at_utc"] = updated_at_utc
+
+    assertions_raw = type_pr.get("assertions")
+    type_pr["assertions"] = [
+        assertion
+        for item in assertions_raw
+        if isinstance(item, Mapping)
+        for assertion in (_normalize_type_pr_assertion(item),)
+        if assertion
+    ] if isinstance(assertions_raw, list) else []
+    for assertion in type_pr["assertions"]:
+        assertion["type_pr_id"] = type_pr_id
+
+    decisions_raw = type_pr.get("review_decisions")
+    if isinstance(decisions_raw, list):
+        type_pr["review_decisions"] = [
+            decision
+            for item in decisions_raw
+            if isinstance(item, Mapping)
+            for decision in (
+                _normalize_type_pr_review_decision(
+                    item,
+                    type_pr_id=type_pr_id,
+                    decided_at_default=updated_at_utc,
+                ),
+            )
+            if decision
+        ]
+    else:
+        type_pr["review_decisions"] = []
+
+    reviewers_raw = type_pr.get("reviewers")
+    reviewers: list[dict[str, str]] = []
+    if isinstance(reviewers_raw, list):
+        for entry in reviewers_raw:
+            if isinstance(entry, Mapping):
+                reviewer_id = str(entry.get("reviewer_id") or entry.get("reviewer") or "").strip()
+                status = str(entry.get("status") or "PENDING").strip().upper() or "PENDING"
+            else:
+                reviewer_id = str(entry).strip()
+                status = "PENDING"
+            if reviewer_id:
+                reviewers.append({"reviewer_id": reviewer_id, "status": status})
+    type_pr["reviewers"] = reviewers
+
+    transitions_raw = type_pr.get("status_transitions")
+    transitions = [dict(item) for item in transitions_raw if isinstance(item, Mapping)] if isinstance(transitions_raw, list) else []
+    if not transitions:
+        transitions = [
+            _new_type_pr_status_transition(
+                from_status=None,
+                to_status=type_pr["status"],
+                receipt_id=str(type_pr.get("last_receipt_id") or "").strip(),
+                changed_at_utc=updated_at_utc,
+            )
+        ]
+    type_pr["status_transitions"] = transitions
+    return type_pr
+
+
 def _proposal_state_counts(proposals: list[dict[str, Any]]) -> dict[str, int]:
     counts = Counter(
         _normalize_proposal_state(proposal.get("state"))
@@ -1353,11 +1706,42 @@ def _write_local_proposal_store(
         proposals = []
     persisted["proposals"] = proposals
 
-    local_store_path.parent.mkdir(parents=True, exist_ok=True)
-    local_store_path.write_text(
-        json.dumps(persisted, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    type_prs_raw = persisted.get("type_prs")
+    if isinstance(type_prs_raw, list):
+        type_prs = [
+            normalized_item
+            for item in type_prs_raw
+            if isinstance(item, Mapping)
+            for normalized_item in (_normalize_local_type_pr(item),)
+            if normalized_item
+        ]
+    else:
+        type_prs = []
+    persisted["type_prs"] = type_prs
+
+    _write_json_atomic(local_store_path, persisted)
+
+
+def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp.write(serialized)
+            temp_path = Path(tmp.name)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 def _set_proposal_state(
@@ -1488,6 +1872,528 @@ def query_local_proposals(
         },
         "missing_proposal_ids": missing,
         "proposals": matched,
+        "local_store": str(local_store),
+    }
+
+
+def _resolve_type_pr_targets(
+    type_prs: list[dict[str, Any]],
+    *,
+    type_pr_ids: set[str] | None,
+) -> tuple[dict[str, dict[str, Any]], list[str], list[str]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    for type_pr in type_prs:
+        type_pr_id = _type_pr_id_from_doc(type_pr)
+        if type_pr_id and type_pr_id not in by_id:
+            by_id[type_pr_id] = type_pr
+
+    if type_pr_ids is None:
+        target_ids = sorted(by_id)
+        missing: list[str] = []
+    else:
+        target_ids = sorted(type_pr_ids)
+        missing = [type_pr_id for type_pr_id in target_ids if type_pr_id not in by_id]
+    return by_id, target_ids, missing
+
+
+def _type_pr_status_counts(type_prs: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(_normalize_type_pr_status(type_pr.get("status")) for type_pr in type_prs)
+    return {state: int(counts.get(state, 0)) for state in sorted(counts)}
+
+
+def _type_pr_confidence_floor(type_pr: Mapping[str, Any]) -> float:
+    assertions_raw = type_pr.get("assertions")
+    assertions = [item for item in assertions_raw if isinstance(item, Mapping)] if isinstance(assertions_raw, list) else []
+    confidence_values: list[float] = []
+    for assertion in assertions:
+        confidence_raw = assertion.get("confidence")
+        if confidence_raw is None:
+            continue
+        try:
+            confidence_values.append(float(confidence_raw))
+        except (TypeError, ValueError):
+            continue
+    if not confidence_values:
+        return 0.0
+    return round(min(confidence_values), 6)
+
+
+def _type_pr_conflict_count(type_pr: Mapping[str, Any]) -> int:
+    assertions_raw = type_pr.get("assertions")
+    assertions = [item for item in assertions_raw if isinstance(item, Mapping)] if isinstance(assertions_raw, list) else []
+    total = 0
+    for assertion in assertions:
+        conflict_count_raw = assertion.get("conflict_count")
+        if conflict_count_raw is not None:
+            try:
+                total += int(conflict_count_raw)
+                continue
+            except (TypeError, ValueError):
+                pass
+        conflicts_raw = assertion.get("conflicts")
+        if isinstance(conflicts_raw, list):
+            total += len([item for item in conflicts_raw if isinstance(item, Mapping)])
+    return total
+
+
+def _type_pr_assertion_state_counts(type_pr: Mapping[str, Any]) -> dict[str, int]:
+    assertions_raw = type_pr.get("assertions")
+    assertions = [item for item in assertions_raw if isinstance(item, Mapping)] if isinstance(assertions_raw, list) else []
+    counts = Counter(_normalize_type_assertion_state(assertion.get("lifecycle_state")) for assertion in assertions)
+    return {state: int(counts.get(state, 0)) for state in sorted(counts)}
+
+
+def _type_pr_matches_reviewer(type_pr: Mapping[str, Any], *, reviewer_id: str | None) -> bool:
+    if not reviewer_id:
+        return True
+    reviewers_raw = type_pr.get("reviewers")
+    if not isinstance(reviewers_raw, list):
+        return False
+    for reviewer in reviewers_raw:
+        if isinstance(reviewer, Mapping):
+            candidate = str(reviewer.get("reviewer_id") or reviewer.get("reviewer") or "").strip()
+        else:
+            candidate = str(reviewer).strip()
+        if candidate == reviewer_id:
+            return True
+    return False
+
+
+def _extract_asserted_type_name(assertion: Mapping[str, Any]) -> str:
+    asserted_type_raw = assertion.get("asserted_type")
+    if isinstance(asserted_type_raw, Mapping):
+        asserted_name = str(asserted_type_raw.get("name") or asserted_type_raw.get("display") or "").strip()
+        if asserted_name:
+            return asserted_name
+    return str(assertion.get("suggested_type") or assertion.get("type_name") or "").strip()
+
+
+def list_type_pr_review_queue(
+    *,
+    local_store: Path,
+    reviewer_id: str | None = None,
+    statuses: list[str] | None = None,
+    type_pr_ids: list[str] | None = None,
+    sort_by: str = "updated_at_utc",
+    sort_desc: bool = True,
+) -> dict[str, Any]:
+    normalized_reviewer = str(reviewer_id).strip() if reviewer_id is not None else None
+    if normalized_reviewer == "":
+        normalized_reviewer = None
+
+    normalized_statuses = {
+        _normalize_type_pr_status(status, default="")
+        for status in (statuses or TYPE_PR_QUEUE_STATUSES)
+        if str(status).strip()
+    }
+    if not normalized_statuses:
+        normalized_statuses = set(TYPE_PR_QUEUE_STATUSES)
+
+    filter_ids = {str(item).strip() for item in (type_pr_ids or []) if str(item).strip()}
+    store_doc = _load_local_proposal_store(local_store)
+    type_prs = store_doc.get("type_prs")
+    type_pr_docs = [dict(item) for item in type_prs if isinstance(item, Mapping)] if isinstance(type_prs, list) else []
+    by_id, target_ids, missing = _resolve_type_pr_targets(
+        type_pr_docs,
+        type_pr_ids=filter_ids if filter_ids else None,
+    )
+
+    rows: list[dict[str, Any]] = []
+    for type_pr_id in target_ids:
+        type_pr = by_id.get(type_pr_id)
+        if type_pr is None:
+            continue
+
+        status = _normalize_type_pr_status(type_pr.get("status"))
+        if status not in normalized_statuses:
+            continue
+        if not _type_pr_matches_reviewer(type_pr, reviewer_id=normalized_reviewer):
+            continue
+
+        assertions_raw = type_pr.get("assertions")
+        assertions = [item for item in assertions_raw if isinstance(item, Mapping)] if isinstance(assertions_raw, list) else []
+        rows.append(
+            {
+                "type_pr_id": type_pr_id,
+                "title": str(type_pr.get("title") or "").strip(),
+                "author": str(type_pr.get("author") or "").strip(),
+                "status": status,
+                "assertion_count": len(assertions),
+                "confidence_floor": _type_pr_confidence_floor(type_pr),
+                "conflict_count": _type_pr_conflict_count(type_pr),
+                "last_updated_utc": str(type_pr.get("updated_at_utc") or ""),
+                "assertion_state_counts": _type_pr_assertion_state_counts(type_pr),
+            }
+        )
+
+    sort_key = str(sort_by or "updated_at_utc").strip().lower()
+    if sort_key == "confidence_floor":
+        rows.sort(key=lambda row: (float(row["confidence_floor"]), str(row["type_pr_id"])), reverse=sort_desc)
+    elif sort_key == "conflict_count":
+        rows.sort(key=lambda row: (int(row["conflict_count"]), str(row["type_pr_id"])), reverse=sort_desc)
+    else:
+        rows.sort(key=lambda row: (str(row["last_updated_utc"]), str(row["type_pr_id"])), reverse=sort_desc)
+        sort_key = "updated_at_utc"
+
+    return {
+        "schema_version": 1,
+        "kind": "type_pr_review_list_panel",
+        "generated_at_utc": _utc_now(),
+        "panel": {
+            "id": "type-pr-review",
+            "view": "list",
+            "columns": [
+                "type_pr_id",
+                "title",
+                "author",
+                "status",
+                "confidence_floor",
+                "conflict_count",
+                "last_updated_utc",
+            ],
+        },
+        "filters": {
+            "reviewer_id": normalized_reviewer,
+            "statuses": sorted(normalized_statuses),
+            "type_pr_ids": sorted(filter_ids),
+            "sort_by": sort_key,
+            "sort_desc": bool(sort_desc),
+        },
+        "metrics": {
+            "scanned_total": len(type_pr_docs),
+            "matched_total": len(rows),
+            "missing_total": len(missing),
+            "status_counts": _type_pr_status_counts(type_pr_docs),
+        },
+        "missing_type_pr_ids": missing,
+        "rows": rows,
+        "local_store": str(local_store),
+    }
+
+
+def get_type_pr_detail(
+    *,
+    local_store: Path,
+    type_pr_id: str,
+    reviewer_id: str | None = None,
+) -> dict[str, Any]:
+    normalized_id = str(type_pr_id).strip()
+    if not normalized_id:
+        raise ValueError("type_pr_id is required")
+
+    normalized_reviewer = str(reviewer_id).strip() if reviewer_id is not None else None
+    if normalized_reviewer == "":
+        normalized_reviewer = None
+
+    store_doc = _load_local_proposal_store(local_store)
+    type_prs = store_doc.get("type_prs")
+    type_pr_docs = [dict(item) for item in type_prs if isinstance(item, Mapping)] if isinstance(type_prs, list) else []
+    by_id, _, _ = _resolve_type_pr_targets(type_pr_docs, type_pr_ids=None)
+    type_pr = by_id.get(normalized_id)
+    if type_pr is None:
+        raise ValueError(f"unknown type_pr_id '{normalized_id}'")
+    if not _type_pr_matches_reviewer(type_pr, reviewer_id=normalized_reviewer):
+        raise ValueError(f"type_pr_id '{normalized_id}' is not assigned to reviewer '{normalized_reviewer}'")
+
+    assertions_raw = type_pr.get("assertions")
+    assertions = [item for item in assertions_raw if isinstance(item, Mapping)] if isinstance(assertions_raw, list) else []
+    assertion_rows: list[dict[str, Any]] = []
+    for assertion in assertions:
+        assertion_rows.append(
+            {
+                "assertion_id": _type_assertion_id_from_doc(assertion),
+                "target": dict(assertion.get("target")) if isinstance(assertion.get("target"), Mapping) else {},
+                "lifecycle_state": _normalize_type_assertion_state(assertion.get("lifecycle_state")),
+                "confidence": float(assertion.get("confidence") or 0.0),
+                "asserted_type": _extract_asserted_type_name(assertion),
+                "evidence_ids": [str(item) for item in assertion.get("evidence_ids", []) if str(item).strip()]
+                if isinstance(assertion.get("evidence_ids"), list)
+                else [],
+                "conflict_count": int(assertion.get("conflict_count") or 0),
+                "transition_history": [
+                    dict(item)
+                    for item in assertion.get("transition_history", [])
+                    if isinstance(item, Mapping)
+                ] if isinstance(assertion.get("transition_history"), list) else [],
+                "review_decisions": [
+                    dict(item)
+                    for item in assertion.get("review_decisions", [])
+                    if isinstance(item, Mapping)
+                ] if isinstance(assertion.get("review_decisions"), list) else [],
+            }
+        )
+
+    review_timeline = [
+        dict(item)
+        for item in type_pr.get("review_decisions", [])
+        if isinstance(item, Mapping)
+    ] if isinstance(type_pr.get("review_decisions"), list) else []
+    review_timeline.sort(key=lambda item: str(item.get("decided_at_utc") or ""), reverse=True)
+
+    return {
+        "schema_version": 1,
+        "kind": "type_pr_review_detail_panel",
+        "generated_at_utc": _utc_now(),
+        "panel": {
+            "id": "type-pr-review",
+            "view": "detail",
+        },
+        "type_pr": {
+            "type_pr_id": normalized_id,
+            "title": str(type_pr.get("title") or "").strip(),
+            "author": str(type_pr.get("author") or "").strip(),
+            "status": _normalize_type_pr_status(type_pr.get("status")),
+            "reviewers": [dict(item) for item in type_pr.get("reviewers", []) if isinstance(item, Mapping)]
+            if isinstance(type_pr.get("reviewers"), list)
+            else [],
+            "assertion_count": len(assertion_rows),
+            "confidence_floor": _type_pr_confidence_floor(type_pr),
+            "conflict_count": _type_pr_conflict_count(type_pr),
+            "created_at_utc": str(type_pr.get("created_at_utc") or ""),
+            "updated_at_utc": str(type_pr.get("updated_at_utc") or ""),
+            "assertion_state_counts": _type_pr_assertion_state_counts(type_pr),
+        },
+        "assertions": assertion_rows,
+        "review_timeline": review_timeline,
+        "decision_form": {
+            "supported_decisions": sorted(TYPE_PR_DECISION_TO_PR_STATUS),
+            "comment_required_for": [
+                TYPE_PR_DECISION_REQUEST_CHANGES,
+                TYPE_PR_DECISION_REJECT,
+            ],
+            "rationale_required": True,
+        },
+        "local_store": str(local_store),
+    }
+
+
+def submit_type_pr_review_decision(
+    *,
+    local_store: Path,
+    type_pr_id: str,
+    reviewer_id: str,
+    decision: str,
+    rationale: str,
+    comment: str | None = None,
+) -> dict[str, Any]:
+    normalized_id = str(type_pr_id).strip()
+    if not normalized_id:
+        raise ValueError("type_pr_id is required")
+
+    normalized_reviewer = str(reviewer_id).strip()
+    if not normalized_reviewer:
+        raise ValueError("reviewer_id is required")
+
+    normalized_decision = _normalize_type_pr_decision(decision)
+    if normalized_decision not in TYPE_PR_DECISION_TO_PR_STATUS:
+        allowed = ", ".join(sorted(TYPE_PR_DECISION_TO_PR_STATUS))
+        raise ValueError(f"unsupported type PR decision '{decision}'; expected one of: {allowed}")
+
+    normalized_rationale = str(rationale).strip()
+    if not normalized_rationale:
+        raise ValueError("rationale is required")
+
+    normalized_comment = str(comment).strip() if comment is not None else None
+    if normalized_comment == "":
+        normalized_comment = None
+    if normalized_decision in {TYPE_PR_DECISION_REQUEST_CHANGES, TYPE_PR_DECISION_REJECT} and not normalized_comment:
+        raise ValueError(f"comment is required for decision '{normalized_decision}'")
+
+    store_doc = _load_local_proposal_store(local_store)
+    type_prs = store_doc.get("type_prs")
+    type_pr_docs = [dict(item) for item in type_prs if isinstance(item, Mapping)] if isinstance(type_prs, list) else []
+    by_id, _, _ = _resolve_type_pr_targets(type_pr_docs, type_pr_ids=None)
+    type_pr = by_id.get(normalized_id)
+    if type_pr is None:
+        raise ValueError(f"unknown type_pr_id '{normalized_id}'")
+
+    current_status = _normalize_type_pr_status(type_pr.get("status"))
+    if current_status not in TYPE_PR_REVIEWABLE_STATUSES:
+        allowed_states = ", ".join(sorted(TYPE_PR_REVIEWABLE_STATUSES))
+        raise ValueError(
+            f"type_pr '{normalized_id}' is not reviewable in status '{current_status}' "
+            f"(expected one of: {allowed_states})"
+        )
+
+    assertions_raw = type_pr.get("assertions")
+    assertions = [item for item in assertions_raw if isinstance(item, Mapping)] if isinstance(assertions_raw, list) else []
+    if not assertions:
+        raise ValueError(f"type_pr '{normalized_id}' has no assertions")
+
+    non_reviewable_assertions = [
+        f"{_type_assertion_id_from_doc(assertion)}={_normalize_type_assertion_state(assertion.get('lifecycle_state'))}"
+        for assertion in assertions
+        if _normalize_type_assertion_state(assertion.get("lifecycle_state")) != TYPE_ASSERTION_STATE_UNDER_REVIEW
+    ]
+    if non_reviewable_assertions:
+        raise ValueError(
+            "all assertions must be UNDER_REVIEW before decision; received: "
+            + ", ".join(non_reviewable_assertions)
+        )
+
+    state_before = {
+        "type_pr_id": normalized_id,
+        "status": current_status,
+        "assertion_states": {
+            _type_assertion_id_from_doc(assertion): _normalize_type_assertion_state(assertion.get("lifecycle_state"))
+            for assertion in assertions
+        },
+    }
+
+    working_doc = json.loads(json.dumps(store_doc))
+    working_type_prs_raw = working_doc.get("type_prs")
+    working_type_pr_docs = (
+        [dict(item) for item in working_type_prs_raw if isinstance(item, Mapping)]
+        if isinstance(working_type_prs_raw, list)
+        else []
+    )
+    working_by_id, _, _ = _resolve_type_pr_targets(working_type_pr_docs, type_pr_ids=None)
+    working_pr = working_by_id.get(normalized_id)
+    if working_pr is None:
+        raise ValueError(f"type_pr '{normalized_id}' disappeared during transactional update")
+
+    decision_at_utc = _utc_now()
+    receipt_id = _new_receipt_id(action="type_pr_review")
+    resulting_state = TYPE_PR_DECISION_TO_ASSERTION_STATE[normalized_decision]
+    next_pr_status = TYPE_PR_DECISION_TO_PR_STATUS[normalized_decision]
+    review_id = str(uuid.uuid4())
+
+    pr_decisions_raw = working_pr.get("review_decisions")
+    pr_decisions = [dict(item) for item in pr_decisions_raw if isinstance(item, Mapping)] if isinstance(pr_decisions_raw, list) else []
+    pr_decision: dict[str, Any] = {
+        "review_id": review_id,
+        "type_pr_id": normalized_id,
+        "reviewer_id": normalized_reviewer,
+        "decision": normalized_decision,
+        "rationale": normalized_rationale,
+        "receipt_id": receipt_id,
+        "decided_at_utc": decision_at_utc,
+        "resulting_state": resulting_state,
+    }
+    if normalized_comment:
+        pr_decision["comment"] = normalized_comment
+    pr_decisions.append(pr_decision)
+    working_pr["review_decisions"] = pr_decisions
+
+    status_transitions_raw = working_pr.get("status_transitions")
+    status_transitions = [dict(item) for item in status_transitions_raw if isinstance(item, Mapping)] if isinstance(status_transitions_raw, list) else []
+    status_transitions.append(
+        _new_type_pr_status_transition(
+            from_status=current_status,
+            to_status=next_pr_status,
+            receipt_id=receipt_id,
+            changed_at_utc=decision_at_utc,
+            reviewer_id=normalized_reviewer,
+            decision=normalized_decision,
+            comment=normalized_comment,
+            rationale=normalized_rationale,
+        )
+    )
+    working_pr["status_transitions"] = status_transitions
+    working_pr["status"] = next_pr_status
+    working_pr["updated_at_utc"] = decision_at_utc
+    working_pr["last_receipt_id"] = receipt_id
+
+    reviewers_raw = working_pr.get("reviewers")
+    reviewers = [dict(item) for item in reviewers_raw if isinstance(item, Mapping)] if isinstance(reviewers_raw, list) else []
+    reviewer_updated = False
+    for reviewer in reviewers:
+        candidate = str(reviewer.get("reviewer_id") or reviewer.get("reviewer") or "").strip()
+        if candidate == normalized_reviewer:
+            reviewer["status"] = TYPE_PR_DECISION_TO_REVIEWER_STATUS[normalized_decision]
+            reviewer["latest_decision_id"] = review_id
+            reviewer_updated = True
+            break
+    if not reviewer_updated:
+        reviewers.append(
+            {
+                "reviewer_id": normalized_reviewer,
+                "status": TYPE_PR_DECISION_TO_REVIEWER_STATUS[normalized_decision],
+                "latest_decision_id": review_id,
+            }
+        )
+    working_pr["reviewers"] = reviewers
+
+    working_assertions_raw = working_pr.get("assertions")
+    working_assertions = [dict(item) for item in working_assertions_raw if isinstance(item, Mapping)] if isinstance(working_assertions_raw, list) else []
+    for assertion in working_assertions:
+        from_state = _normalize_type_assertion_state(assertion.get("lifecycle_state"))
+        assertion["lifecycle_state"] = resulting_state
+        assertion["updated_at_utc"] = decision_at_utc
+        assertion["last_receipt_id"] = receipt_id
+
+        transition_history_raw = assertion.get("transition_history")
+        transition_history = [dict(item) for item in transition_history_raw if isinstance(item, Mapping)] if isinstance(transition_history_raw, list) else []
+        transition_history.append(
+            _new_type_assertion_transition(
+                from_state=from_state,
+                to_state=resulting_state,
+                receipt_id=receipt_id,
+                changed_at_utc=decision_at_utc,
+                reviewer_id=normalized_reviewer,
+                decision=normalized_decision,
+                comment=normalized_comment,
+                rationale=normalized_rationale,
+            )
+        )
+        assertion["transition_history"] = transition_history
+
+        assertion_decisions_raw = assertion.get("review_decisions")
+        assertion_decisions = [dict(item) for item in assertion_decisions_raw if isinstance(item, Mapping)] if isinstance(assertion_decisions_raw, list) else []
+        assertion_decision: dict[str, Any] = {
+            "review_id": str(uuid.uuid4()),
+            "type_pr_id": normalized_id,
+            "reviewer_id": normalized_reviewer,
+            "decision": normalized_decision,
+            "rationale": normalized_rationale,
+            "receipt_id": receipt_id,
+            "decided_at_utc": decision_at_utc,
+            "resulting_state": resulting_state,
+        }
+        if normalized_comment:
+            assertion_decision["comment"] = normalized_comment
+        assertion_decisions.append(assertion_decision)
+        assertion["review_decisions"] = assertion_decisions
+
+    working_pr["assertions"] = working_assertions
+    working_doc["type_prs"] = working_type_pr_docs
+
+    state_after = {
+        "type_pr_id": normalized_id,
+        "status": next_pr_status,
+        "assertion_states": {
+            _type_assertion_id_from_doc(assertion): _normalize_type_assertion_state(assertion.get("lifecycle_state"))
+            for assertion in working_assertions
+        },
+    }
+    state_before_hash = _digest_json(state_before)
+    state_after_hash = _digest_json(state_after)
+    transaction_id = _new_transaction_id()
+
+    _write_local_proposal_store(local_store, working_doc)
+
+    return {
+        "schema_version": 1,
+        "kind": "type_pr_review_decision_report",
+        "generated_at_utc": _utc_now(),
+        "type_pr_id": normalized_id,
+        "decision": normalized_decision,
+        "target_assertion_state": resulting_state,
+        "next_pr_status": next_pr_status,
+        "review_id": review_id,
+        "receipt_id": receipt_id,
+        "comment": normalized_comment,
+        "rationale": normalized_rationale,
+        "transaction": {
+            "transaction_id": transaction_id,
+            "scope": "type_pr",
+            "phase": "review_decision",
+            "atomic": True,
+            "pre_state_hash": state_before_hash,
+            "post_state_hash": state_after_hash,
+        },
+        "state_before": state_before,
+        "state_after": state_after,
         "local_store": str(local_store),
     }
 
@@ -4591,6 +5497,77 @@ def _proposal_rollback_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _type_pr_list_command(args: argparse.Namespace) -> int:
+    report = list_type_pr_review_queue(
+        local_store=args.local_store,
+        reviewer_id=args.reviewer_id,
+        statuses=args.status,
+        type_pr_ids=args.type_pr_id,
+        sort_by=args.sort_by,
+        sort_desc=not args.sort_asc,
+    )
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+def _type_pr_detail_command(args: argparse.Namespace) -> int:
+    try:
+        report = get_type_pr_detail(
+            local_store=args.local_store,
+            type_pr_id=args.type_pr_id,
+            reviewer_id=args.reviewer_id,
+        )
+    except ValueError as exc:
+        error_report = {
+            "schema_version": 1,
+            "kind": "type_pr_review_detail_error",
+            "error": str(exc),
+        }
+        print(json.dumps(error_report, indent=2, sort_keys=True))
+        return 1
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+def _type_pr_review_command(args: argparse.Namespace) -> int:
+    try:
+        report = submit_type_pr_review_decision(
+            local_store=args.local_store,
+            type_pr_id=args.type_pr_id,
+            reviewer_id=args.reviewer_id,
+            decision=args.decision,
+            rationale=args.rationale,
+            comment=args.comment,
+        )
+    except ValueError as exc:
+        error_report = {
+            "schema_version": 1,
+            "kind": "type_pr_review_decision_error",
+            "error": str(exc),
+        }
+        print(json.dumps(error_report, indent=2, sort_keys=True))
+        return 1
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def _add_triage_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--corpus", type=Path, required=True, help="Path to corpus JSON")
     parser.add_argument(
@@ -5118,6 +6095,135 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional path to write proposal rollback report JSON",
     )
     proposal_rollback_parser.set_defaults(func=_proposal_rollback_command)
+
+    type_pr_list_parser = subparsers.add_parser(
+        "type-pr-list",
+        help="Render Type PR review queue list panel payload",
+    )
+    type_pr_list_parser.add_argument(
+        "--local-store",
+        type=Path,
+        required=True,
+        help="Path to local proposal store JSON",
+    )
+    type_pr_list_parser.add_argument(
+        "--reviewer-id",
+        type=str,
+        default=None,
+        help="Optional reviewer identifier to filter assigned Type PRs",
+    )
+    type_pr_list_parser.add_argument(
+        "--status",
+        action="append",
+        type=str.upper,
+        default=None,
+        choices=TYPE_PR_ALLOWED_STATUSES,
+        help="Type PR status filter. Repeatable. Defaults to review queue statuses.",
+    )
+    type_pr_list_parser.add_argument(
+        "--type-pr-id",
+        action="append",
+        default=None,
+        help="Type PR id filter. Repeatable.",
+    )
+    type_pr_list_parser.add_argument(
+        "--sort-by",
+        type=str,
+        default="updated_at_utc",
+        choices=["updated_at_utc", "confidence_floor", "conflict_count"],
+        help="Sort key for list rows",
+    )
+    type_pr_list_parser.add_argument(
+        "--sort-asc",
+        action="store_true",
+        help="Sort ascending (default: descending)",
+    )
+    type_pr_list_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write Type PR list panel JSON",
+    )
+    type_pr_list_parser.set_defaults(func=_type_pr_list_command)
+
+    type_pr_detail_parser = subparsers.add_parser(
+        "type-pr-detail",
+        help="Render Type PR detail panel payload",
+    )
+    type_pr_detail_parser.add_argument(
+        "--local-store",
+        type=Path,
+        required=True,
+        help="Path to local proposal store JSON",
+    )
+    type_pr_detail_parser.add_argument(
+        "--type-pr-id",
+        type=str,
+        required=True,
+        help="Type PR id to render in detail pane",
+    )
+    type_pr_detail_parser.add_argument(
+        "--reviewer-id",
+        type=str,
+        default=None,
+        help="Optional reviewer identity used for assignment checks",
+    )
+    type_pr_detail_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write Type PR detail panel JSON",
+    )
+    type_pr_detail_parser.set_defaults(func=_type_pr_detail_command)
+
+    type_pr_review_parser = subparsers.add_parser(
+        "type-pr-review",
+        help="Submit Type PR approve/request-changes/reject decision atomically",
+    )
+    type_pr_review_parser.add_argument(
+        "--local-store",
+        type=Path,
+        required=True,
+        help="Path to local proposal store JSON",
+    )
+    type_pr_review_parser.add_argument(
+        "--type-pr-id",
+        type=str,
+        required=True,
+        help="Type PR id to review",
+    )
+    type_pr_review_parser.add_argument(
+        "--reviewer-id",
+        type=str,
+        required=True,
+        help="Reviewer identifier",
+    )
+    type_pr_review_parser.add_argument(
+        "--decision",
+        type=str.upper,
+        required=True,
+        choices=sorted(TYPE_PR_DECISION_TO_PR_STATUS),
+        help="Review decision",
+    )
+    type_pr_review_parser.add_argument(
+        "--rationale",
+        type=str,
+        required=True,
+        help="Required rationale captured with review decision",
+    )
+    type_pr_review_parser.add_argument(
+        "--comment",
+        type=str,
+        default=None,
+        help="Comment required for REQUEST_CHANGES and REJECT decisions",
+    )
+    type_pr_review_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write Type PR review decision report JSON",
+    )
+    type_pr_review_parser.set_defaults(func=_type_pr_review_command)
 
     return parser
 
