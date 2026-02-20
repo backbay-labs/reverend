@@ -1427,6 +1427,333 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
                 self.assertEqual(assertion_decision["rationale"], "evidence quality below threshold")
                 self.assertEqual(assertion_decision["comment"], "missing callsite proof")
 
+    def test_type_pr_approve_triggers_scope_propagation_and_deterministic_conflict_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_store = Path(tmpdir) / "local_store.json"
+            local_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "local_proposal_store",
+                        "proposals": [],
+                        "type_prs": [
+                            {
+                                "type_pr_id": "tp-propagation",
+                                "title": "Propagate accepted network type",
+                                "author": "user:analyst",
+                                "status": "IN_REVIEW",
+                                "reviewers": [{"reviewer_id": "user:reviewer", "status": "PENDING"}],
+                                "assertions": [
+                                    {
+                                        "assertion_id": "a-1",
+                                        "lifecycle_state": "UNDER_REVIEW",
+                                        "confidence": 0.92,
+                                        "source": {
+                                            "source_type": "ML_MODEL",
+                                            "source_id": "idioms",
+                                        },
+                                        "propagation_policy": {
+                                            "same_program": {
+                                                "mode": "AUTO_PROPAGATE",
+                                                "min_confidence": 0.8,
+                                                "confidence_adjustment": -0.05,
+                                                "require_review_on_conflict": False,
+                                                "allow_replace_lower_priority": True,
+                                            },
+                                            "cross_program": {
+                                                "mode": "PROPOSE",
+                                                "min_confidence": 0.8,
+                                                "confidence_adjustment": -0.1,
+                                                "require_review_on_conflict": True,
+                                                "allow_replace_lower_priority": False,
+                                            },
+                                            "corpus_kb": {
+                                                "mode": "DISABLED",
+                                                "min_confidence": 0.9,
+                                                "confidence_adjustment": -0.1,
+                                                "require_review_on_conflict": True,
+                                                "allow_replace_lower_priority": False,
+                                            },
+                                            "conflict_resolution": {
+                                                "source_priority_order": [
+                                                    "DWARF",
+                                                    "ANALYST",
+                                                    "CONSTRAINT_SOLVER",
+                                                    "ML_MODEL",
+                                                    "HEURISTIC",
+                                                    "GHIDRA_DEFAULT",
+                                                ],
+                                                "confidence_margin": 0.15,
+                                                "tie_breaker": "ASSERTION_ID_ASC",
+                                                "workflow": [
+                                                    "SOURCE_PRIORITY",
+                                                    "CONFIDENCE",
+                                                    "TIE_BREAKER",
+                                                ],
+                                            },
+                                        },
+                                        "propagation_targets": [
+                                            {
+                                                "scope": "SAME_PROGRAM",
+                                                "rule": "SAME_PROGRAM_DIRECT_DATAFLOW",
+                                                "target_program_id": "program:a",
+                                                "target_assertion_id": "target-1",
+                                            },
+                                            {
+                                                "scope": "SAME_PROGRAM",
+                                                "rule": "SAME_PROGRAM_GLOBAL_CONSISTENCY",
+                                                "target_program_id": "program:a",
+                                                "target_assertion_id": "target-2",
+                                                "competing_assertion_id": "comp-1",
+                                                "competing_source_type": "HEURISTIC",
+                                                "competing_confidence": 0.42,
+                                                "conflict_category": "PRIMITIVE_TYPE_DISAGREEMENT",
+                                            },
+                                            {
+                                                "scope": "CROSS_PROGRAM",
+                                                "rule": "CROSS_PROGRAM_EXACT_FUNCTION_MATCH",
+                                                "target_program_id": "program:b",
+                                                "target_assertion_id": "target-3",
+                                                "competing_assertion_id": "comp-2",
+                                                "competing_source_type": "ML_MODEL",
+                                                "competing_confidence": 0.9,
+                                                "competing_target_id": "zz-target",
+                                            },
+                                            {
+                                                "scope": "CORPUS_KB",
+                                                "rule": "CORPUS_KB_LAYOUT_FINGERPRINT",
+                                                "target_program_id": "kb:1",
+                                                "target_assertion_id": "target-4",
+                                            },
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "type-pr-review",
+                        "--local-store",
+                        str(local_store),
+                        "--type-pr-id",
+                        "tp-propagation",
+                        "--reviewer-id",
+                        "user:reviewer",
+                        "--decision",
+                        "APPROVE",
+                        "--rationale",
+                        "ready for scope propagation",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(report["kind"], "type_pr_review_decision_report")
+            self.assertIsInstance(report["propagation"], dict)
+
+            propagation = report["propagation"]
+            metrics = propagation["metrics"]
+            self.assertEqual(metrics["targeted_assertion_total"], 1)
+            self.assertEqual(metrics["targeted_event_total"], 4)
+            self.assertEqual(metrics["applied_total"], 2)
+            self.assertEqual(metrics["conflict_total"], 1)
+            self.assertEqual(metrics["skipped_total"], 1)
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            type_pr = local_doc["type_prs"][0]
+            assertion = type_pr["assertions"][0]
+            self.assertEqual(assertion["lifecycle_state"], "PROPAGATED")
+
+            outcomes = [event["outcome"] for event in assertion["propagation_events"]]
+            self.assertEqual(outcomes, ["APPLIED", "APPLIED", "CONFLICT", "SKIPPED"])
+
+            conflicts = assertion["conflicts"]
+            self.assertEqual(len(conflicts), 2)
+            auto_resolved = next(item for item in conflicts if item["status"] == "AUTO_RESOLVED")
+            escalated = next(item for item in conflicts if item["status"] == "ESCALATED")
+            self.assertEqual(auto_resolved["resolution"]["strategy"], "SOURCE_PRIORITY")
+            self.assertEqual(auto_resolved["resolution"]["winner_assertion_id"], "a-1")
+            self.assertEqual(escalated["resolution"]["strategy"], "DETERMINISTIC_TIE_BREAK")
+            self.assertEqual(escalated["workflow_version"], "source-priority-confidence-tiebreak-v1")
+            self.assertIsInstance(escalated["queue_position"], int)
+
+            tx = type_pr["propagation_transactions"][0]
+            self.assertEqual(tx["status"], "propagated")
+            self.assertEqual(tx["propagation_receipt_id"], propagation["propagation_receipt_id"])
+
+    def test_type_pr_propagation_rollback_marks_events_and_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_store = Path(tmpdir) / "local_store.json"
+            local_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "local_proposal_store",
+                        "proposals": [],
+                        "type_prs": [
+                            {
+                                "type_pr_id": "tp-rollback",
+                                "title": "Rollback propagated assertion",
+                                "author": "user:analyst",
+                                "status": "IN_REVIEW",
+                                "assertions": [
+                                    {
+                                        "assertion_id": "a-rollback",
+                                        "lifecycle_state": "UNDER_REVIEW",
+                                        "confidence": 0.91,
+                                        "source": {
+                                            "source_type": "ANALYST",
+                                            "source_id": "user:analyst",
+                                        },
+                                        "propagation_policy": {
+                                            "same_program": {
+                                                "mode": "AUTO_PROPAGATE",
+                                                "min_confidence": 0.8,
+                                                "confidence_adjustment": -0.05,
+                                                "require_review_on_conflict": False,
+                                                "allow_replace_lower_priority": True,
+                                            },
+                                            "cross_program": {
+                                                "mode": "DISABLED",
+                                                "min_confidence": 0.85,
+                                                "confidence_adjustment": -0.1,
+                                                "require_review_on_conflict": True,
+                                                "allow_replace_lower_priority": False,
+                                            },
+                                            "corpus_kb": {
+                                                "mode": "DISABLED",
+                                                "min_confidence": 0.9,
+                                                "confidence_adjustment": -0.1,
+                                                "require_review_on_conflict": True,
+                                                "allow_replace_lower_priority": False,
+                                            },
+                                            "conflict_resolution": {
+                                                "source_priority_order": [
+                                                    "DWARF",
+                                                    "ANALYST",
+                                                    "CONSTRAINT_SOLVER",
+                                                    "ML_MODEL",
+                                                    "HEURISTIC",
+                                                    "GHIDRA_DEFAULT",
+                                                ],
+                                                "confidence_margin": 0.15,
+                                                "tie_breaker": "ASSERTION_ID_ASC",
+                                                "workflow": [
+                                                    "SOURCE_PRIORITY",
+                                                    "CONFIDENCE",
+                                                    "TIE_BREAKER",
+                                                ],
+                                            },
+                                        },
+                                        "propagation_targets": [
+                                            {
+                                                "scope": "SAME_PROGRAM",
+                                                "rule": "SAME_PROGRAM_DIRECT_DATAFLOW",
+                                                "target_program_id": "program:local",
+                                                "target_assertion_id": "target-local-1",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                approve_exit = MODULE.main(
+                    [
+                        "type-pr-review",
+                        "--local-store",
+                        str(local_store),
+                        "--type-pr-id",
+                        "tp-rollback",
+                        "--reviewer-id",
+                        "user:reviewer",
+                        "--decision",
+                        "APPROVE",
+                        "--rationale",
+                        "propagate then rollback",
+                    ]
+                )
+            self.assertEqual(approve_exit, 0)
+            approve_report = json.loads(stdout.getvalue())
+            propagation_receipt_id = approve_report["propagation"]["propagation_receipt_id"]
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                rollback_exit = MODULE.main(
+                    [
+                        "type-pr-rollback-propagation",
+                        "--local-store",
+                        str(local_store),
+                        "--type-pr-id",
+                        "tp-rollback",
+                        "--propagation-receipt-id",
+                        propagation_receipt_id,
+                        "--actor-id",
+                        "worker:rollback",
+                    ]
+                )
+            self.assertEqual(rollback_exit, 0)
+            rollback_report = json.loads(stdout.getvalue())
+            self.assertEqual(rollback_report["kind"], "type_pr_propagation_rollback_report")
+            self.assertEqual(rollback_report["metrics"]["rolled_back_total"], 1)
+            self.assertEqual(rollback_report["metrics"]["restored_assertion_total"], 1)
+            self.assertEqual(rollback_report["rolled_back_propagation_receipt_ids"], [propagation_receipt_id])
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            type_pr = local_doc["type_prs"][0]
+            assertion = type_pr["assertions"][0]
+            self.assertEqual(assertion["lifecycle_state"], "ACCEPTED")
+            matching_events = [
+                event
+                for event in assertion["propagation_events"]
+                if event.get("applied_receipt_id") == propagation_receipt_id
+            ]
+            self.assertEqual(len(matching_events), 1)
+            self.assertEqual(matching_events[0]["outcome"], "ROLLED_BACK")
+            self.assertEqual(
+                matching_events[0]["rollback_receipt_id"],
+                rollback_report["rollback_receipt_ids"][0],
+            )
+
+            tx = type_pr["propagation_transactions"][0]
+            self.assertEqual(tx["status"], "rolled_back")
+            self.assertEqual(tx["rollback_receipt_id"], rollback_report["rollback_receipt_ids"][0])
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                second_exit = MODULE.main(
+                    [
+                        "type-pr-rollback-propagation",
+                        "--local-store",
+                        str(local_store),
+                        "--type-pr-id",
+                        "tp-rollback",
+                        "--propagation-receipt-id",
+                        propagation_receipt_id,
+                    ]
+                )
+            self.assertEqual(second_exit, 0)
+            second_report = json.loads(stdout.getvalue())
+            self.assertEqual(second_report["metrics"]["rolled_back_total"], 0)
+            self.assertEqual(second_report["metrics"]["already_rolled_back_total"], 1)
+            self.assertEqual(second_report["rollback_receipt_ids"], rollback_report["rollback_receipt_ids"])
+
     def test_type_pr_review_decision_preserves_store_when_preconditions_fail(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             local_store = Path(tmpdir) / "local_store.json"

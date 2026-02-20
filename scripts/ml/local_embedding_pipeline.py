@@ -68,13 +68,71 @@ PROPOSAL_REVIEW_ACTION_TO_STATE = {
 TYPE_ASSERTION_STATE_PROPOSED = "PROPOSED"
 TYPE_ASSERTION_STATE_UNDER_REVIEW = "UNDER_REVIEW"
 TYPE_ASSERTION_STATE_ACCEPTED = "ACCEPTED"
+TYPE_ASSERTION_STATE_PROPAGATED = "PROPAGATED"
+TYPE_ASSERTION_STATE_DEPRECATED = "DEPRECATED"
 TYPE_ASSERTION_STATE_REJECTED = "REJECTED"
 TYPE_ASSERTION_ALLOWED_STATES = (
     TYPE_ASSERTION_STATE_PROPOSED,
     TYPE_ASSERTION_STATE_UNDER_REVIEW,
     TYPE_ASSERTION_STATE_ACCEPTED,
+    TYPE_ASSERTION_STATE_PROPAGATED,
+    TYPE_ASSERTION_STATE_DEPRECATED,
     TYPE_ASSERTION_STATE_REJECTED,
 )
+
+TYPE_SOURCE_DWARF = "DWARF"
+TYPE_SOURCE_ANALYST = "ANALYST"
+TYPE_SOURCE_CONSTRAINT_SOLVER = "CONSTRAINT_SOLVER"
+TYPE_SOURCE_ML_MODEL = "ML_MODEL"
+TYPE_SOURCE_HEURISTIC = "HEURISTIC"
+TYPE_SOURCE_GHIDRA_DEFAULT = "GHIDRA_DEFAULT"
+TYPE_SOURCE_ALLOWED = (
+    TYPE_SOURCE_DWARF,
+    TYPE_SOURCE_ANALYST,
+    TYPE_SOURCE_CONSTRAINT_SOLVER,
+    TYPE_SOURCE_ML_MODEL,
+    TYPE_SOURCE_HEURISTIC,
+    TYPE_SOURCE_GHIDRA_DEFAULT,
+)
+
+TYPE_PROPAGATION_SCOPE_SAME_PROGRAM = "SAME_PROGRAM"
+TYPE_PROPAGATION_SCOPE_CROSS_PROGRAM = "CROSS_PROGRAM"
+TYPE_PROPAGATION_SCOPE_CORPUS_KB = "CORPUS_KB"
+TYPE_PROPAGATION_ALLOWED_SCOPES = (
+    TYPE_PROPAGATION_SCOPE_SAME_PROGRAM,
+    TYPE_PROPAGATION_SCOPE_CROSS_PROGRAM,
+    TYPE_PROPAGATION_SCOPE_CORPUS_KB,
+)
+
+TYPE_PROPAGATION_MODE_AUTO = "AUTO_PROPAGATE"
+TYPE_PROPAGATION_MODE_PROPOSE = "PROPOSE"
+TYPE_PROPAGATION_MODE_DISABLED = "DISABLED"
+TYPE_PROPAGATION_ALLOWED_MODES = (
+    TYPE_PROPAGATION_MODE_AUTO,
+    TYPE_PROPAGATION_MODE_PROPOSE,
+    TYPE_PROPAGATION_MODE_DISABLED,
+)
+
+TYPE_PROPAGATION_OUTCOME_APPLIED = "APPLIED"
+TYPE_PROPAGATION_OUTCOME_PROPOSED = "PROPOSED"
+TYPE_PROPAGATION_OUTCOME_SKIPPED = "SKIPPED"
+TYPE_PROPAGATION_OUTCOME_CONFLICT = "CONFLICT"
+TYPE_PROPAGATION_OUTCOME_ROLLED_BACK = "ROLLED_BACK"
+
+TYPE_CONFLICT_STATUS_OPEN = "OPEN"
+TYPE_CONFLICT_STATUS_AUTO_RESOLVED = "AUTO_RESOLVED"
+TYPE_CONFLICT_STATUS_ESCALATED = "ESCALATED"
+TYPE_CONFLICT_STATUS_RESOLVED = "RESOLVED"
+
+TYPE_CONFLICT_STRATEGY_SOURCE_PRIORITY = "SOURCE_PRIORITY"
+TYPE_CONFLICT_STRATEGY_HIGHER_CONFIDENCE = "HIGHER_CONFIDENCE"
+TYPE_CONFLICT_STRATEGY_TIE_BREAK = "DETERMINISTIC_TIE_BREAK"
+TYPE_CONFLICT_STRATEGY_MANUAL_REVIEW = "MANUAL_REVIEW"
+
+TYPE_PROPAGATION_TIE_BREAK_ASSERTION_ID_ASC = "ASSERTION_ID_ASC"
+TYPE_PROPAGATION_TIE_BREAK_TARGET_ID_ASC = "TARGET_ID_ASC"
+TYPE_PROPAGATION_TIE_BREAK_RECEIPT_TIMESTAMP_ASC = "RECEIPT_TIMESTAMP_ASC"
+TYPE_PROPAGATION_WORKFLOW_VERSION = "source-priority-confidence-tiebreak-v1"
 
 TYPE_PR_STATUS_DRAFT = "DRAFT"
 TYPE_PR_STATUS_OPEN = "OPEN"
@@ -1355,6 +1413,290 @@ def _normalize_type_pr_decision(raw_decision: Any) -> str:
     return normalized
 
 
+def _coerce_float(raw: Any, *, default: float = 0.0) -> float:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamp_confidence(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _normalize_type_source(
+    raw_source: Any,
+    *,
+    default: str = TYPE_SOURCE_ML_MODEL,
+) -> str:
+    normalized = str(raw_source or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if not normalized:
+        return default
+    if normalized in TYPE_SOURCE_ALLOWED:
+        return normalized
+    return default
+
+
+def _normalize_propagation_scope(
+    raw_scope: Any,
+    *,
+    default: str = TYPE_PROPAGATION_SCOPE_SAME_PROGRAM,
+) -> str:
+    normalized = str(raw_scope or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if not normalized:
+        return default
+    if normalized in TYPE_PROPAGATION_ALLOWED_SCOPES:
+        return normalized
+    return default
+
+
+def _normalize_propagation_mode(
+    raw_mode: Any,
+    *,
+    default: str = TYPE_PROPAGATION_MODE_PROPOSE,
+) -> str:
+    normalized = str(raw_mode or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if not normalized:
+        return default
+    if normalized in TYPE_PROPAGATION_ALLOWED_MODES:
+        return normalized
+    return default
+
+
+def _scope_key_for_propagation_scope(scope: str) -> str:
+    if scope == TYPE_PROPAGATION_SCOPE_CROSS_PROGRAM:
+        return "cross_program"
+    if scope == TYPE_PROPAGATION_SCOPE_CORPUS_KB:
+        return "corpus_kb"
+    return "same_program"
+
+
+def _default_scope_policy(
+    *,
+    mode: str,
+    min_confidence: float,
+    confidence_adjustment: float,
+    require_review_on_conflict: bool,
+    allow_replace_lower_priority: bool,
+) -> dict[str, Any]:
+    return {
+        "mode": _normalize_propagation_mode(mode),
+        "min_confidence": _clamp_confidence(min_confidence),
+        "confidence_adjustment": max(-1.0, min(1.0, confidence_adjustment)),
+        "require_review_on_conflict": bool(require_review_on_conflict),
+        "allow_replace_lower_priority": bool(allow_replace_lower_priority),
+    }
+
+
+def _default_propagation_policy() -> dict[str, Any]:
+    return {
+        "same_program": _default_scope_policy(
+            mode=TYPE_PROPAGATION_MODE_AUTO,
+            min_confidence=0.80,
+            confidence_adjustment=-0.05,
+            require_review_on_conflict=True,
+            allow_replace_lower_priority=True,
+        ),
+        "cross_program": _default_scope_policy(
+            mode=TYPE_PROPAGATION_MODE_PROPOSE,
+            min_confidence=0.85,
+            confidence_adjustment=-0.10,
+            require_review_on_conflict=True,
+            allow_replace_lower_priority=False,
+        ),
+        "corpus_kb": _default_scope_policy(
+            mode=TYPE_PROPAGATION_MODE_PROPOSE,
+            min_confidence=0.90,
+            confidence_adjustment=-0.10,
+            require_review_on_conflict=True,
+            allow_replace_lower_priority=False,
+        ),
+        "conflict_resolution": {
+            "source_priority_order": [
+                TYPE_SOURCE_DWARF,
+                TYPE_SOURCE_ANALYST,
+                TYPE_SOURCE_CONSTRAINT_SOLVER,
+                TYPE_SOURCE_ML_MODEL,
+                TYPE_SOURCE_HEURISTIC,
+                TYPE_SOURCE_GHIDRA_DEFAULT,
+            ],
+            "confidence_margin": 0.15,
+            "tie_breaker": TYPE_PROPAGATION_TIE_BREAK_ASSERTION_ID_ASC,
+            "workflow": [
+                TYPE_CONFLICT_STRATEGY_SOURCE_PRIORITY,
+                "CONFIDENCE",
+                "TIE_BREAKER",
+            ],
+        },
+    }
+
+
+def _normalize_scope_policy(
+    raw_policy: Any,
+    *,
+    default_policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    policy = dict(raw_policy) if isinstance(raw_policy, Mapping) else {}
+    normalized = _default_scope_policy(
+        mode=_normalize_propagation_mode(
+            policy.get("mode"),
+            default=_normalize_propagation_mode(default_policy.get("mode")),
+        ),
+        min_confidence=_coerce_float(
+            policy.get("min_confidence"),
+            default=_coerce_float(default_policy.get("min_confidence"), default=0.0),
+        ),
+        confidence_adjustment=_coerce_float(
+            policy.get("confidence_adjustment"),
+            default=_coerce_float(default_policy.get("confidence_adjustment"), default=0.0),
+        ),
+        require_review_on_conflict=bool(
+            policy.get("require_review_on_conflict", default_policy.get("require_review_on_conflict", True))
+        ),
+        allow_replace_lower_priority=bool(
+            policy.get("allow_replace_lower_priority", default_policy.get("allow_replace_lower_priority", False))
+        ),
+    )
+    return normalized
+
+
+def _normalize_conflict_resolution_policy(raw_policy: Any) -> dict[str, Any]:
+    defaults = _default_propagation_policy()["conflict_resolution"]
+    policy = dict(raw_policy) if isinstance(raw_policy, Mapping) else {}
+
+    source_priority_raw = policy.get("source_priority_order")
+    if isinstance(source_priority_raw, list):
+        source_priority = [
+            _normalize_type_source(item, default="")
+            for item in source_priority_raw
+            if _normalize_type_source(item, default="")
+        ]
+    else:
+        source_priority = list(defaults["source_priority_order"])
+    if len(source_priority) != len(TYPE_SOURCE_ALLOWED) or len(set(source_priority)) != len(TYPE_SOURCE_ALLOWED):
+        source_priority = list(defaults["source_priority_order"])
+
+    tie_breaker = str(policy.get("tie_breaker") or "").strip().upper()
+    if tie_breaker not in {
+        TYPE_PROPAGATION_TIE_BREAK_ASSERTION_ID_ASC,
+        TYPE_PROPAGATION_TIE_BREAK_TARGET_ID_ASC,
+        TYPE_PROPAGATION_TIE_BREAK_RECEIPT_TIMESTAMP_ASC,
+    }:
+        tie_breaker = str(defaults["tie_breaker"])
+
+    workflow_raw = policy.get("workflow")
+    if isinstance(workflow_raw, list):
+        workflow = [str(item).strip().upper().replace("-", "_").replace(" ", "_") for item in workflow_raw]
+    else:
+        workflow = list(defaults["workflow"])
+    if workflow != [TYPE_CONFLICT_STRATEGY_SOURCE_PRIORITY, "CONFIDENCE", "TIE_BREAKER"]:
+        workflow = list(defaults["workflow"])
+
+    return {
+        "source_priority_order": source_priority,
+        "confidence_margin": _clamp_confidence(
+            _coerce_float(policy.get("confidence_margin"), default=_coerce_float(defaults["confidence_margin"]))
+        ),
+        "tie_breaker": tie_breaker,
+        "workflow": workflow,
+    }
+
+
+def _normalize_propagation_policy(raw_policy: Any) -> dict[str, Any]:
+    defaults = _default_propagation_policy()
+    policy = dict(raw_policy) if isinstance(raw_policy, Mapping) else {}
+    return {
+        "same_program": _normalize_scope_policy(
+            policy.get("same_program"),
+            default_policy=defaults["same_program"],
+        ),
+        "cross_program": _normalize_scope_policy(
+            policy.get("cross_program"),
+            default_policy=defaults["cross_program"],
+        ),
+        "corpus_kb": _normalize_scope_policy(
+            policy.get("corpus_kb"),
+            default_policy=defaults["corpus_kb"],
+        ),
+        "conflict_resolution": _normalize_conflict_resolution_policy(policy.get("conflict_resolution")),
+    }
+
+
+def _normalize_propagation_targets(raw_targets: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_targets, list):
+        return []
+    targets: list[dict[str, Any]] = []
+    for item in raw_targets:
+        if not isinstance(item, Mapping):
+            continue
+        target = dict(item)
+        target["scope"] = _normalize_propagation_scope(target.get("scope"))
+        rule = str(target.get("rule") or "").strip().upper()
+        if not rule:
+            if target["scope"] == TYPE_PROPAGATION_SCOPE_CROSS_PROGRAM:
+                rule = "CROSS_PROGRAM_EXACT_FUNCTION_MATCH"
+            elif target["scope"] == TYPE_PROPAGATION_SCOPE_CORPUS_KB:
+                rule = "CORPUS_KB_LAYOUT_FINGERPRINT"
+            else:
+                rule = "SAME_PROGRAM_DIRECT_DATAFLOW"
+        target["rule"] = rule
+
+        for key in (
+            "target_program_id",
+            "target_assertion_id",
+            "target_id",
+            "competing_assertion_id",
+            "competing_source_type",
+            "competing_target_id",
+            "conflict_category",
+        ):
+            if key in target and target[key] is not None:
+                target[key] = str(target[key]).strip()
+        if "competing_source_type" in target:
+            target["competing_source_type"] = _normalize_type_source(
+                target.get("competing_source_type"),
+                default=TYPE_SOURCE_ML_MODEL,
+            )
+        competing_confidence_raw = target.get("competing_confidence")
+        if competing_confidence_raw is not None:
+            target["competing_confidence"] = _clamp_confidence(
+                _coerce_float(competing_confidence_raw, default=0.0)
+            )
+        targets.append(target)
+    return targets
+
+
+def _normalize_propagation_events(raw_events: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_events, list):
+        return []
+    events: list[dict[str, Any]] = []
+    for item in raw_events:
+        if isinstance(item, Mapping):
+            events.append(dict(item))
+    return events
+
+
+def _normalize_type_conflicts(raw_conflicts: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_conflicts, list):
+        return []
+    conflicts: list[dict[str, Any]] = []
+    for item in raw_conflicts:
+        if not isinstance(item, Mapping):
+            continue
+        conflict = dict(item)
+        status = str(conflict.get("status") or TYPE_CONFLICT_STATUS_OPEN).strip().upper().replace("-", "_")
+        if status not in {
+            TYPE_CONFLICT_STATUS_OPEN,
+            TYPE_CONFLICT_STATUS_AUTO_RESOLVED,
+            TYPE_CONFLICT_STATUS_ESCALATED,
+            TYPE_CONFLICT_STATUS_RESOLVED,
+        }:
+            status = TYPE_CONFLICT_STATUS_OPEN
+        conflict["status"] = status
+        conflicts.append(conflict)
+    return conflicts
+
+
 def _new_type_assertion_transition(
     *,
     from_state: str | None,
@@ -1471,20 +1813,47 @@ def _normalize_type_pr_assertion(raw: Mapping[str, Any]) -> dict[str, Any]:
 
     confidence_raw = assertion.get("confidence")
     if confidence_raw is not None:
-        try:
-            assertion["confidence"] = float(confidence_raw)
-        except (TypeError, ValueError):
-            assertion["confidence"] = 0.0
+        assertion["confidence"] = _clamp_confidence(_coerce_float(confidence_raw, default=0.0))
 
     evidence_ids_raw = assertion.get("evidence_ids")
     if isinstance(evidence_ids_raw, list):
         assertion["evidence_ids"] = [str(item).strip() for item in evidence_ids_raw if str(item).strip()]
 
-    conflicts_raw = assertion.get("conflicts")
-    conflicts = [dict(item) for item in conflicts_raw if isinstance(item, Mapping)] if isinstance(conflicts_raw, list) else []
-    if conflicts:
-        assertion["conflicts"] = conflicts
-    if "conflict_count" not in assertion:
+    source_raw = assertion.get("source")
+    if isinstance(source_raw, Mapping):
+        source_doc = dict(source_raw)
+    else:
+        source_doc = {}
+    source_doc["source_type"] = _normalize_type_source(source_doc.get("source_type"))
+    source_id = str(source_doc.get("source_id") or "").strip()
+    if source_id:
+        source_doc["source_id"] = source_id
+    assertion["source"] = source_doc
+
+    if (
+        assertion["lifecycle_state"] in {TYPE_ASSERTION_STATE_ACCEPTED, TYPE_ASSERTION_STATE_PROPAGATED}
+        or "propagation_policy" in assertion
+    ):
+        assertion["propagation_policy"] = _normalize_propagation_policy(assertion.get("propagation_policy"))
+
+    if "propagation_targets" in assertion:
+        assertion["propagation_targets"] = _normalize_propagation_targets(assertion.get("propagation_targets"))
+    elif "propagation_candidates" in assertion:
+        assertion["propagation_targets"] = _normalize_propagation_targets(assertion.get("propagation_candidates"))
+
+    if "propagation_events" in assertion:
+        assertion["propagation_events"] = _normalize_propagation_events(assertion.get("propagation_events"))
+    elif assertion["lifecycle_state"] == TYPE_ASSERTION_STATE_PROPAGATED:
+        assertion["propagation_events"] = []
+
+    conflicts = _normalize_type_conflicts(assertion.get("conflicts"))
+    assertion["conflicts"] = conflicts
+    if "conflict_count" in assertion:
+        try:
+            assertion["conflict_count"] = int(assertion.get("conflict_count") or 0)
+        except (TypeError, ValueError):
+            assertion["conflict_count"] = len(conflicts)
+    else:
         assertion["conflict_count"] = len(conflicts)
 
     transitions_raw = (
@@ -1599,6 +1968,16 @@ def _normalize_local_type_pr(raw: Mapping[str, Any]) -> dict[str, Any]:
             )
         ]
     type_pr["status_transitions"] = transitions
+
+    propagation_transactions_raw = type_pr.get("propagation_transactions")
+    if isinstance(propagation_transactions_raw, list):
+        type_pr["propagation_transactions"] = [
+            dict(item)
+            for item in propagation_transactions_raw
+            if isinstance(item, Mapping)
+        ]
+    else:
+        type_pr["propagation_transactions"] = []
     return type_pr
 
 
@@ -1968,6 +2347,471 @@ def _extract_asserted_type_name(assertion: Mapping[str, Any]) -> str:
     return str(assertion.get("suggested_type") or assertion.get("type_name") or "").strip()
 
 
+def _capture_type_assertion_snapshot(assertion: Mapping[str, Any]) -> dict[str, Any]:
+    transition_history_raw = assertion.get("transition_history")
+    transition_history = (
+        [dict(item) for item in transition_history_raw if isinstance(item, Mapping)]
+        if isinstance(transition_history_raw, list)
+        else []
+    )
+    propagation_events_raw = assertion.get("propagation_events")
+    propagation_events = (
+        [dict(item) for item in propagation_events_raw if isinstance(item, Mapping)]
+        if isinstance(propagation_events_raw, list)
+        else []
+    )
+    conflicts_raw = assertion.get("conflicts")
+    conflicts = (
+        [dict(item) for item in conflicts_raw if isinstance(item, Mapping)]
+        if isinstance(conflicts_raw, list)
+        else []
+    )
+    return {
+        "state": _normalize_type_assertion_state(assertion.get("lifecycle_state")),
+        "last_receipt_id": str(assertion.get("last_receipt_id") or "").strip(),
+        "updated_at_utc": str(assertion.get("updated_at_utc") or ""),
+        "transition_history": transition_history,
+        "propagation_events": propagation_events,
+        "conflicts": conflicts,
+        "conflict_count": int(assertion.get("conflict_count") or len(conflicts)),
+    }
+
+
+def _ensure_type_pr_propagation_transactions(type_pr: dict[str, Any]) -> list[dict[str, Any]]:
+    transactions_raw = type_pr.get("propagation_transactions")
+    if not isinstance(transactions_raw, list):
+        transactions_raw = []
+    transactions = [dict(item) for item in transactions_raw if isinstance(item, Mapping)]
+    type_pr["propagation_transactions"] = transactions
+    return transactions
+
+
+def _source_priority_rank(source_type: str, priority_order: list[str]) -> int:
+    normalized_source = _normalize_type_source(source_type, default="")
+    try:
+        return priority_order.index(normalized_source)
+    except ValueError:
+        return len(priority_order) + 1
+
+
+def _resolve_conflict_tie_break_winner(
+    *,
+    tie_breaker: str,
+    source_assertion_id: str,
+    competing_assertion_id: str,
+    source_target_id: str,
+    competing_target_id: str,
+) -> str:
+    if tie_breaker == TYPE_PROPAGATION_TIE_BREAK_TARGET_ID_ASC:
+        source_value = source_target_id or source_assertion_id
+        competing_value = competing_target_id or competing_assertion_id
+    else:
+        source_value = source_assertion_id
+        competing_value = competing_assertion_id
+    if source_value <= competing_value:
+        return source_assertion_id
+    return competing_assertion_id
+
+
+def _resolve_propagation_conflict(
+    *,
+    assertion: Mapping[str, Any],
+    target: Mapping[str, Any],
+    policy: Mapping[str, Any],
+    scope_policy: Mapping[str, Any],
+    resulting_confidence: float,
+    policy_mode: str,
+    propagation_receipt_id: str,
+    propagated_at_utc: str,
+) -> tuple[dict[str, Any], str, str]:
+    assertion_id = _type_assertion_id_from_doc(assertion)
+    competing_assertion_id = str(target.get("competing_assertion_id") or "").strip() or f"conflict:{uuid.uuid4()}"
+    competing_source_type = _normalize_type_source(
+        target.get("competing_source_type"),
+        default=TYPE_SOURCE_ML_MODEL,
+    )
+    competing_confidence = _clamp_confidence(
+        _coerce_float(target.get("competing_confidence"), default=resulting_confidence)
+    )
+
+    conflict_policy = (
+        dict(policy.get("conflict_resolution"))
+        if isinstance(policy.get("conflict_resolution"), Mapping)
+        else _default_propagation_policy()["conflict_resolution"]
+    )
+    source_priority_order = [
+        _normalize_type_source(item, default="")
+        for item in conflict_policy.get("source_priority_order", [])
+        if _normalize_type_source(item, default="")
+    ]
+    if len(source_priority_order) != len(TYPE_SOURCE_ALLOWED) or len(set(source_priority_order)) != len(TYPE_SOURCE_ALLOWED):
+        source_priority_order = list(_default_propagation_policy()["conflict_resolution"]["source_priority_order"])
+
+    source_type = TYPE_SOURCE_ML_MODEL
+    source_raw = assertion.get("source")
+    if isinstance(source_raw, Mapping):
+        source_type = _normalize_type_source(source_raw.get("source_type"), default=TYPE_SOURCE_ML_MODEL)
+
+    source_rank = _source_priority_rank(source_type, source_priority_order)
+    competing_rank = _source_priority_rank(competing_source_type, source_priority_order)
+    confidence_margin = _clamp_confidence(_coerce_float(conflict_policy.get("confidence_margin"), default=0.15))
+    tie_breaker = str(conflict_policy.get("tie_breaker") or TYPE_PROPAGATION_TIE_BREAK_ASSERTION_ID_ASC).strip().upper()
+    if tie_breaker not in {
+        TYPE_PROPAGATION_TIE_BREAK_ASSERTION_ID_ASC,
+        TYPE_PROPAGATION_TIE_BREAK_TARGET_ID_ASC,
+        TYPE_PROPAGATION_TIE_BREAK_RECEIPT_TIMESTAMP_ASC,
+    }:
+        tie_breaker = TYPE_PROPAGATION_TIE_BREAK_ASSERTION_ID_ASC
+
+    requires_review = bool(scope_policy.get("require_review_on_conflict", True))
+    allow_replace_lower_priority = bool(scope_policy.get("allow_replace_lower_priority", False))
+    conflict_id = str(uuid.uuid4())
+
+    resolution: dict[str, Any]
+    reason: str
+    winner_assertion_id: str
+    loser_assertion_id: str
+
+    if source_rank != competing_rank:
+        winner_assertion_id = assertion_id if source_rank < competing_rank else competing_assertion_id
+        loser_assertion_id = competing_assertion_id if winner_assertion_id == assertion_id else assertion_id
+        resolution = {
+            "strategy": TYPE_CONFLICT_STRATEGY_SOURCE_PRIORITY,
+            "requires_review": requires_review,
+            "winner_assertion_id": winner_assertion_id,
+            "loser_assertion_id": loser_assertion_id,
+            "priority_gap": abs(source_rank - competing_rank),
+            "reason": "source priority comparison",
+        }
+        reason = "source_priority"
+    else:
+        confidence_delta = abs(resulting_confidence - competing_confidence)
+        if confidence_delta > confidence_margin:
+            winner_assertion_id = assertion_id if resulting_confidence >= competing_confidence else competing_assertion_id
+            loser_assertion_id = competing_assertion_id if winner_assertion_id == assertion_id else assertion_id
+            resolution = {
+                "strategy": TYPE_CONFLICT_STRATEGY_HIGHER_CONFIDENCE,
+                "requires_review": requires_review,
+                "winner_assertion_id": winner_assertion_id,
+                "loser_assertion_id": loser_assertion_id,
+                "confidence_delta": round(confidence_delta, 6),
+                "reason": "confidence delta exceeded margin",
+            }
+            reason = "higher_confidence"
+        else:
+            winner_assertion_id = _resolve_conflict_tie_break_winner(
+                tie_breaker=tie_breaker,
+                source_assertion_id=assertion_id,
+                competing_assertion_id=competing_assertion_id,
+                source_target_id=str(assertion.get("target_id") or ""),
+                competing_target_id=str(target.get("competing_target_id") or target.get("target_id") or ""),
+            )
+            loser_assertion_id = competing_assertion_id if winner_assertion_id == assertion_id else assertion_id
+            resolution = {
+                "strategy": TYPE_CONFLICT_STRATEGY_TIE_BREAK,
+                "requires_review": requires_review,
+                "winner_assertion_id": winner_assertion_id,
+                "loser_assertion_id": loser_assertion_id,
+                "tie_breaker": tie_breaker,
+                "reason": "deterministic tie-break",
+            }
+            reason = "deterministic_tie_break"
+
+    winner_is_propagated = resolution["winner_assertion_id"] == assertion_id
+    if winner_is_propagated and not allow_replace_lower_priority:
+        requires_review = True
+        resolution["requires_review"] = True
+
+    conflict_status = TYPE_CONFLICT_STATUS_ESCALATED if requires_review else TYPE_CONFLICT_STATUS_AUTO_RESOLVED
+    conflict: dict[str, Any] = {
+        "conflict_id": conflict_id,
+        "category": str(target.get("conflict_category") or "PRIMITIVE_TYPE_DISAGREEMENT"),
+        "detected_during": "PROPAGATION",
+        "competing_assertion_id": competing_assertion_id,
+        "competing_source_type": competing_source_type,
+        "status": conflict_status,
+        "workflow_version": TYPE_PROPAGATION_WORKFLOW_VERSION,
+        "queue_position": None,
+        "queued_at": propagated_at_utc,
+        "resolution": resolution,
+    }
+
+    if conflict_status == TYPE_CONFLICT_STATUS_AUTO_RESOLVED:
+        resolution["resolved_receipt_id"] = propagation_receipt_id
+        resolution["resolved_at"] = propagated_at_utc
+        conflict["resolved_receipt_id"] = propagation_receipt_id
+        conflict["resolved_at"] = propagated_at_utc
+    else:
+        conflict["escalation_reason"] = "manual_review_required_by_scope_policy"
+
+    if conflict_status == TYPE_CONFLICT_STATUS_ESCALATED:
+        return conflict, TYPE_PROPAGATION_OUTCOME_CONFLICT, reason
+
+    if winner_is_propagated:
+        if policy_mode == TYPE_PROPAGATION_MODE_AUTO:
+            return conflict, TYPE_PROPAGATION_OUTCOME_APPLIED, reason
+        return conflict, TYPE_PROPAGATION_OUTCOME_PROPOSED, reason
+    return conflict, TYPE_PROPAGATION_OUTCOME_SKIPPED, reason
+
+
+def _apply_type_assertion_propagation(
+    *,
+    assertion: dict[str, Any],
+    propagation_receipt_id: str,
+    propagated_at_utc: str,
+) -> dict[str, Any]:
+    policy = _normalize_propagation_policy(assertion.get("propagation_policy"))
+    assertion["propagation_policy"] = policy
+    targets = _normalize_propagation_targets(assertion.get("propagation_targets"))
+    assertion["propagation_targets"] = targets
+
+    propagation_events = _normalize_propagation_events(assertion.get("propagation_events"))
+    conflicts = _normalize_type_conflicts(assertion.get("conflicts"))
+    next_queue_position = (
+        max(
+            (
+                int(item.get("queue_position"))
+                for item in conflicts
+                if item.get("queue_position") is not None
+            ),
+            default=-1,
+        )
+        + 1
+    )
+
+    base_confidence = _clamp_confidence(_coerce_float(assertion.get("confidence"), default=0.0))
+    applied_event_ids: list[str] = []
+    conflict_ids: list[str] = []
+    metrics = {
+        "targeted_total": len(targets),
+        "applied_total": 0,
+        "proposed_total": 0,
+        "skipped_total": 0,
+        "conflict_total": 0,
+    }
+
+    for target in targets:
+        scope = _normalize_propagation_scope(target.get("scope"))
+        scope_policy_key = _scope_key_for_propagation_scope(scope)
+        scope_policy = (
+            dict(policy.get(scope_policy_key))
+            if isinstance(policy.get(scope_policy_key), Mapping)
+            else _default_propagation_policy()[scope_policy_key]
+        )
+        policy_mode = _normalize_propagation_mode(
+            scope_policy.get("mode"),
+            default=TYPE_PROPAGATION_MODE_PROPOSE,
+        )
+
+        min_confidence = _clamp_confidence(_coerce_float(scope_policy.get("min_confidence"), default=0.0))
+        confidence_adjustment = max(
+            -1.0,
+            min(1.0, _coerce_float(scope_policy.get("confidence_adjustment"), default=0.0)),
+        )
+        resulting_confidence = _clamp_confidence(base_confidence + confidence_adjustment)
+
+        event_id = str(uuid.uuid4())
+        event: dict[str, Any] = {
+            "event_id": event_id,
+            "scope": scope,
+            "rule": str(target.get("rule") or ""),
+            "policy_mode": policy_mode,
+            "target_program_id": str(target.get("target_program_id") or "").strip() or None,
+            "target_assertion_id": str(target.get("target_assertion_id") or target.get("target_id") or "").strip()
+            or None,
+            "resulting_confidence": round(resulting_confidence, 6),
+            "propagated_at": propagated_at_utc,
+        }
+
+        outcome = TYPE_PROPAGATION_OUTCOME_SKIPPED
+        reason: str | None = None
+        if policy_mode == TYPE_PROPAGATION_MODE_DISABLED:
+            reason = "scope disabled by policy"
+        elif resulting_confidence < min_confidence:
+            reason = "below confidence threshold"
+        else:
+            competing_assertion_id = str(target.get("competing_assertion_id") or "").strip()
+            if competing_assertion_id:
+                conflict, conflict_outcome, conflict_reason = _resolve_propagation_conflict(
+                    assertion=assertion,
+                    target=target,
+                    policy=policy,
+                    scope_policy=scope_policy,
+                    resulting_confidence=resulting_confidence,
+                    policy_mode=policy_mode,
+                    propagation_receipt_id=propagation_receipt_id,
+                    propagated_at_utc=propagated_at_utc,
+                )
+                if conflict["status"] == TYPE_CONFLICT_STATUS_ESCALATED:
+                    conflict["queue_position"] = next_queue_position
+                    next_queue_position += 1
+                conflicts.append(conflict)
+                conflict_ids.append(str(conflict.get("conflict_id") or ""))
+                outcome = conflict_outcome
+                reason = conflict_reason
+                if outcome == TYPE_PROPAGATION_OUTCOME_CONFLICT:
+                    event["conflict_id"] = str(conflict.get("conflict_id") or "").strip()
+                    event["competing_assertion_id"] = competing_assertion_id
+            else:
+                outcome = (
+                    TYPE_PROPAGATION_OUTCOME_APPLIED
+                    if policy_mode == TYPE_PROPAGATION_MODE_AUTO
+                    else TYPE_PROPAGATION_OUTCOME_PROPOSED
+                )
+
+        event["outcome"] = outcome
+        if outcome == TYPE_PROPAGATION_OUTCOME_APPLIED:
+            event["applied_receipt_id"] = propagation_receipt_id
+            applied_event_ids.append(event_id)
+            metrics["applied_total"] += 1
+        elif outcome == TYPE_PROPAGATION_OUTCOME_PROPOSED:
+            metrics["proposed_total"] += 1
+        elif outcome == TYPE_PROPAGATION_OUTCOME_CONFLICT:
+            metrics["conflict_total"] += 1
+        else:
+            metrics["skipped_total"] += 1
+            event["reason"] = reason or "skipped"
+
+        propagation_events.append(event)
+
+    if metrics["applied_total"] > 0:
+        previous_state = _normalize_type_assertion_state(assertion.get("lifecycle_state"))
+        if previous_state != TYPE_ASSERTION_STATE_PROPAGATED:
+            transition_history_raw = assertion.get("transition_history")
+            transition_history = (
+                [dict(item) for item in transition_history_raw if isinstance(item, Mapping)]
+                if isinstance(transition_history_raw, list)
+                else []
+            )
+            transition_history.append(
+                _new_type_assertion_transition(
+                    from_state=previous_state,
+                    to_state=TYPE_ASSERTION_STATE_PROPAGATED,
+                    receipt_id=propagation_receipt_id,
+                    changed_at_utc=propagated_at_utc,
+                    reason="propagation_policy_applied",
+                )
+            )
+            assertion["transition_history"] = transition_history
+            assertion["lifecycle_state"] = TYPE_ASSERTION_STATE_PROPAGATED
+
+    assertion["propagation_events"] = propagation_events
+    assertion["conflicts"] = conflicts
+    assertion["conflict_count"] = len(conflicts)
+    assertion["updated_at_utc"] = propagated_at_utc
+    assertion["last_receipt_id"] = propagation_receipt_id
+
+    return {
+        "assertion_id": _type_assertion_id_from_doc(assertion),
+        "applied_event_ids": applied_event_ids,
+        "conflict_ids": [conflict_id for conflict_id in conflict_ids if conflict_id],
+        "metrics": metrics,
+    }
+
+
+def _run_type_pr_propagation(
+    *,
+    type_pr: dict[str, Any],
+    triggered_by: str | None = None,
+    propagated_at_utc: str | None = None,
+) -> dict[str, Any] | None:
+    assertions_raw = type_pr.get("assertions")
+    assertions = [dict(item) for item in assertions_raw if isinstance(item, Mapping)] if isinstance(assertions_raw, list) else []
+    if not assertions:
+        return None
+
+    accepted_assertions = [
+        assertion
+        for assertion in assertions
+        if _normalize_type_assertion_state(assertion.get("lifecycle_state")) == TYPE_ASSERTION_STATE_ACCEPTED
+    ]
+    if not accepted_assertions:
+        return None
+
+    propagated_at = propagated_at_utc or _utc_now()
+    propagation_receipt_id = _new_receipt_id(action="propagate")
+    transaction_id = _new_transaction_id()
+    transactions = _ensure_type_pr_propagation_transactions(type_pr)
+
+    state_before = {
+        _type_assertion_id_from_doc(assertion): _capture_type_assertion_snapshot(assertion)
+        for assertion in accepted_assertions
+    }
+
+    targeted_assertion_ids: list[str] = []
+    applied_event_ids: list[str] = []
+    conflict_ids: list[str] = []
+    metrics = {
+        "targeted_assertion_total": 0,
+        "targeted_event_total": 0,
+        "applied_total": 0,
+        "proposed_total": 0,
+        "skipped_total": 0,
+        "conflict_total": 0,
+    }
+
+    for assertion in accepted_assertions:
+        result = _apply_type_assertion_propagation(
+            assertion=assertion,
+            propagation_receipt_id=propagation_receipt_id,
+            propagated_at_utc=propagated_at,
+        )
+        assertion_id = str(result.get("assertion_id") or "").strip()
+        if assertion_id:
+            targeted_assertion_ids.append(assertion_id)
+        applied_event_ids.extend(str(item) for item in result.get("applied_event_ids", []) if str(item).strip())
+        conflict_ids.extend(str(item) for item in result.get("conflict_ids", []) if str(item).strip())
+
+        result_metrics = result.get("metrics")
+        if isinstance(result_metrics, Mapping):
+            metrics["targeted_event_total"] += int(result_metrics.get("targeted_total") or 0)
+            metrics["applied_total"] += int(result_metrics.get("applied_total") or 0)
+            metrics["proposed_total"] += int(result_metrics.get("proposed_total") or 0)
+            metrics["skipped_total"] += int(result_metrics.get("skipped_total") or 0)
+            metrics["conflict_total"] += int(result_metrics.get("conflict_total") or 0)
+
+    metrics["targeted_assertion_total"] = len(targeted_assertion_ids)
+    if metrics["targeted_event_total"] == 0:
+        type_pr["assertions"] = assertions
+        return None
+
+    state_after = {
+        assertion_id: _capture_type_assertion_snapshot(assertion)
+        for assertion in assertions
+        for assertion_id in (_type_assertion_id_from_doc(assertion),)
+        if assertion_id in state_before
+    }
+    transaction: dict[str, Any] = {
+        "transaction_id": transaction_id,
+        "phase": "propagate",
+        "status": "propagated",
+        "propagation_receipt_id": propagation_receipt_id,
+        "assertion_ids": sorted(targeted_assertion_ids),
+        "state_before": state_before,
+        "state_after": state_after,
+        "state_before_hash": _digest_json(state_before),
+        "state_after_hash": _digest_json(state_after),
+        "applied_event_ids": sorted(set(applied_event_ids)),
+        "conflict_ids": sorted(set(conflict_ids)),
+        "propagated_at_utc": propagated_at,
+    }
+    if triggered_by:
+        transaction["triggered_by"] = str(triggered_by)
+    transactions.append(transaction)
+    type_pr["propagation_transactions"] = transactions
+    type_pr["assertions"] = assertions
+    type_pr["updated_at_utc"] = propagated_at
+
+    return {
+        "propagation_receipt_id": propagation_receipt_id,
+        "transaction_id": transaction_id,
+        "assertion_ids": sorted(targeted_assertion_ids),
+        "applied_event_ids": sorted(set(applied_event_ids)),
+        "conflict_ids": sorted(set(conflict_ids)),
+        "metrics": metrics,
+    }
+
+
 def list_type_pr_review_queue(
     *,
     local_store: Path,
@@ -2120,6 +2964,21 @@ def get_type_pr_detail(
                     for item in assertion.get("review_decisions", [])
                     if isinstance(item, Mapping)
                 ] if isinstance(assertion.get("review_decisions"), list) else [],
+                "propagation_events": [
+                    dict(item)
+                    for item in assertion.get("propagation_events", [])
+                    if isinstance(item, Mapping)
+                ] if isinstance(assertion.get("propagation_events"), list) else [],
+                "conflicts": [
+                    dict(item)
+                    for item in assertion.get("conflicts", [])
+                    if isinstance(item, Mapping)
+                ] if isinstance(assertion.get("conflicts"), list) else [],
+                "propagation_policy": (
+                    dict(assertion.get("propagation_policy"))
+                    if isinstance(assertion.get("propagation_policy"), Mapping)
+                    else {}
+                ),
             }
         )
 
@@ -2152,6 +3011,9 @@ def get_type_pr_detail(
             "created_at_utc": str(type_pr.get("created_at_utc") or ""),
             "updated_at_utc": str(type_pr.get("updated_at_utc") or ""),
             "assertion_state_counts": _type_pr_assertion_state_counts(type_pr),
+            "propagation_transaction_count": len(
+                [item for item in type_pr.get("propagation_transactions", []) if isinstance(item, Mapping)]
+            ) if isinstance(type_pr.get("propagation_transactions"), list) else 0,
         },
         "assertions": assertion_rows,
         "review_timeline": review_timeline,
@@ -2356,6 +3218,20 @@ def submit_type_pr_review_decision(
         assertion["review_decisions"] = assertion_decisions
 
     working_pr["assertions"] = working_assertions
+    propagation_report: dict[str, Any] | None = None
+    if normalized_decision == TYPE_PR_DECISION_APPROVE:
+        propagation_report = _run_type_pr_propagation(
+            type_pr=working_pr,
+            triggered_by=normalized_reviewer,
+            propagated_at_utc=decision_at_utc,
+        )
+
+    final_assertions_raw = working_pr.get("assertions")
+    final_assertions = (
+        [dict(item) for item in final_assertions_raw if isinstance(item, Mapping)]
+        if isinstance(final_assertions_raw, list)
+        else []
+    )
     working_doc["type_prs"] = working_type_pr_docs
 
     state_after = {
@@ -2363,7 +3239,7 @@ def submit_type_pr_review_decision(
         "status": next_pr_status,
         "assertion_states": {
             _type_assertion_id_from_doc(assertion): _normalize_type_assertion_state(assertion.get("lifecycle_state"))
-            for assertion in working_assertions
+            for assertion in final_assertions
         },
     }
     state_before_hash = _digest_json(state_before)
@@ -2394,6 +3270,211 @@ def submit_type_pr_review_decision(
         },
         "state_before": state_before,
         "state_after": state_after,
+        "propagation": propagation_report,
+        "local_store": str(local_store),
+    }
+
+
+def rollback_type_pr_propagation(
+    *,
+    local_store: Path,
+    type_pr_id: str,
+    propagation_receipt_ids: list[str] | None = None,
+    actor_id: str | None = None,
+) -> dict[str, Any]:
+    normalized_type_pr_id = str(type_pr_id).strip()
+    if not normalized_type_pr_id:
+        raise ValueError("type_pr_id is required")
+
+    normalized_actor = str(actor_id).strip() if actor_id is not None else None
+    if normalized_actor == "":
+        normalized_actor = None
+
+    store_doc = _load_local_proposal_store(local_store)
+    working_doc = json.loads(json.dumps(store_doc))
+    type_prs_raw = working_doc.get("type_prs")
+    type_pr_docs = [dict(item) for item in type_prs_raw if isinstance(item, Mapping)] if isinstance(type_prs_raw, list) else []
+    by_id, _, _ = _resolve_type_pr_targets(type_pr_docs, type_pr_ids=None)
+    type_pr = by_id.get(normalized_type_pr_id)
+    if type_pr is None:
+        raise ValueError(f"unknown type_pr_id '{normalized_type_pr_id}'")
+
+    assertions_raw = type_pr.get("assertions")
+    assertions = [dict(item) for item in assertions_raw if isinstance(item, Mapping)] if isinstance(assertions_raw, list) else []
+    assertion_by_id: dict[str, dict[str, Any]] = {}
+    for assertion in assertions:
+        assertion_id = _type_assertion_id_from_doc(assertion)
+        if assertion_id and assertion_id not in assertion_by_id:
+            assertion_by_id[assertion_id] = assertion
+
+    transactions = _ensure_type_pr_propagation_transactions(type_pr)
+    transactions_by_receipt: dict[str, dict[str, Any]] = {}
+    for transaction in transactions:
+        receipt_id = str(transaction.get("propagation_receipt_id") or "").strip()
+        if receipt_id and receipt_id not in transactions_by_receipt:
+            transactions_by_receipt[receipt_id] = transaction
+
+    filter_ids = {str(item).strip() for item in (propagation_receipt_ids or []) if str(item).strip()}
+    if filter_ids:
+        target_receipt_ids = sorted(filter_ids)
+        missing = [
+            receipt_id
+            for receipt_id in target_receipt_ids
+            if receipt_id not in transactions_by_receipt
+        ]
+        if missing:
+            raise ValueError(f"unknown propagation_receipt_id(s): {', '.join(missing)}")
+    else:
+        target_receipt_ids = sorted(
+            receipt_id
+            for receipt_id, tx in transactions_by_receipt.items()
+            if str(tx.get("status") or "propagated").strip().lower() != "rolled_back"
+        )
+        missing = []
+
+    rolled_back_receipt_ids: list[str] = []
+    already_rolled_back_receipt_ids: list[str] = []
+    rollback_receipt_ids: list[str] = []
+    rolled_back_event_ids: list[str] = []
+    restored_assertion_ids: list[str] = []
+
+    for propagation_receipt_id in target_receipt_ids:
+        transaction = transactions_by_receipt[propagation_receipt_id]
+        tx_status = str(transaction.get("status") or "propagated").strip().lower()
+        rollback_receipt_id = str(transaction.get("rollback_receipt_id") or "").strip()
+        if tx_status == "rolled_back":
+            already_rolled_back_receipt_ids.append(propagation_receipt_id)
+            if rollback_receipt_id:
+                rollback_receipt_ids.append(rollback_receipt_id)
+            continue
+
+        if not rollback_receipt_id:
+            rollback_receipt_id = _new_receipt_id(action="rollback")
+        rollback_at_utc = _utc_now()
+        rollback_transaction_id = _new_transaction_id()
+
+        assertion_ids_raw = transaction.get("assertion_ids")
+        if isinstance(assertion_ids_raw, list):
+            assertion_ids = [str(item).strip() for item in assertion_ids_raw if str(item).strip()]
+        else:
+            state_before_raw = transaction.get("state_before")
+            if isinstance(state_before_raw, Mapping):
+                assertion_ids = [str(item).strip() for item in state_before_raw if str(item).strip()]
+            else:
+                assertion_ids = []
+
+        tx_rolled_back_event_ids: list[str] = []
+        tx_restored_assertion_ids: list[str] = []
+        for assertion_id in assertion_ids:
+            assertion = assertion_by_id.get(assertion_id)
+            if assertion is None:
+                raise ValueError(
+                    f"propagation transaction '{propagation_receipt_id}' references missing assertion '{assertion_id}'"
+                )
+
+            propagation_events_raw = assertion.get("propagation_events")
+            propagation_events = [
+                dict(item) for item in propagation_events_raw if isinstance(item, Mapping)
+            ] if isinstance(propagation_events_raw, list) else []
+
+            event_updated = False
+            for event in propagation_events:
+                event_receipt_id = str(event.get("applied_receipt_id") or "").strip()
+                event_outcome = str(event.get("outcome") or "").strip().upper()
+                if event_receipt_id != propagation_receipt_id or event_outcome != TYPE_PROPAGATION_OUTCOME_APPLIED:
+                    continue
+                event["outcome"] = TYPE_PROPAGATION_OUTCOME_ROLLED_BACK
+                event["rollback_receipt_id"] = rollback_receipt_id
+                event["rolled_back_at"] = rollback_at_utc
+                event_updated = True
+                event_id = str(event.get("event_id") or "").strip()
+                if event_id:
+                    tx_rolled_back_event_ids.append(event_id)
+
+            if not event_updated:
+                continue
+
+            assertion["propagation_events"] = propagation_events
+            current_state = _normalize_type_assertion_state(assertion.get("lifecycle_state"))
+            has_applied_events = any(
+                str(item.get("outcome") or "").strip().upper() == TYPE_PROPAGATION_OUTCOME_APPLIED
+                for item in propagation_events
+            )
+            next_state = TYPE_ASSERTION_STATE_PROPAGATED if has_applied_events else TYPE_ASSERTION_STATE_ACCEPTED
+            if current_state != next_state:
+                transition_history_raw = assertion.get("transition_history")
+                transition_history = [
+                    dict(item) for item in transition_history_raw if isinstance(item, Mapping)
+                ] if isinstance(transition_history_raw, list) else []
+                transition_history.append(
+                    _new_type_assertion_transition(
+                        from_state=current_state,
+                        to_state=next_state,
+                        receipt_id=rollback_receipt_id,
+                        changed_at_utc=rollback_at_utc,
+                        reviewer_id=normalized_actor,
+                        reason="propagation_rollback",
+                    )
+                )
+                assertion["transition_history"] = transition_history
+                assertion["lifecycle_state"] = next_state
+
+            assertion["updated_at_utc"] = rollback_at_utc
+            assertion["last_receipt_id"] = rollback_receipt_id
+            tx_restored_assertion_ids.append(assertion_id)
+
+        transaction["status"] = "rolled_back"
+        transaction["rollback_receipt_id"] = rollback_receipt_id
+        transaction["rolled_back_at_utc"] = rollback_at_utc
+        transaction["rollback_transaction"] = {
+            "transaction_id": rollback_transaction_id,
+            "phase": "rollback",
+            "scope": "type_pr",
+            "pre_state_hash": str(transaction.get("state_after_hash") or ""),
+            "post_state_hash": str(transaction.get("state_before_hash") or ""),
+        }
+        transaction["rollback_receipt_links"] = [
+            {
+                "receipt_id": propagation_receipt_id,
+                "link_type": "ROLLS_BACK_PROPAGATION",
+            }
+        ]
+        transaction["rolled_back_event_ids"] = sorted(set(tx_rolled_back_event_ids))
+        if normalized_actor:
+            transaction["rolled_back_by"] = normalized_actor
+
+        rolled_back_receipt_ids.append(propagation_receipt_id)
+        rollback_receipt_ids.append(rollback_receipt_id)
+        rolled_back_event_ids.extend(tx_rolled_back_event_ids)
+        restored_assertion_ids.extend(tx_restored_assertion_ids)
+
+    type_pr["assertions"] = assertions
+    type_pr["propagation_transactions"] = transactions
+    type_pr["updated_at_utc"] = _utc_now()
+    working_doc["type_prs"] = type_pr_docs
+    _write_local_proposal_store(local_store, working_doc)
+
+    return {
+        "schema_version": 1,
+        "kind": "type_pr_propagation_rollback_report",
+        "generated_at_utc": _utc_now(),
+        "type_pr_id": normalized_type_pr_id,
+        "bulk": not filter_ids,
+        "query": {
+            "propagation_receipt_ids": sorted(filter_ids),
+        },
+        "metrics": {
+            "targeted_total": len(target_receipt_ids),
+            "rolled_back_total": len(rolled_back_receipt_ids),
+            "already_rolled_back_total": len(already_rolled_back_receipt_ids),
+            "restored_assertion_total": len(restored_assertion_ids),
+            "missing_total": len(missing),
+        },
+        "rolled_back_propagation_receipt_ids": rolled_back_receipt_ids,
+        "already_rolled_back_propagation_receipt_ids": already_rolled_back_receipt_ids,
+        "rollback_receipt_ids": rollback_receipt_ids,
+        "rolled_back_event_ids": sorted(set(rolled_back_event_ids)),
+        "restored_assertion_ids": restored_assertion_ids,
         "local_store": str(local_store),
     }
 
@@ -5568,6 +6649,32 @@ def _type_pr_review_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _type_pr_rollback_propagation_command(args: argparse.Namespace) -> int:
+    try:
+        report = rollback_type_pr_propagation(
+            local_store=args.local_store,
+            type_pr_id=args.type_pr_id,
+            propagation_receipt_ids=args.propagation_receipt_id,
+            actor_id=args.actor_id,
+        )
+    except ValueError as exc:
+        error_report = {
+            "schema_version": 1,
+            "kind": "type_pr_propagation_rollback_error",
+            "error": str(exc),
+        }
+        print(json.dumps(error_report, indent=2, sort_keys=True))
+        return 1
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def _add_triage_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--corpus", type=Path, required=True, help="Path to corpus JSON")
     parser.add_argument(
@@ -6224,6 +7331,42 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional path to write Type PR review decision report JSON",
     )
     type_pr_review_parser.set_defaults(func=_type_pr_review_command)
+
+    type_pr_rollback_parser = subparsers.add_parser(
+        "type-pr-rollback-propagation",
+        help="Rollback propagated Type PR events by propagation receipt id",
+    )
+    type_pr_rollback_parser.add_argument(
+        "--local-store",
+        type=Path,
+        required=True,
+        help="Path to local proposal store JSON",
+    )
+    type_pr_rollback_parser.add_argument(
+        "--type-pr-id",
+        type=str,
+        required=True,
+        help="Type PR id whose propagation should be rolled back",
+    )
+    type_pr_rollback_parser.add_argument(
+        "--propagation-receipt-id",
+        action="append",
+        default=None,
+        help="Propagation receipt id to rollback. Repeatable. Omit to rollback all active propagation receipts.",
+    )
+    type_pr_rollback_parser.add_argument(
+        "--actor-id",
+        type=str,
+        default=None,
+        help="Optional actor identifier recorded with rollback transition",
+    )
+    type_pr_rollback_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write Type PR propagation rollback report JSON",
+    )
+    type_pr_rollback_parser.set_defaults(func=_type_pr_rollback_propagation_command)
 
     return parser
 
