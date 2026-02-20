@@ -1,0 +1,325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Type Assertion Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "assertion_id",
+    "annotation_id",
+    "program_id",
+    "target",
+    "asserted_type",
+    "source",
+    "confidence",
+    "state",
+    "created_receipt_id",
+    "last_receipt_id",
+    "evidence_ids"
+  ],
+  "properties": {
+    "assertion_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "annotation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "program_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_type",
+        "target_id",
+        "target_scope"
+      ],
+      "properties": {
+        "target_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "target_scope": {
+          "type": "string",
+          "enum": [
+            "VARIABLE",
+            "PARAMETER",
+            "RETURN_TYPE",
+            "GLOBAL",
+            "STRUCT_FIELD"
+          ]
+        },
+        "target_address": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "asserted_type": {},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_type",
+        "source_id"
+      ],
+      "properties": {
+        "source_type": {
+          "type": "string",
+          "enum": [
+            "DWARF",
+            "ANALYST",
+            "ML_MODEL",
+            "CONSTRAINT_SOLVER",
+            "HEURISTIC",
+            "GHIDRA_DEFAULT"
+          ]
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "state": {
+      "description": "Maps to type_assertion.lifecycle_state in storage.",
+      "$ref": "#/$defs/lifecycle_state"
+    },
+    "previous_assertion_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "created_receipt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "last_receipt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "uniqueItems": true
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transition"
+      }
+    }
+  },
+  "$defs": {
+    "lifecycle_state": {
+      "type": "string",
+      "enum": [
+        "INFERRED",
+        "PROPOSED",
+        "UNDER_REVIEW",
+        "ACCEPTED",
+        "PROPAGATED",
+        "DEPRECATED",
+        "REJECTED"
+      ]
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_state",
+        "to_state",
+        "receipt_id",
+        "changed_at"
+      ],
+      "properties": {
+        "from_state": {
+          "$ref": "#/$defs/lifecycle_state"
+        },
+        "to_state": {
+          "$ref": "#/$defs/lifecycle_state"
+        },
+        "receipt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "changed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "from_state": {
+              "const": "INFERRED"
+            },
+            "to_state": {
+              "const": "PROPOSED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "INFERRED"
+            },
+            "to_state": {
+              "const": "REJECTED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "PROPOSED"
+            },
+            "to_state": {
+              "const": "UNDER_REVIEW"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "PROPOSED"
+            },
+            "to_state": {
+              "const": "REJECTED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "UNDER_REVIEW"
+            },
+            "to_state": {
+              "const": "PROPOSED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "UNDER_REVIEW"
+            },
+            "to_state": {
+              "const": "ACCEPTED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "UNDER_REVIEW"
+            },
+            "to_state": {
+              "const": "REJECTED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "ACCEPTED"
+            },
+            "to_state": {
+              "const": "PROPAGATED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "ACCEPTED"
+            },
+            "to_state": {
+              "const": "REJECTED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "PROPAGATED"
+            },
+            "to_state": {
+              "const": "UNDER_REVIEW"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "PROPAGATED"
+            },
+            "to_state": {
+              "const": "DEPRECATED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "PROPAGATED"
+            },
+            "to_state": {
+              "const": "REJECTED"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from_state": {
+              "const": "DEPRECATED"
+            },
+            "to_state": {
+              "const": "REJECTED"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
