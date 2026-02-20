@@ -1,0 +1,24 @@
+{
+  "functions": [
+    {
+      "id": "fn.elf.parse_headers",
+      "name": "parse_elf_headers",
+      "text": "parse ELF header and section table entries for executable metadata"
+    },
+    {
+      "id": "fn.net.open_socket",
+      "name": "open_socket",
+      "text": "initialize network socket, resolve host, and connect to remote endpoint"
+    },
+    {
+      "id": "fn.crypto.sha256_update",
+      "name": "sha256_update",
+      "text": "update sha256 context with block data and append message schedule state"
+    },
+    {
+      "id": "fn.pe.parse_imports",
+      "name": "parse_pe_imports",
+      "text": "parse PE import table and resolve imported function names from sections"
+    }
+  ]
+}
