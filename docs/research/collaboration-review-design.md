@@ -32,7 +32,7 @@ AnnotationChangeset {
   status:        DRAFT | OPEN | APPROVED | MERGED | REJECTED
   deltas:        AnnotationDelta[]
   reviews:       Review[]
-  evidence_refs: EvidenceRef[] // Links to dynamic traces, ML outputs
+  evidence_refs: Map<UUID, EvidenceRef> // Canonical evidence refs keyed by stable ID
 }
 
 AnnotationDelta {
@@ -45,6 +45,7 @@ AnnotationDelta {
   confidence:    float         // 0.0-1.0, relevant for ML-proposed changes
   source:        HUMAN | ML_MODEL | IMPORT | SCRIPT
   rationale:     String?       // "Matches known OpenSSL 1.1.1 pattern"
+  evidence_link_ids: UUID[]    // Stable evidence_ref_id list for this proposal
 }
 ```
 
@@ -93,6 +94,19 @@ The diff for an RE changeset should present changes in the context analysts actu
 - **Decompiler diff**: Side-by-side decompiler output for affected functions, with renamed variables, changed types, and added comments highlighted inline.
 - **Type diff**: Structural diff for modified data types (added fields, changed sizes, renamed members).
 - **Summary table**: Grouped by artifact type, listing all deltas with before/after values.
+- **Evidence drawer**: Per-delta expandable drawer keyed by `delta_id` that resolves stable `evidence_link_ids` and renders `xref`, `constant/string`, and `callsite` evidence with deep links.
+
+### Evidence Drawer Data Contract (UI-219)
+
+For each selected proposal delta:
+
+1. Load `AnnotationDelta.evidence_link_ids`.
+2. Resolve each ID in `AnnotationChangeset.evidence_refs`.
+3. Render grouped evidence cards with:
+   - stable `evidence_ref_id`
+   - evidence kind (`XREF`, `CONSTANT`, `CALLSITE`, other)
+   - short explanation + confidence
+   - deep link target (`listing://`, `decompiler://`, `trace://`)
 
 ---
 
@@ -307,7 +321,7 @@ AnnotationRecord {
   // Why
   confidence:    float           // 0.0 - 1.0
   rationale:     String?         // Free-text explanation
-  evidence:      EvidenceRef[]   // Links to supporting evidence
+  evidence_link_ids: UUID[]      // Stable links to EvidenceRef records
 
   // Provenance
   parent_record: UUID?           // Previous annotation this supersedes
@@ -315,13 +329,16 @@ AnnotationRecord {
 }
 
 EvidenceRef {
-  type:          XREF | DYNAMIC_TRACE | ML_OUTPUT | MANUAL_NOTE |
-                 LIBRARY_MATCH | BSIM_RESULT | FIDB_MATCH | EXTERNAL_DOC
+  evidence_ref_id: UUID          // Stable identifier (deterministic from source tuple)
+  type:          XREF | CONSTANT | CALLSITE | DYNAMIC_TRACE | ML_OUTPUT |
+                 MANUAL_NOTE | LIBRARY_MATCH | BSIM_RESULT | FIDB_MATCH | EXTERNAL_DOC
+  source_id:     String          // Stable source key ("xref:<program>:<from>:<to>:<type>", etc.)
   uri:           String          // "ghidra://trace/session-42/snap-7/0x401234"
                                  // "bsim://query/result-id-xyz"
                                  // "fidb://match/openssl-1.1.1/ssl_connect"
   description:   String
   confidence:    float?          // Evidence-specific confidence
+  metadata:      Map<String, String>? // e.g. callsite args, constant operand index
 }
 
 DerivationChain {
@@ -349,6 +366,15 @@ Attribution data should not live inside Ghidra's program database directly (whic
 2. **Ghidra property integration**: Lightweight attribution (author + timestamp + confidence) can be stored as Ghidra program properties or bookmarks, which are already tracked by the merge framework.
 
 3. **Full provenance on the review server**: The complete `DerivationChain` and `EvidenceRef` data lives on the collaboration server, indexed by `changeset_id` and `record_id`.
+
+4. **Append-only proposal evidence links**: Store `proposal_evidence_link(delta_id, evidence_ref_id)` rows separately from artifact mutations. Apply and rollback operations reference these same IDs instead of creating replacement evidence rows.
+
+### Apply/Rollback Evidence Integrity Rules
+
+1. Applying a proposal must persist `evidence_link_ids` into the apply receipt.
+2. Rolling back an applied proposal must reference the original apply receipt's `evidence_link_ids`.
+3. Evidence link rows are immutable; rollback changes proposal/apply state, not evidence identity.
+4. Review UI drawer resolves evidence only from `delta_id -> evidence_link_ids`, so evidence remains inspectable after apply/rollback.
 
 ### Provenance Chain Example
 
@@ -427,6 +453,7 @@ sequenceDiagram
         G->>S: Check in with changeset metadata
         S->>S: Merge (invoke MergeResolvers if conflicts)
         S-->>G: New version N+1
+        G->>R: Persist apply receipt + evidence_link_ids
         G->>R: Update changeset status: MERGED
     else Changes Requested
         R->>G: Changeset NEEDS_WORK
@@ -467,15 +494,23 @@ sequenceDiagram
 
     alt High confidence (>0.95) + no conflicts
         R->>R: Auto-approve per project policy
+        R->>R: Persist apply receipt referencing evidence_ref_ids
         R->>S: Apply changeset
         R->>A: Notify (post-hoc review available)
     else Medium confidence (0.7-0.95)
         R->>A: Route to human review queue
         A->>R: Review, approve/reject individual deltas
+        R->>R: Persist apply receipt referencing evidence_ref_ids
         R->>S: Apply approved deltas
     else Low confidence (<0.7)
         R->>R: Park in "suggestions" queue
         A->>R: Browse suggestions optionally
+    end
+
+    opt Reviewer requests rollback
+        A->>R: Roll back applied delta(s)
+        R->>R: Create rollback receipt (reuse same evidence_ref_ids)
+        R->>S: Revert applied transaction
     end
 ```
 
@@ -646,6 +681,8 @@ public interface AnnotationChangesetService {
     List<AnnotationChangeset> getPendingReviews(Program program);
     List<AnnotationChangeset> getChangesetHistory(Program program);
     AnnotationChangeset getChangeset(UUID id);
+    List<EvidenceRef> getEvidenceForDelta(UUID changesetId, UUID deltaId);
+    void attachEvidenceLinks(UUID changesetId, UUID deltaId, List<UUID> evidenceRefIds);
 
     // Capture control
     void startCapturing(Program program); // Begin recording changes
@@ -668,6 +705,8 @@ public interface ReviewService {
     // Review queries
     List<Review> getReviews(UUID changesetId);
     List<AnnotationChangeset> getReviewQueue(AnalystIdentity reviewer);
+    List<EvidenceRef> getEvidenceForDelta(UUID changesetId, UUID deltaId);
+    List<UUID> getReceiptEvidenceLinks(UUID receiptId);
 
     // Attribution
     void recordAttribution(AnnotationRecord record);
@@ -727,6 +766,7 @@ ghidra_scripts/
     ChangesetCapturingListener.java   // DomainObjectListener implementation
     ChangesetPanel.java               // UI for viewing/managing changesets
     ReviewPanel.java                  // UI for reviewing proposed changes
+    EvidenceDrawerPanel.java          // Per-delta evidence inspection (xref/constant/callsite)
     AttributionPanel.java            // UI for viewing annotation provenance
     BranchManagerImpl.java           // Branch management implementation
     ReviewServiceClient.java          // HTTP client for review server
@@ -738,7 +778,7 @@ The plugin would:
 1. Register as a `Plugin` with `@PluginInfo(servicesProvided = {AnnotationChangesetService.class})`
 2. On program open: attach a `ChangesetCapturingListener` to the program
 3. Provide toolbar actions: "New Changeset", "Submit for Review", "View Review Queue"
-4. Provide a dockable panel showing current changeset deltas
+4. Provide dockable panels showing current changeset deltas and per-delta evidence links
 5. On merge: wrap `ProgramMultiUserMergeManager` to inject attribution recording and priority rules
 
 ### Server-Side Components
