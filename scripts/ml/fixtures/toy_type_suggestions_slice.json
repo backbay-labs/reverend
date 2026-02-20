@@ -1,0 +1,54 @@
+{
+  "suggestions": [
+    {
+      "target_id": "fn.net.open_socket:param.addr",
+      "target_scope": "PARAMETER",
+      "suggested_type": "struct sockaddr_in *",
+      "ground_truth_type": "struct sockaddr_in *",
+      "model_confidence": 0.86,
+      "consensus_ratio": 0.9,
+      "pattern_match_score": 1.0,
+      "evidence_refs": [
+        {
+          "kind": "CALLSITE",
+          "description": "Socket callsites pass AF_INET constants",
+          "uri": "local-index://evidence/fn.net.open_socket/callsite",
+          "confidence": 0.9
+        },
+        {
+          "kind": "STRUCT_LAYOUT",
+          "description": "Observed layout aligns with sockaddr_in",
+          "uri": "local-index://evidence/fn.net.open_socket/layout",
+          "confidence": 0.88
+        }
+      ]
+    },
+    {
+      "target_id": "fn.pe.parse_imports:local.desc",
+      "target_scope": "VARIABLE",
+      "suggested_type": "IMAGE_IMPORT_DESCRIPTOR *",
+      "ground_truth_type": "IMAGE_IMPORT_DESCRIPTOR *",
+      "model_confidence": 0.81,
+      "consensus_ratio": 0.75,
+      "pattern_match_score": 1.0,
+      "evidence_refs": [
+        {
+          "kind": "STRUCT_LAYOUT",
+          "description": "Field offsets match PE import descriptor",
+          "uri": "local-index://evidence/fn.pe.parse_imports/layout",
+          "confidence": 0.85
+        }
+      ]
+    },
+    {
+      "target_id": "fn.crypto.sha256_update:local.ctx",
+      "target_scope": "VARIABLE",
+      "suggested_type": "AES_CTX *",
+      "ground_truth_type": "SHA256_CTX *",
+      "model_confidence": 0.22,
+      "consensus_ratio": 0.1,
+      "pattern_match_score": 0.0,
+      "evidence_refs": []
+    }
+  ]
+}

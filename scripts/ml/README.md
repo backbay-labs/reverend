@@ -89,3 +89,20 @@ python3 scripts/ml/local_embedding_pipeline.py evaluate \
 `evaluate` emits reranked metrics plus a baseline comparison block (`mrr_delta`,
 `recall@1_delta`, and per-query ordering deltas). Add `--disable-reranker` to
 evaluate baseline only.
+
+## Generate Type Suggestions (Confidence + Quarantine Policy)
+
+```bash
+python3 scripts/ml/local_embedding_pipeline.py suggest-types \
+  --input scripts/ml/fixtures/toy_type_suggestions_slice.json \
+  --auto-apply-threshold 0.90 \
+  --suggest-threshold 0.50 \
+  --output /tmp/ml301-type-suggestions.json \
+  --telemetry-path /tmp/ml301-type-suggestion-metrics.jsonl
+```
+
+Suggestion reports include:
+- Confidence score and confidence component breakdown
+- Evidence summary and evidence references
+- Policy action (`AUTO_APPLY`, `SUGGEST`, `QUARANTINED`)
+- Suggestion quality metrics (accuracy, precision, quarantine rates) for CI artifacts
