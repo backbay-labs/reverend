@@ -637,6 +637,394 @@ def generate_type_suggestion_report(
 
 
 @dataclass(frozen=True)
+class TriageFunctionFeatures:
+    """Deterministic feature vector for mission-stage triage scoring."""
+
+    function_id: str
+    name: str
+    entrypoint_score: float
+    hotspot_score: float
+    unknown_score: float
+    tags: tuple[str, ...]
+    rationale: tuple[str, ...]
+    evidence_refs: tuple[EvidenceRef, ...]
+
+
+@dataclass(frozen=True)
+class TriageFinding:
+    """Single triage output row containing evidence references."""
+
+    function_id: str
+    name: str
+    score: float
+    tags: tuple[str, ...]
+    rationale: tuple[str, ...]
+    evidence_refs: tuple[EvidenceRef, ...]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "function_id": self.function_id,
+            "name": self.name,
+            "score": round(self.score, 6),
+            "tags": list(self.tags),
+            "rationale": list(self.rationale),
+            "evidence_refs": [ref.to_json() for ref in self.evidence_refs],
+        }
+
+
+@dataclass(frozen=True)
+class TriageMissionStageEvent:
+    """Execution trace row for a mission stage transition."""
+
+    stage: str
+    input_count: int
+    output_count: int
+    next_stage: str | None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "stage": self.stage,
+            "input_count": self.input_count,
+            "output_count": self.output_count,
+            "next_stage": self.next_stage,
+        }
+
+
+@dataclass(frozen=True)
+class TriageMissionReport:
+    """Persisted mission summary artifact for deterministic triage runs."""
+
+    mission_id: str
+    generated_at_utc: str
+    stages: tuple[TriageMissionStageEvent, ...]
+    feature_count: int
+    entrypoints: tuple[TriageFinding, ...]
+    hotspots: tuple[TriageFinding, ...]
+    unknowns: tuple[TriageFinding, ...]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "kind": "triage_mission_summary",
+            "mission_id": self.mission_id,
+            "generated_at_utc": self.generated_at_utc,
+            "execution": {
+                "stage_graph": [stage.to_json() for stage in self.stages],
+                "feature_count": self.feature_count,
+            },
+            "entrypoints": [finding.to_json() for finding in self.entrypoints],
+            "hotspots": [finding.to_json() for finding in self.hotspots],
+            "unknowns": [finding.to_json() for finding in self.unknowns],
+            "counts": {
+                "entrypoints": len(self.entrypoints),
+                "hotspots": len(self.hotspots),
+                "unknowns": len(self.unknowns),
+            },
+        }
+
+
+class DeterministicTriageFeatureExtractor:
+    """Deterministic feature extractor for entrypoint/hotspot/unknown scoring."""
+
+    _ENTRYPOINT_HINTS = {
+        "main",
+        "start",
+        "entry",
+        "bootstrap",
+        "dispatch",
+        "handler",
+        "init",
+    }
+    _CATEGORY_HINTS = {
+        "CONFIG": {"config", "option", "registry", "setting", "profile", "argv"},
+        "CRYPTO": {"aes", "rsa", "sha", "decrypt", "encrypt", "cipher", "key"},
+        "NETWORK": {"socket", "http", "connect", "dns", "packet", "tls", "port"},
+    }
+    _UNKNOWN_HINTS = {"unknown", "opaque", "mystery", "obfuscated", "todo", "unresolved"}
+    _OPAQUE_NAME_PREFIXES = ("fun_", "sub_", "thunk_", "unknown")
+    _ENTRYPOINT_EVIDENCE_KINDS = {"CALLSITE", "XREF"}
+
+    def extract(self, record: FunctionRecord) -> TriageFunctionFeatures:
+        text_tokens = set(_TOKEN_RE.findall(f"{record.name} {record.text}".lower()))
+        evidence_kinds = {ref.kind for ref in record.evidence_refs}
+
+        entrypoint_hits = sorted(text_tokens & self._ENTRYPOINT_HINTS)
+        entrypoint_score = min(len(entrypoint_hits) / 3.0, 1.0)
+        if evidence_kinds & self._ENTRYPOINT_EVIDENCE_KINDS:
+            entrypoint_score = min(1.0, entrypoint_score + 0.2)
+
+        tags: list[str] = []
+        category_signals: list[float] = []
+        rationale: list[str] = []
+        if entrypoint_hits:
+            rationale.append(f"entrypoint_hints={','.join(entrypoint_hits)}")
+
+        for category, hints in self._CATEGORY_HINTS.items():
+            hits = sorted(text_tokens & hints)
+            if hits:
+                tags.append(category)
+                rationale.append(f"{category.lower()}_hints={','.join(hits)}")
+            category_signals.append(min(len(hits), 3) / 3.0)
+
+        category_signal = (
+            sum(category_signals) / len(category_signals) if category_signals else 0.0
+        )
+        category_coverage = (
+            len(tags) / len(self._CATEGORY_HINTS) if self._CATEGORY_HINTS else 0.0
+        )
+        evidence_signal = min(len(record.evidence_refs), 4) / 4.0
+        hotspot_score = min(
+            1.0,
+            0.6 * category_signal + 0.25 * category_coverage + 0.15 * evidence_signal,
+        )
+
+        unknown_hits = sorted(text_tokens & self._UNKNOWN_HINTS)
+        opaque_name = 0.0
+        lowered_name = record.name.lower()
+        if lowered_name.startswith(self._OPAQUE_NAME_PREFIXES):
+            opaque_name = 1.0
+        missing_domain_tags = 1.0 if not tags else 0.0
+        weak_evidence = 1.0 if len(record.evidence_refs) <= 1 else 0.0
+        unknown_score = min(
+            1.0,
+            0.4 * (1.0 if unknown_hits else 0.0)
+            + 0.3 * missing_domain_tags
+            + 0.2 * weak_evidence
+            + 0.1 * opaque_name,
+        )
+        if unknown_hits:
+            rationale.append(f"unknown_hints={','.join(unknown_hits)}")
+        if weak_evidence:
+            rationale.append("weak_evidence")
+        if missing_domain_tags:
+            rationale.append("no_domain_tags")
+
+        return TriageFunctionFeatures(
+            function_id=record.function_id,
+            name=record.name,
+            entrypoint_score=entrypoint_score,
+            hotspot_score=hotspot_score,
+            unknown_score=unknown_score,
+            tags=tuple(tags),
+            rationale=tuple(sorted(set(rationale))),
+            evidence_refs=record.evidence_refs,
+        )
+
+
+class DeterministicTriageMission:
+    """Deterministic stage-graph mission for triage outputs and artifacts."""
+
+    STAGE_GRAPH: tuple[tuple[str, str | None], ...] = (
+        ("extract_features", "select_entrypoints"),
+        ("select_entrypoints", "rank_hotspots"),
+        ("rank_hotspots", "select_unknowns"),
+        ("select_unknowns", "build_summary"),
+        ("build_summary", None),
+    )
+
+    def __init__(
+        self,
+        *,
+        feature_extractor: DeterministicTriageFeatureExtractor | None = None,
+        entrypoint_threshold: float = 0.45,
+        hotspot_threshold: float = 0.30,
+        unknown_threshold: float = 0.55,
+        hotspot_limit: int = 10,
+    ):
+        if hotspot_limit <= 0:
+            raise ValueError("hotspot_limit must be > 0")
+        self._feature_extractor = feature_extractor or DeterministicTriageFeatureExtractor()
+        self._entrypoint_threshold = max(0.0, min(1.0, entrypoint_threshold))
+        self._hotspot_threshold = max(0.0, min(1.0, hotspot_threshold))
+        self._unknown_threshold = max(0.0, min(1.0, unknown_threshold))
+        self._hotspot_limit = hotspot_limit
+
+    def run(
+        self,
+        records: list[FunctionRecord],
+        *,
+        mission_id: str | None = None,
+    ) -> TriageMissionReport:
+        ordered_records = sorted(records, key=lambda item: item.function_id)
+        resolved_mission_id = mission_id or self._derive_mission_id(ordered_records)
+
+        stage_handlers = {
+            "extract_features": self._stage_extract_features,
+            "select_entrypoints": self._stage_select_entrypoints,
+            "rank_hotspots": self._stage_rank_hotspots,
+            "select_unknowns": self._stage_select_unknowns,
+            "build_summary": self._stage_build_summary,
+        }
+
+        context: dict[str, Any] = {
+            "records": ordered_records,
+            "features": tuple(),
+            "entrypoints": tuple(),
+            "hotspots": tuple(),
+            "unknowns": tuple(),
+        }
+        stage_events: list[TriageMissionStageEvent] = []
+
+        for stage_name, next_stage in self.STAGE_GRAPH:
+            handler = stage_handlers[stage_name]
+            input_count = self._stage_input_count(stage_name, context)
+            handler(context)
+            output_count = self._stage_output_count(stage_name, context)
+            stage_events.append(
+                TriageMissionStageEvent(
+                    stage=stage_name,
+                    input_count=input_count,
+                    output_count=output_count,
+                    next_stage=next_stage,
+                )
+            )
+
+        features = context["features"]
+        entrypoints = context["entrypoints"]
+        hotspots = context["hotspots"]
+        unknowns = context["unknowns"]
+        return TriageMissionReport(
+            mission_id=resolved_mission_id,
+            generated_at_utc=_utc_now(),
+            stages=tuple(stage_events),
+            feature_count=len(features),
+            entrypoints=entrypoints,
+            hotspots=hotspots,
+            unknowns=unknowns,
+        )
+
+    @staticmethod
+    def _derive_mission_id(records: list[FunctionRecord]) -> str:
+        seed = "|".join(record.function_id for record in records)
+        digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+        return f"triage:{digest}"
+
+    @staticmethod
+    def _stage_input_count(stage_name: str, context: Mapping[str, Any]) -> int:
+        if stage_name == "extract_features":
+            return len(context["records"])
+        if stage_name == "select_entrypoints":
+            return len(context["features"])
+        if stage_name == "rank_hotspots":
+            return len(context["features"])
+        if stage_name == "select_unknowns":
+            return len(context["features"])
+        if stage_name == "build_summary":
+            return len(context["entrypoints"]) + len(context["hotspots"]) + len(context["unknowns"])
+        return 0
+
+    @staticmethod
+    def _stage_output_count(stage_name: str, context: Mapping[str, Any]) -> int:
+        if stage_name == "extract_features":
+            return len(context["features"])
+        if stage_name == "select_entrypoints":
+            return len(context["entrypoints"])
+        if stage_name == "rank_hotspots":
+            return len(context["hotspots"])
+        if stage_name == "select_unknowns":
+            return len(context["unknowns"])
+        if stage_name == "build_summary":
+            return 1
+        return 0
+
+    def _stage_extract_features(self, context: dict[str, Any]) -> None:
+        records = context["records"]
+        features = [self._feature_extractor.extract(record) for record in records]
+        context["features"] = tuple(sorted(features, key=lambda item: item.function_id))
+
+    def _stage_select_entrypoints(self, context: dict[str, Any]) -> None:
+        features = context["features"]
+        rows = [
+            self._build_finding(
+                feature=feature,
+                score=feature.entrypoint_score,
+            )
+            for feature in features
+            if feature.entrypoint_score >= self._entrypoint_threshold
+        ]
+        if not rows and features:
+            fallback_features = sorted(
+                features,
+                key=lambda item: (-item.entrypoint_score, item.function_id),
+            )
+            rows = [
+                self._build_finding(
+                    feature=fallback_features[0],
+                    score=fallback_features[0].entrypoint_score,
+                )
+            ]
+        rows.sort(key=lambda item: (-item.score, item.function_id))
+        context["entrypoints"] = tuple(rows)
+
+    def _stage_rank_hotspots(self, context: dict[str, Any]) -> None:
+        features = context["features"]
+        rows = [
+            self._build_finding(
+                feature=feature,
+                score=feature.hotspot_score,
+            )
+            for feature in features
+            if feature.hotspot_score >= self._hotspot_threshold and feature.tags
+        ]
+        if not rows and features:
+            fallback_features = [feature for feature in features if feature.tags]
+            if not fallback_features:
+                fallback_features = list(features)
+            fallback_features.sort(key=lambda item: (-item.hotspot_score, item.function_id))
+            fallback_limit = min(self._hotspot_limit, max(1, min(3, len(fallback_features))))
+            rows = [
+                self._build_finding(
+                    feature=feature,
+                    score=feature.hotspot_score,
+                )
+                for feature in fallback_features[:fallback_limit]
+            ]
+        rows.sort(key=lambda item: (-item.score, item.function_id))
+        context["hotspots"] = tuple(rows[: min(self._hotspot_limit, len(rows))])
+
+    def _stage_select_unknowns(self, context: dict[str, Any]) -> None:
+        features = context["features"]
+        rows = [
+            self._build_finding(
+                feature=feature,
+                score=feature.unknown_score,
+            )
+            for feature in features
+            if feature.unknown_score >= self._unknown_threshold
+        ]
+        if not rows and features:
+            fallback_features = sorted(
+                features,
+                key=lambda item: (-item.unknown_score, item.function_id),
+            )
+            fallback_limit = max(1, min(3, len(fallback_features)))
+            rows = [
+                self._build_finding(
+                    feature=feature,
+                    score=feature.unknown_score,
+                )
+                for feature in fallback_features[:fallback_limit]
+            ]
+        rows.sort(key=lambda item: (-item.score, item.function_id))
+        context["unknowns"] = tuple(rows)
+
+    @staticmethod
+    def _stage_build_summary(_: dict[str, Any]) -> None:
+        return
+
+    @staticmethod
+    def _build_finding(*, feature: TriageFunctionFeatures, score: float) -> TriageFinding:
+        return TriageFinding(
+            function_id=feature.function_id,
+            name=feature.name,
+            score=score,
+            tags=feature.tags,
+            rationale=feature.rationale,
+            evidence_refs=feature.evidence_refs,
+        )
+
+
+@dataclass(frozen=True)
 class IndexBuildStats:
     """Pipeline and index build statistics."""
 
@@ -1715,8 +2103,27 @@ def _suggest_types_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _triage_mission_command(args: argparse.Namespace) -> int:
+    records = load_corpus(args.corpus)
+    mission = DeterministicTriageMission(
+        entrypoint_threshold=args.entrypoint_threshold,
+        hotspot_threshold=args.hotspot_threshold,
+        unknown_threshold=args.unknown_threshold,
+        hotspot_limit=args.hotspot_limit,
+    )
+    report = mission.run(records, mission_id=args.mission_id).to_json()
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml327] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="ML-301 local embedding and retrieval baseline")
+    parser = argparse.ArgumentParser(description="ML-301/ML-327 deterministic ML utility commands")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     build_parser = subparsers.add_parser("build", help="Build local embedding index from corpus JSON")
@@ -1929,6 +2336,49 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional JSONL path for suggestion-quality telemetry events",
     )
     suggest_parser.set_defaults(func=_suggest_types_command)
+
+    triage_parser = subparsers.add_parser(
+        "triage-mission",
+        help="Run deterministic triage mission graph and emit summary artifact",
+    )
+    triage_parser.add_argument("--corpus", type=Path, required=True, help="Path to corpus JSON")
+    triage_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write mission summary artifact JSON",
+    )
+    triage_parser.add_argument(
+        "--mission-id",
+        type=str,
+        default=None,
+        help="Optional mission id override for deterministic artifact naming",
+    )
+    triage_parser.add_argument(
+        "--entrypoint-threshold",
+        type=float,
+        default=0.45,
+        help="Score threshold for entrypoint emission",
+    )
+    triage_parser.add_argument(
+        "--hotspot-threshold",
+        type=float,
+        default=0.30,
+        help="Score threshold for hotspot emission",
+    )
+    triage_parser.add_argument(
+        "--unknown-threshold",
+        type=float,
+        default=0.55,
+        help="Score threshold for unknown emission",
+    )
+    triage_parser.add_argument(
+        "--hotspot-limit",
+        type=int,
+        default=10,
+        help="Maximum hotspot rows to include in summary artifact",
+    )
+    triage_parser.set_defaults(func=_triage_mission_command)
 
     return parser
 
