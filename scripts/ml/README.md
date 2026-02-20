@@ -166,6 +166,7 @@ Default triage thresholds are calibrated from the curated benchmark fixture:
 - `triage-panel.json` (in-plugin panel payload for map + ranked hotspots)
 - `triage-report.md` (versionable report with navigable evidence/source links)
 - `triage-artifacts.json` (artifact manifest)
+  - includes relative artifact paths plus SHA-256 and byte-size metadata for versionable tracking
 
 Render only the UI panel payload:
 

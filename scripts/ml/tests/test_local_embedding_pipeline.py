@@ -2237,10 +2237,20 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertIn("## Ranked Hotspots", markdown)
             self.assertIn("local-index://evidence/fn.main.dispatch/callsite", markdown)
             self.assertIn("local-index://function/fn.main.dispatch", markdown)
+            self.assertIn("[context](local-index://function/fn.main.dispatch)", markdown)
 
             manifest = json.loads((report_dir / "triage-artifacts.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["kind"], "triage_mission_artifacts")
             self.assertEqual(manifest["mission_id"], "triage:test")
+            self.assertEqual(manifest["artifacts"]["summary"], "triage-summary.json")
+            self.assertEqual(manifest["artifacts"]["panel"], "triage-panel.json")
+            self.assertEqual(manifest["artifacts"]["markdown"], "triage-report.md")
+            for checksum in manifest["artifact_checksums"].values():
+                self.assertEqual(len(str(checksum)), 64)
+                self.assertTrue(all(ch in "0123456789abcdef" for ch in str(checksum)))
+            self.assertGreater(manifest["artifact_bytes"]["summary"], 0)
+            self.assertGreater(manifest["artifact_bytes"]["panel"], 0)
+            self.assertGreater(manifest["artifact_bytes"]["markdown"], 0)
 
     def test_triage_panel_cli_emits_ui_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
