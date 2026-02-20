@@ -925,11 +925,173 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(apply_report["kind"], "proposal_apply_report")
             self.assertEqual(apply_report["metrics"]["applied_total"], 1)
             self.assertEqual(apply_report["applied_proposal_ids"], ["p-approved"])
+            self.assertTrue(apply_report["apply_receipt_id"].startswith("receipt:apply:"))
+            self.assertEqual(apply_report["transaction"]["phase"], "apply")
+            self.assertEqual(apply_report["transaction"]["scope"], "single")
+            self.assertEqual(apply_report["receipt_links"][0]["link_type"], "APPLIES_PROPOSAL")
+            self.assertEqual(apply_report["receipt_links"][0]["receipt_id"], "receipt:p-approved")
 
             local_doc = json.loads(local_store.read_text(encoding="utf-8"))
             by_id = {item["proposal_id"]: item for item in local_doc["proposals"]}
             self.assertEqual(by_id["p-approved"]["state"], "APPLIED")
             self.assertEqual(by_id["p-proposed"]["state"], "PROPOSED")
+            self.assertEqual(len(local_doc["apply_transactions"]), 1)
+            tx = local_doc["apply_transactions"][0]
+            self.assertEqual(tx["status"], "applied")
+            self.assertEqual(tx["apply_receipt_id"], apply_report["apply_receipt_id"])
+            self.assertEqual(tx["receipt_links"][0]["link_type"], "APPLIES_PROPOSAL")
+            self.assertEqual(tx["state_before"]["p-approved"]["state"], "APPROVED")
+            self.assertEqual(tx["state_after"]["p-approved"]["state"], "APPLIED")
+
+    def test_proposal_rollback_restores_pre_apply_state_for_single_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_store = Path(tmpdir) / "local_store.json"
+            local_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "local_proposal_store",
+                        "proposals": [
+                            {"proposal_id": "p-1", "state": "APPROVED", "receipt_id": "receipt:p-1"},
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                apply_exit = MODULE.main(
+                    [
+                        "proposal-apply",
+                        "--local-store",
+                        str(local_store),
+                        "--proposal-id",
+                        "p-1",
+                        "--actor-id",
+                        "worker:apply",
+                    ]
+                )
+            self.assertEqual(apply_exit, 0)
+            apply_report = json.loads(stdout.getvalue())
+            apply_receipt_id = apply_report["apply_receipt_id"]
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                rollback_exit = MODULE.main(
+                    [
+                        "proposal-rollback",
+                        "--local-store",
+                        str(local_store),
+                        "--apply-receipt-id",
+                        apply_receipt_id,
+                        "--actor-id",
+                        "worker:rollback",
+                    ]
+                )
+            self.assertEqual(rollback_exit, 0)
+            rollback_report = json.loads(stdout.getvalue())
+            self.assertEqual(rollback_report["kind"], "proposal_rollback_report")
+            self.assertEqual(rollback_report["metrics"]["rolled_back_total"], 1)
+            self.assertEqual(rollback_report["metrics"]["restored_total"], 1)
+            self.assertEqual(rollback_report["restored_proposal_ids"], ["p-1"])
+            self.assertEqual(rollback_report["rolled_back_apply_receipt_ids"], [apply_receipt_id])
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            proposal = local_doc["proposals"][0]
+            self.assertEqual(proposal["state"], "APPROVED")
+            rollback_events = [event for event in proposal["apply_events"] if event["action"] == "ROLLBACK"]
+            self.assertEqual(len(rollback_events), 1)
+            rollback_event = rollback_events[0]
+            self.assertEqual(rollback_event["receipt_links"][0]["link_type"], "ROLLS_BACK_APPLY")
+            self.assertEqual(rollback_event["receipt_links"][0]["receipt_id"], apply_receipt_id)
+
+            tx = local_doc["apply_transactions"][0]
+            self.assertEqual(tx["status"], "rolled_back")
+            self.assertEqual(tx["rollback_receipt_id"], rollback_report["rollback_receipt_ids"][0])
+            self.assertEqual(tx["rollback_receipt_links"][0]["link_type"], "ROLLS_BACK_APPLY")
+            self.assertEqual(tx["rollback_receipt_links"][0]["receipt_id"], apply_receipt_id)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                rollback_exit = MODULE.main(
+                    [
+                        "proposal-rollback",
+                        "--local-store",
+                        str(local_store),
+                        "--apply-receipt-id",
+                        apply_receipt_id,
+                    ]
+                )
+            self.assertEqual(rollback_exit, 0)
+            second_report = json.loads(stdout.getvalue())
+            self.assertEqual(second_report["metrics"]["rolled_back_total"], 0)
+            self.assertEqual(second_report["metrics"]["already_rolled_back_total"], 1)
+            self.assertEqual(second_report["rollback_receipt_ids"], rollback_report["rollback_receipt_ids"])
+
+    def test_proposal_rollback_restores_pre_apply_state_for_batch_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_store = Path(tmpdir) / "local_store.json"
+            local_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "local_proposal_store",
+                        "proposals": [
+                            {"proposal_id": "p-1", "state": "APPROVED", "receipt_id": "receipt:p-1"},
+                            {"proposal_id": "p-2", "state": "APPROVED", "receipt_id": "receipt:p-2"},
+                            {"proposal_id": "p-3", "state": "PROPOSED", "receipt_id": "receipt:p-3"},
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                apply_exit = MODULE.main(
+                    [
+                        "proposal-apply",
+                        "--local-store",
+                        str(local_store),
+                        "--actor-id",
+                        "worker:apply",
+                    ]
+                )
+            self.assertEqual(apply_exit, 0)
+            apply_report = json.loads(stdout.getvalue())
+            self.assertEqual(apply_report["transaction"]["scope"], "batch")
+            self.assertEqual(apply_report["applied_proposal_ids"], ["p-1", "p-2"])
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                rollback_exit = MODULE.main(
+                    [
+                        "proposal-rollback",
+                        "--local-store",
+                        str(local_store),
+                        "--apply-receipt-id",
+                        apply_report["apply_receipt_id"],
+                    ]
+                )
+            self.assertEqual(rollback_exit, 0)
+            rollback_report = json.loads(stdout.getvalue())
+            self.assertEqual(rollback_report["metrics"]["rolled_back_total"], 1)
+            self.assertEqual(rollback_report["metrics"]["restored_total"], 2)
+            self.assertEqual(
+                rollback_report["restored_proposal_ids"],
+                list(reversed(apply_report["applied_proposal_ids"])),
+            )
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            by_id = {item["proposal_id"]: item for item in local_doc["proposals"]}
+            self.assertEqual(by_id["p-1"]["state"], "APPROVED")
+            self.assertEqual(by_id["p-2"]["state"], "APPROVED")
+            self.assertEqual(by_id["p-3"]["state"], "PROPOSED")
 
     @staticmethod
     def _triage_fixture_records() -> list[FunctionRecord]:

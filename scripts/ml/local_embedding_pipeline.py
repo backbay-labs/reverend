@@ -17,6 +17,7 @@ import os
 import re
 import tempfile
 import time
+import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -41,6 +42,10 @@ PROPOSAL_STATE_PROPOSED = "PROPOSED"
 PROPOSAL_STATE_APPROVED = "APPROVED"
 PROPOSAL_STATE_REJECTED = "REJECTED"
 PROPOSAL_STATE_APPLIED = "APPLIED"
+PROPOSAL_ACTION_APPLY = "APPLY"
+PROPOSAL_ACTION_ROLLBACK = "ROLLBACK"
+PROPOSAL_LINK_APPLIES_PROPOSAL = "APPLIES_PROPOSAL"
+PROPOSAL_LINK_ROLLS_BACK_APPLY = "ROLLS_BACK_APPLY"
 PROPOSAL_REVIEW_ACTION_APPROVE = "APPROVE"
 PROPOSAL_REVIEW_ACTION_REJECT = "REJECT"
 PROPOSAL_ALLOWED_STATES = (
@@ -53,7 +58,7 @@ PROPOSAL_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     PROPOSAL_STATE_PROPOSED: frozenset({PROPOSAL_STATE_APPROVED, PROPOSAL_STATE_REJECTED}),
     PROPOSAL_STATE_APPROVED: frozenset({PROPOSAL_STATE_APPLIED}),
     PROPOSAL_STATE_REJECTED: frozenset(),
-    PROPOSAL_STATE_APPLIED: frozenset(),
+    PROPOSAL_STATE_APPLIED: frozenset({PROPOSAL_STATE_APPROVED}),
 }
 PROPOSAL_REVIEW_ACTION_TO_STATE = {
     PROPOSAL_REVIEW_ACTION_APPROVE: PROPOSAL_STATE_APPROVED,
@@ -1042,6 +1047,73 @@ def _proposal_state_counts(proposals: list[dict[str, Any]]) -> dict[str, int]:
     return {state: int(counts.get(state, 0)) for state in sorted(counts)}
 
 
+def _new_receipt_id(*, action: str) -> str:
+    return f"receipt:{action.lower()}:{uuid.uuid4()}"
+
+
+def _new_transaction_id() -> str:
+    return str(uuid.uuid4())
+
+
+def _digest_json(payload: Any) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _capture_proposal_snapshot(proposal: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        "state": _normalize_proposal_state(proposal.get("state")),
+        "receipt_id": str(proposal.get("receipt_id") or "").strip(),
+    }
+
+
+def _ensure_apply_transactions(store_doc: dict[str, Any]) -> list[dict[str, Any]]:
+    transactions_raw = store_doc.get("apply_transactions")
+    if not isinstance(transactions_raw, list):
+        transactions_raw = []
+    transactions = [dict(item) for item in transactions_raw if isinstance(item, Mapping)]
+    store_doc["apply_transactions"] = transactions
+    return transactions
+
+
+def _next_program_transaction_id(
+    store_doc: dict[str, Any],
+    *,
+    apply_transactions: list[dict[str, Any]],
+) -> int:
+    next_value_raw = store_doc.get("next_program_transaction_id")
+    if next_value_raw is None:
+        max_seen = -1
+        for transaction in apply_transactions:
+            tx_id_raw = transaction.get("program_transaction_id")
+            try:
+                tx_id = int(tx_id_raw)
+            except (TypeError, ValueError):
+                continue
+            if tx_id > max_seen:
+                max_seen = tx_id
+            rollback_raw = transaction.get("rollback_transaction")
+            if isinstance(rollback_raw, Mapping):
+                rollback_tx_id_raw = rollback_raw.get("program_transaction_id")
+                try:
+                    rollback_tx_id = int(rollback_tx_id_raw)
+                except (TypeError, ValueError):
+                    continue
+                if rollback_tx_id > max_seen:
+                    max_seen = rollback_tx_id
+        next_value = max_seen + 1
+    else:
+        try:
+            next_value = int(next_value_raw)
+        except (TypeError, ValueError):
+            next_value = 0
+
+    if next_value < 0:
+        next_value = 0
+    store_doc["next_program_transaction_id"] = next_value + 1
+    return next_value
+
+
 def _write_local_proposal_store(
     local_store_path: Path,
     store_doc: Mapping[str, Any],
@@ -1119,11 +1191,11 @@ def _set_proposal_state(
             decision["comment"] = reason
         decisions.append(decision)
         proposal["review_decisions"] = decisions
-    elif action == "APPLY":
+    elif action == PROPOSAL_ACTION_APPLY:
         events_raw = proposal.get("apply_events")
         events = [dict(item) for item in events_raw if isinstance(item, Mapping)] if isinstance(events_raw, list) else []
         event: dict[str, Any] = {
-            "action": "APPLY",
+            "action": PROPOSAL_ACTION_APPLY,
             "resulting_state": normalized_to_state,
             "applied_at_utc": changed_at_utc,
         }
@@ -1295,6 +1367,7 @@ def apply_local_proposals(
 
     store_doc = _load_local_proposal_store(local_store)
     proposals = store_doc["proposals"]
+    apply_transactions = _ensure_apply_transactions(store_doc)
 
     filter_ids = {str(item).strip() for item in (proposal_ids or []) if str(item).strip()}
     by_id, target_ids, missing = _resolve_proposal_targets(
@@ -1326,18 +1399,99 @@ def apply_local_proposals(
         )
 
     applied_ids: list[str] = []
-    for proposal_id in candidate_ids:
-        proposal = by_id[proposal_id]
-        _set_proposal_state(
-            proposal,
-            to_state=PROPOSAL_STATE_APPLIED,
-            action="APPLY",
-            actor_id=normalized_actor,
+    apply_receipt_id: str | None = None
+    transaction_doc: dict[str, Any] | None = None
+    if candidate_ids:
+        scope = "single" if len(candidate_ids) == 1 else "batch"
+        apply_receipt_id = _new_receipt_id(action="apply")
+        transaction_id = _new_transaction_id()
+        program_transaction_id = _next_program_transaction_id(
+            store_doc,
+            apply_transactions=apply_transactions,
         )
-        applied_ids.append(proposal_id)
+        state_before = {
+            proposal_id: _capture_proposal_snapshot(by_id[proposal_id])
+            for proposal_id in candidate_ids
+        }
+
+        for proposal_id in candidate_ids:
+            proposal = by_id[proposal_id]
+            proposal_receipt_id = str(proposal.get("receipt_id") or f"receipt:{proposal_id}").strip()
+            if not proposal_receipt_id:
+                proposal_receipt_id = f"receipt:{proposal_id}"
+            _set_proposal_state(
+                proposal,
+                to_state=PROPOSAL_STATE_APPLIED,
+                action=PROPOSAL_ACTION_APPLY,
+                actor_id=normalized_actor,
+            )
+            events_raw = proposal.get("apply_events")
+            events = [dict(item) for item in events_raw if isinstance(item, Mapping)] if isinstance(events_raw, list) else []
+            if events:
+                events[-1]["apply_receipt_id"] = apply_receipt_id
+                events[-1]["receipt_links"] = [
+                    {
+                        "receipt_id": proposal_receipt_id,
+                        "link_type": PROPOSAL_LINK_APPLIES_PROPOSAL,
+                    }
+                ]
+                events[-1]["transaction"] = {
+                    "transaction_id": transaction_id,
+                    "scope": scope,
+                    "phase": "apply",
+                    "program_transaction_id": program_transaction_id,
+                }
+                proposal["apply_events"] = events
+            applied_ids.append(proposal_id)
+
+        state_after = {
+            proposal_id: _capture_proposal_snapshot(by_id[proposal_id])
+            for proposal_id in candidate_ids
+        }
+        state_before_hash = _digest_json(state_before)
+        state_after_hash = _digest_json(state_after)
+        receipt_links = [
+            {
+                "receipt_id": str(by_id[proposal_id].get("receipt_id") or f"receipt:{proposal_id}").strip()
+                or f"receipt:{proposal_id}",
+                "link_type": PROPOSAL_LINK_APPLIES_PROPOSAL,
+            }
+            for proposal_id in candidate_ids
+        ]
+        transaction_doc = {
+            "transaction_id": transaction_id,
+            "program_transaction_id": program_transaction_id,
+            "scope": scope,
+            "status": "applied",
+            "phase": "apply",
+            "apply_receipt_id": apply_receipt_id,
+            "proposal_ids": list(candidate_ids),
+            "state_before": state_before,
+            "state_after": state_after,
+            "state_before_hash": state_before_hash,
+            "state_after_hash": state_after_hash,
+            "receipt_links": receipt_links,
+            "applied_at_utc": _utc_now(),
+        }
+        if normalized_actor:
+            transaction_doc["applied_by"] = normalized_actor
+        apply_transactions.append(transaction_doc)
 
     store_doc["proposals"] = proposals
     _write_local_proposal_store(local_store, store_doc)
+
+    transaction_summary: dict[str, Any] | None = None
+    receipt_links: list[dict[str, str]] = []
+    if transaction_doc is not None:
+        receipt_links = [dict(item) for item in transaction_doc.get("receipt_links", []) if isinstance(item, Mapping)]
+        transaction_summary = {
+            "transaction_id": transaction_doc["transaction_id"],
+            "scope": transaction_doc["scope"],
+            "phase": "apply",
+            "program_transaction_id": transaction_doc["program_transaction_id"],
+            "pre_apply_state_hash": transaction_doc["state_before_hash"],
+            "post_apply_state_hash": transaction_doc["state_after_hash"],
+        }
 
     return {
         "schema_version": 1,
@@ -1354,6 +1508,211 @@ def apply_local_proposals(
             "state_counts": _proposal_state_counts(proposals),
         },
         "applied_proposal_ids": applied_ids,
+        "apply_receipt_id": apply_receipt_id,
+        "transaction": transaction_summary,
+        "receipt_links": receipt_links,
+        "local_store": str(local_store),
+    }
+
+
+def rollback_local_proposals(
+    *,
+    local_store: Path,
+    apply_receipt_ids: list[str] | None = None,
+    actor_id: str | None = None,
+) -> dict[str, Any]:
+    normalized_actor = str(actor_id).strip() if actor_id is not None else None
+    if normalized_actor == "":
+        normalized_actor = None
+
+    store_doc = _load_local_proposal_store(local_store)
+    proposals = store_doc["proposals"]
+    apply_transactions = _ensure_apply_transactions(store_doc)
+    by_id, _, _ = _resolve_proposal_targets(proposals, proposal_ids=None)
+
+    transactions_by_apply_receipt: dict[str, dict[str, Any]] = {}
+    for transaction in apply_transactions:
+        apply_receipt_id = str(transaction.get("apply_receipt_id") or "").strip()
+        if apply_receipt_id and apply_receipt_id not in transactions_by_apply_receipt:
+            transactions_by_apply_receipt[apply_receipt_id] = transaction
+
+    filter_ids = {str(item).strip() for item in (apply_receipt_ids or []) if str(item).strip()}
+    if filter_ids:
+        target_apply_receipt_ids = sorted(filter_ids)
+        missing = [
+            apply_receipt_id
+            for apply_receipt_id in target_apply_receipt_ids
+            if apply_receipt_id not in transactions_by_apply_receipt
+        ]
+        if missing:
+            raise ValueError(f"unknown apply_receipt_id(s): {', '.join(missing)}")
+    else:
+        target_apply_receipt_ids = sorted(
+            apply_receipt_id
+            for apply_receipt_id, transaction in transactions_by_apply_receipt.items()
+            if str(transaction.get("status") or "applied").strip().lower() != "rolled_back"
+        )
+        missing = []
+
+    rolled_back_apply_receipt_ids: list[str] = []
+    already_rolled_back_apply_receipt_ids: list[str] = []
+    rollback_receipt_ids: list[str] = []
+    restored_proposal_ids: list[str] = []
+
+    for apply_receipt_id in target_apply_receipt_ids:
+        transaction = transactions_by_apply_receipt[apply_receipt_id]
+        status = str(transaction.get("status") or "applied").strip().lower()
+        rollback_receipt_id = str(transaction.get("rollback_receipt_id") or "").strip()
+        if status == "rolled_back":
+            already_rolled_back_apply_receipt_ids.append(apply_receipt_id)
+            if rollback_receipt_id:
+                rollback_receipt_ids.append(rollback_receipt_id)
+            continue
+
+        state_before_raw = transaction.get("state_before")
+        if not isinstance(state_before_raw, Mapping):
+            raise ValueError(f"apply transaction '{apply_receipt_id}' missing required state_before snapshot")
+
+        proposal_ids_raw = transaction.get("proposal_ids")
+        proposal_ids_in_tx = (
+            [str(item).strip() for item in proposal_ids_raw if str(item).strip()]
+            if isinstance(proposal_ids_raw, list)
+            else [str(item).strip() for item in state_before_raw if str(item).strip()]
+        )
+        if not proposal_ids_in_tx:
+            raise ValueError(f"apply transaction '{apply_receipt_id}' has no proposal_ids")
+
+        for proposal_id in proposal_ids_in_tx:
+            proposal = by_id.get(proposal_id)
+            if proposal is None:
+                raise ValueError(
+                    f"apply transaction '{apply_receipt_id}' references missing proposal '{proposal_id}'"
+                )
+            snapshot_raw = state_before_raw.get(proposal_id)
+            if not isinstance(snapshot_raw, Mapping):
+                raise ValueError(
+                    f"apply transaction '{apply_receipt_id}' missing state_before snapshot for '{proposal_id}'"
+                )
+            expected_state = _normalize_proposal_state(snapshot_raw.get("state"), default="")
+            if not expected_state:
+                raise ValueError(
+                    f"apply transaction '{apply_receipt_id}' snapshot for '{proposal_id}' is missing state"
+                )
+            current_state = _normalize_proposal_state(proposal.get("state"))
+            if current_state == expected_state:
+                continue
+            allowed = PROPOSAL_ALLOWED_TRANSITIONS.get(current_state, frozenset())
+            if expected_state not in allowed:
+                raise ValueError(
+                    f"cannot rollback '{apply_receipt_id}': proposal '{proposal_id}' is '{current_state}'"
+                )
+
+        if not rollback_receipt_id:
+            rollback_receipt_id = _new_receipt_id(action="rollback")
+        rollback_transaction_id = _new_transaction_id()
+        rollback_program_tx_id = _next_program_transaction_id(
+            store_doc,
+            apply_transactions=apply_transactions,
+        )
+        scope = str(transaction.get("scope") or "").strip().lower()
+        if scope not in {"single", "batch"}:
+            scope = "single" if len(proposal_ids_in_tx) == 1 else "batch"
+        restore_order = list(reversed(proposal_ids_in_tx)) if scope == "batch" else list(proposal_ids_in_tx)
+        pre_apply_state_hash = str(transaction.get("state_before_hash") or _digest_json(state_before_raw)).strip()
+        post_apply_state_hash = str(transaction.get("state_after_hash") or "").strip() or None
+
+        for proposal_id in restore_order:
+            proposal = by_id[proposal_id]
+            snapshot_raw = state_before_raw.get(proposal_id)
+            if not isinstance(snapshot_raw, Mapping):
+                continue
+            target_state = _normalize_proposal_state(snapshot_raw.get("state"))
+            from_state = _normalize_proposal_state(proposal.get("state"))
+            if from_state != target_state:
+                _set_proposal_state(
+                    proposal,
+                    to_state=target_state,
+                    action=PROPOSAL_ACTION_ROLLBACK,
+                    actor_id=normalized_actor,
+                )
+            rolled_back_at = str(proposal.get("updated_at_utc") or _utc_now())
+            events_raw = proposal.get("apply_events")
+            events = [dict(item) for item in events_raw if isinstance(item, Mapping)] if isinstance(events_raw, list) else []
+            event: dict[str, Any] = {
+                "action": PROPOSAL_ACTION_ROLLBACK,
+                "resulting_state": target_state,
+                "restored_from_state": from_state,
+                "rolled_back_at_utc": rolled_back_at,
+                "apply_receipt_id": apply_receipt_id,
+                "rollback_receipt_id": rollback_receipt_id,
+                "receipt_links": [
+                    {
+                        "receipt_id": apply_receipt_id,
+                        "link_type": PROPOSAL_LINK_ROLLS_BACK_APPLY,
+                    }
+                ],
+                "transaction": {
+                    "transaction_id": rollback_transaction_id,
+                    "scope": scope,
+                    "phase": "rollback",
+                    "program_transaction_id": rollback_program_tx_id,
+                    "pre_apply_state_hash": pre_apply_state_hash,
+                    "post_apply_state_hash": post_apply_state_hash,
+                },
+            }
+            if normalized_actor:
+                event["actor_id"] = normalized_actor
+            events.append(event)
+            proposal["apply_events"] = events
+            restored_proposal_ids.append(proposal_id)
+
+        transaction["status"] = "rolled_back"
+        transaction["rollback_receipt_id"] = rollback_receipt_id
+        transaction["rolled_back_at_utc"] = _utc_now()
+        transaction["rollback_transaction"] = {
+            "transaction_id": rollback_transaction_id,
+            "scope": scope,
+            "phase": "rollback",
+            "program_transaction_id": rollback_program_tx_id,
+            "pre_apply_state_hash": pre_apply_state_hash,
+            "post_apply_state_hash": post_apply_state_hash,
+        }
+        transaction["rollback_receipt_links"] = [
+            {
+                "receipt_id": apply_receipt_id,
+                "link_type": PROPOSAL_LINK_ROLLS_BACK_APPLY,
+            }
+        ]
+        if normalized_actor:
+            transaction["rolled_back_by"] = normalized_actor
+
+        rolled_back_apply_receipt_ids.append(apply_receipt_id)
+        rollback_receipt_ids.append(rollback_receipt_id)
+
+    store_doc["proposals"] = proposals
+    _write_local_proposal_store(local_store, store_doc)
+
+    return {
+        "schema_version": 1,
+        "kind": "proposal_rollback_report",
+        "generated_at_utc": _utc_now(),
+        "bulk": not filter_ids,
+        "query": {
+            "apply_receipt_ids": sorted(filter_ids),
+        },
+        "metrics": {
+            "scanned_total": len(proposals),
+            "targeted_total": len(target_apply_receipt_ids),
+            "rolled_back_total": len(rolled_back_apply_receipt_ids),
+            "already_rolled_back_total": len(already_rolled_back_apply_receipt_ids),
+            "restored_total": len(restored_proposal_ids),
+            "missing_total": len(missing),
+            "state_counts": _proposal_state_counts(proposals),
+        },
+        "rolled_back_apply_receipt_ids": rolled_back_apply_receipt_ids,
+        "already_rolled_back_apply_receipt_ids": already_rolled_back_apply_receipt_ids,
+        "rollback_receipt_ids": rollback_receipt_ids,
+        "restored_proposal_ids": restored_proposal_ids,
         "local_store": str(local_store),
     }
 
@@ -3911,6 +4270,31 @@ def _proposal_apply_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _proposal_rollback_command(args: argparse.Namespace) -> int:
+    try:
+        report = rollback_local_proposals(
+            local_store=args.local_store,
+            apply_receipt_ids=args.apply_receipt_id,
+            actor_id=args.actor_id,
+        )
+    except ValueError as exc:
+        error_report = {
+            "schema_version": 1,
+            "kind": "proposal_rollback_error",
+            "error": str(exc),
+        }
+        print(json.dumps(error_report, indent=2, sort_keys=True))
+        return 1
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def _add_triage_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--corpus", type=Path, required=True, help="Path to corpus JSON")
     parser.add_argument(
@@ -4408,6 +4792,36 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional path to write proposal apply report JSON",
     )
     proposal_apply_parser.set_defaults(func=_proposal_apply_command)
+
+    proposal_rollback_parser = subparsers.add_parser(
+        "proposal-rollback",
+        help="Rollback applied proposals by apply receipt id",
+    )
+    proposal_rollback_parser.add_argument(
+        "--local-store",
+        type=Path,
+        required=True,
+        help="Path to local proposal store JSON",
+    )
+    proposal_rollback_parser.add_argument(
+        "--apply-receipt-id",
+        action="append",
+        default=None,
+        help="Apply receipt id to rollback. Repeatable. Omit for rollback of all active apply receipts.",
+    )
+    proposal_rollback_parser.add_argument(
+        "--actor-id",
+        type=str,
+        default=None,
+        help="Optional actor id recorded with rollback transition",
+    )
+    proposal_rollback_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write proposal rollback report JSON",
+    )
+    proposal_rollback_parser.set_defaults(func=_proposal_rollback_command)
 
     return parser
 
