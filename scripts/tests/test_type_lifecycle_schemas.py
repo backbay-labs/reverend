@@ -130,6 +130,33 @@ class TypeLifecycleSchemaTest(unittest.TestCase):
             "updated_at": TS_1,
         }
 
+    def _transition(
+        self,
+        *,
+        from_state: str,
+        to_state: str,
+        receipt_id: str = UUID_13,
+        changed_at: str = TS_2,
+    ) -> dict[str, object]:
+        transition: dict[str, object] = {
+            "from_state": from_state,
+            "to_state": to_state,
+            "receipt_id": receipt_id,
+            "changed_at": changed_at,
+        }
+        if from_state == "UNDER_REVIEW":
+            transition["reviewer_id"] = "user:alice"
+            transition["rationale"] = "review decision"
+            if to_state == "ACCEPTED":
+                transition["decision"] = "APPROVE"
+            elif to_state == "PROPOSED":
+                transition["decision"] = "REQUEST_CHANGES"
+                transition["comment"] = "requires updates"
+            elif to_state == "REJECTED":
+                transition["decision"] = "REJECT"
+                transition["comment"] = "unsupported evidence"
+        return transition
+
     def _propagation_event(
         self,
         event_id: str,
@@ -233,12 +260,20 @@ class TypeLifecycleSchemaTest(unittest.TestCase):
         self._assert_invalid(self.type_validator, payload)
 
         payload["propagation_policy"] = self._propagation_policy()
+        self._assert_invalid(self.type_validator, payload)
+
+        payload["transitions"] = [
+            self._transition(from_state="UNDER_REVIEW", to_state="ACCEPTED"),
+        ]
         self._assert_valid(self.type_validator, payload)
 
     def test_propagated_state_requires_applied_event(self) -> None:
         payload = self._base_type_assertion()
         payload["state"] = "PROPAGATED"
         payload["propagation_policy"] = self._propagation_policy()
+        payload["transitions"] = [
+            self._transition(from_state="ACCEPTED", to_state="PROPAGATED"),
+        ]
         payload["propagation_events"] = [
             self._propagation_event(UUID_7, "PROPOSED", policy_mode="PROPOSE")
         ]
@@ -253,6 +288,9 @@ class TypeLifecycleSchemaTest(unittest.TestCase):
         payload = self._base_type_assertion()
         payload["state"] = "PROPAGATED"
         payload["propagation_policy"] = self._propagation_policy()
+        payload["transitions"] = [
+            self._transition(from_state="ACCEPTED", to_state="PROPAGATED"),
+        ]
         payload["propagation_events"] = [
             self._propagation_event(UUID_7, "APPLIED"),
             self._propagation_event(UUID_18, "CONFLICT"),
@@ -268,6 +306,9 @@ class TypeLifecycleSchemaTest(unittest.TestCase):
         payload = self._base_type_assertion()
         payload["state"] = "PROPAGATED"
         payload["propagation_policy"] = self._propagation_policy()
+        payload["transitions"] = [
+            self._transition(from_state="ACCEPTED", to_state="PROPAGATED"),
+        ]
         rolled_back = self._propagation_event(UUID_18, "ROLLED_BACK")
         del rolled_back["rollback_receipt_id"]
         del rolled_back["rolled_back_at"]
@@ -285,6 +326,9 @@ class TypeLifecycleSchemaTest(unittest.TestCase):
         payload = self._base_type_assertion()
         payload["state"] = "PROPAGATED"
         payload["propagation_policy"] = self._propagation_policy()
+        payload["transitions"] = [
+            self._transition(from_state="ACCEPTED", to_state="PROPAGATED"),
+        ]
         payload["propagation_events"] = [
             self._propagation_event(UUID_7, "APPLIED")
         ]
@@ -313,6 +357,24 @@ class TypeLifecycleSchemaTest(unittest.TestCase):
                 "resolved_receipt_id": UUID_13,
                 "resolved_at": TS_2,
             }
+        ]
+        self._assert_valid(self.type_validator, payload)
+
+    def test_evidence_links_must_not_be_empty(self) -> None:
+        payload = self._base_type_assertion()
+        payload["evidence_ids"] = []
+        self._assert_invalid(self.type_validator, payload)
+
+    def test_non_initial_state_requires_transition_to_current_state(self) -> None:
+        payload = self._base_type_assertion()
+        payload["state"] = "REJECTED"
+        payload["transitions"] = [
+            self._transition(from_state="PROPOSED", to_state="UNDER_REVIEW"),
+        ]
+        self._assert_invalid(self.type_validator, payload)
+
+        payload["transitions"] = [
+            self._transition(from_state="PROPOSED", to_state="REJECTED"),
         ]
         self._assert_valid(self.type_validator, payload)
 
