@@ -46,7 +46,10 @@ jobs:
           mkdir -p eval/output/smoke
           python3 scripts/ml/local_embedding_pipeline.py suggest-types \
             --input scripts/ml/fixtures/toy_type_suggestions_slice.json \
-            --output eval/output/smoke/type-suggestion-metrics.json
+            --output eval/output/smoke/type-suggestion-metrics.json \
+            --telemetry-path eval/output/smoke/type-suggestion-quality.jsonl
+          test -f eval/output/smoke/type-suggestion-metrics.json
+          test -f eval/output/smoke/type-suggestion-quality.jsonl
 
       - name: Upload security invariant report
         uses: actions/upload-artifact@v4
