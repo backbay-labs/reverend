@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import heapq
 import json
 import math
 import re
@@ -653,6 +654,7 @@ class _IndexedRecord:
     norm: float
     non_zero_dimensions: int
     features: tuple[tuple[str, int], ...]
+    sparse_vector: tuple[tuple[int, float], ...] = ()
 
 
 def _now_ns() -> int:
@@ -724,6 +726,11 @@ class LocalEmbeddingPipeline:
                     norm=norm,
                     non_zero_dimensions=non_zero,
                     features=tuple(sorted(token_counts.items(), key=lambda item: item[0])),
+                    sparse_vector=tuple(
+                        (dimension, value)
+                        for dimension, value in enumerate(vector)
+                        if value != 0.0
+                    ),
                 )
             )
 
@@ -763,9 +770,22 @@ class EmbeddingIndex:
     ):
         self.vector_dimension = vector_dimension
         self._records = indexed_records
+        self._function_ids = [indexed.record.function_id for indexed in indexed_records]
+        self._names = [indexed.record.name for indexed in indexed_records]
         self._record_by_id = {
             indexed.record.function_id: indexed.record for indexed in indexed_records
         }
+        self._postings: list[list[tuple[int, float]]] = [[] for _ in range(vector_dimension)]
+        for record_idx, indexed in enumerate(indexed_records):
+            sparse_vector = indexed.sparse_vector
+            if not sparse_vector:
+                sparse_vector = tuple(
+                    (dimension, value)
+                    for dimension, value in enumerate(indexed.vector)
+                    if value != 0.0
+                )
+            for dimension, value in sparse_vector:
+                self._postings[dimension].append((record_idx, value))
         self._stats = stats
 
     @property
@@ -782,24 +802,31 @@ class EmbeddingIndex:
         query_vector, query_norm, _ = pipeline._embed_tokens(pipeline.tokenize(query_text))
         if query_norm == 0.0:
             return []
+        record_count = len(self._records)
+        if record_count == 0:
+            return []
 
-        scored: list[SearchResult] = []
-        for indexed in self._records:
-            if indexed.norm == 0.0:
-                score = 0.0
-            else:
-                score = sum(a * b for a, b in zip(query_vector, indexed.vector))
-            scored.append(
-                SearchResult(
-                    function_id=indexed.record.function_id,
-                    name=indexed.record.name,
-                    score=score,
-                )
+        scores = [0.0] * record_count
+        for dimension, query_weight in enumerate(query_vector):
+            if query_weight == 0.0:
+                continue
+            for record_idx, record_weight in self._postings[dimension]:
+                scores[record_idx] += query_weight * record_weight
+
+        limit = min(top_k, record_count)
+        ranked_indexes = heapq.nsmallest(
+            limit,
+            range(record_count),
+            key=lambda idx: (-scores[idx], self._function_ids[idx]),
+        )
+        return [
+            SearchResult(
+                function_id=self._function_ids[idx],
+                name=self._names[idx],
+                score=scores[idx],
             )
-
-        # Deterministic ordering: primary by score, secondary by function_id.
-        scored.sort(key=lambda item: (-item.score, item.function_id))
-        return scored[: min(top_k, len(scored))]
+            for idx in ranked_indexes
+        ]
 
     def save(self, output_dir: Path) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -871,6 +898,11 @@ class EmbeddingIndex:
                     norm=float(raw.get("norm", 0.0)),
                     non_zero_dimensions=int(raw.get("non_zero_dimensions", 0)),
                     features=tuple(),
+                    sparse_vector=tuple(
+                        (dimension, value)
+                        for dimension, value in enumerate(vector)
+                        if value != 0.0
+                    ),
                 )
             )
 
@@ -916,15 +948,22 @@ class SemanticSearchQueryService:
         adapter: BaselineSimilarityAdapter,
         index: EmbeddingIndex,
         reranker: EvidenceWeightedReranker | None = None,
+        rerank_candidate_multiplier: int = 4,
     ):
+        if rerank_candidate_multiplier <= 0:
+            raise ValueError("rerank_candidate_multiplier must be > 0")
         self._adapter = adapter
         self._index = index
         self._reranker = reranker
+        self._rerank_candidate_multiplier = rerank_candidate_multiplier
 
     def search_intent(self, query_text: str, top_k: int = 5) -> SemanticSearchResponse:
         normalized = query_text.strip()
+        candidate_k = top_k
+        if self._reranker is not None:
+            candidate_k = max(top_k, top_k * self._rerank_candidate_multiplier)
         start = _now_ns()
-        hits = self._adapter.top_k(normalized, top_k=top_k)
+        hits = self._adapter.top_k(normalized, top_k=candidate_k)
         reranked_hits = self._rerank_or_fallback(
             query_text=normalized,
             hits=hits,
@@ -946,8 +985,11 @@ class SemanticSearchQueryService:
             raise ValueError(f"unknown function id: {function_id}")
 
         query_text = f"{seed_record.name} {seed_record.text}".strip()
+        candidate_k = top_k + 1
+        if self._reranker is not None:
+            candidate_k = max(top_k * self._rerank_candidate_multiplier, top_k) + 1
         start = _now_ns()
-        raw_hits = self._adapter.top_k(query_text, top_k=top_k + 1)
+        raw_hits = self._adapter.top_k(query_text, top_k=candidate_k)
         filtered_hits = [item for item in raw_hits if item.function_id != function_id][:top_k]
         reranked_hits = self._rerank_or_fallback(
             query_text=query_text,
@@ -1114,6 +1156,7 @@ def evaluate_queries(
     *,
     index: EmbeddingIndex | None = None,
     reranker: EvidenceWeightedReranker | None = None,
+    rerank_candidate_multiplier: int = 4,
 ) -> dict[str, Any]:
     doc = json.loads(queries_path.read_text(encoding="utf-8"))
     if not isinstance(doc, dict) or not isinstance(doc.get("queries"), list):
@@ -1122,13 +1165,19 @@ def evaluate_queries(
     queries = doc["queries"]
     total = 0
     recall_hits = 0
+    recall_hits_top_k = 0
     mrr_total = 0.0
     results: list[dict[str, Any]] = []
 
     for query in queries:
         text = str(query.get("text") or "")
         gt = str(query.get("ground_truth_id") or "")
-        hits = adapter.top_k(text, top_k=top_k)
+        candidate_k = top_k
+        if reranker is not None and index is not None:
+            multiplier = max(1, rerank_candidate_multiplier)
+            candidate_k = max(top_k, top_k * multiplier)
+            candidate_k = min(candidate_k, index.stats.corpus_size)
+        hits = adapter.top_k(text, top_k=candidate_k)
         if reranker is not None and index is not None:
             try:
                 hits = reranker.rerank(query_text=text, hits=hits, index=index, top_k=top_k)
@@ -1139,6 +1188,8 @@ def evaluate_queries(
         ranked_ids = [item.function_id for item in hits]
         if ranked_ids and ranked_ids[0] == gt:
             recall_hits += 1
+        if gt in ranked_ids:
+            recall_hits_top_k += 1
 
         rank = None
         for idx, function_id in enumerate(ranked_ids, start=1):
@@ -1160,10 +1211,12 @@ def evaluate_queries(
         )
 
     recall_at_1 = (recall_hits / total) if total else 0.0
+    recall_at_k = (recall_hits_top_k / total) if total else 0.0
     mrr = (mrr_total / total) if total else 0.0
     return {
         "queries": total,
         "recall@1": round(recall_at_1, 6),
+        f"recall@{top_k}": round(recall_at_k, 6),
         "mrr": round(mrr, 6),
         "results": results,
     }
@@ -1216,6 +1269,10 @@ def compare_eval_ordering(
     recall_delta = float(candidate_metrics.get("recall@1", 0.0)) - float(
         baseline_metrics.get("recall@1", 0.0)
     )
+    recall_k_key = f"recall@{top_k}"
+    recall_at_top_k_delta = float(candidate_metrics.get(recall_k_key, 0.0)) - float(
+        baseline_metrics.get(recall_k_key, 0.0)
+    )
 
     return {
         "queries_compared": total,
@@ -1225,6 +1282,8 @@ def compare_eval_ordering(
         "mean_rank_delta": round((sum(rank_deltas) / total), 6) if total else 0.0,
         "mrr_delta": round(mrr_delta, 6),
         "recall@1_delta": round(recall_delta, 6),
+        "recall_metric_key": recall_k_key,
+        "recall_at_top_k_delta": round(recall_at_top_k_delta, 6),
         "improves_against_baseline": bool(
             total > 0 and improved > 0 and worsened == 0 and mrr_delta >= 0.0 and recall_delta >= 0.0
         ),
@@ -1260,7 +1319,12 @@ def _search_command(args: argparse.Namespace) -> int:
     pipeline = LocalEmbeddingPipeline(vector_dimension=index.vector_dimension)
     adapter = BaselineSimilarityAdapter(pipeline=pipeline, index=index)
     reranker = None if args.disable_reranker else EvidenceWeightedReranker()
-    service = SemanticSearchQueryService(adapter=adapter, index=index, reranker=reranker)
+    service = SemanticSearchQueryService(
+        adapter=adapter,
+        index=index,
+        reranker=reranker,
+        rerank_candidate_multiplier=max(1, args.rerank_candidate_multiplier),
+    )
     response = _run_semantic_search(
         service=service,
         mode=args.mode,
@@ -1278,7 +1342,12 @@ def _panel_command(args: argparse.Namespace) -> int:
     pipeline = LocalEmbeddingPipeline(vector_dimension=index.vector_dimension)
     adapter = BaselineSimilarityAdapter(pipeline=pipeline, index=index)
     reranker = None if args.disable_reranker else EvidenceWeightedReranker()
-    service = SemanticSearchQueryService(adapter=adapter, index=index, reranker=reranker)
+    service = SemanticSearchQueryService(
+        adapter=adapter,
+        index=index,
+        reranker=reranker,
+        rerank_candidate_multiplier=max(1, args.rerank_candidate_multiplier),
+    )
     response = _run_semantic_search(
         service=service,
         mode=args.mode,
@@ -1303,6 +1372,7 @@ def _evaluate_command(args: argparse.Namespace) -> int:
             "enabled": False,
             "name": "evidence_weighted_v1",
             "status": "disabled",
+            "candidate_multiplier": 1,
         }
     else:
         reranker = EvidenceWeightedReranker()
@@ -1312,6 +1382,7 @@ def _evaluate_command(args: argparse.Namespace) -> int:
             top_k=args.top_k,
             index=index,
             reranker=reranker,
+            rerank_candidate_multiplier=max(1, args.rerank_candidate_multiplier),
         )
         metrics = dict(reranked_metrics)
         metrics["baseline"] = baseline_metrics
@@ -1324,6 +1395,7 @@ def _evaluate_command(args: argparse.Namespace) -> int:
             "enabled": True,
             "name": "evidence_weighted_v1",
             "status": "applied",
+            "candidate_multiplier": max(1, args.rerank_candidate_multiplier),
         }
     metrics["build_stats"] = asdict(adapter.build_stats)
 
@@ -1392,6 +1464,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip evidence-weighted reranking and return baseline ordering only",
     )
+    search_parser.add_argument(
+        "--rerank-candidate-multiplier",
+        type=int,
+        default=4,
+        help="When reranker is enabled, retrieve top_k*multiplier candidates before reranking",
+    )
     search_parser.set_defaults(func=_search_command)
 
     panel_parser = subparsers.add_parser("panel", help="Render semantic search panel payload")
@@ -1422,6 +1500,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip evidence-weighted reranking and return baseline ordering only",
     )
+    panel_parser.add_argument(
+        "--rerank-candidate-multiplier",
+        type=int,
+        default=4,
+        help="When reranker is enabled, retrieve top_k*multiplier candidates before reranking",
+    )
     panel_parser.set_defaults(func=_panel_command)
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate retrieval metrics against query set")
@@ -1433,6 +1517,12 @@ def _parser() -> argparse.ArgumentParser:
         "--disable-reranker",
         action="store_true",
         help="Skip evidence-weighted reranking and evaluate baseline only",
+    )
+    eval_parser.add_argument(
+        "--rerank-candidate-multiplier",
+        type=int,
+        default=4,
+        help="When reranker is enabled, retrieve top_k*multiplier candidates before reranking",
     )
     eval_parser.set_defaults(func=_evaluate_command)
 

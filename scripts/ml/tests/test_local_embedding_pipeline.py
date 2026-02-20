@@ -128,6 +128,7 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             metrics = evaluate_queries(adapter, queries_path, top_k=3)
             self.assertEqual(metrics["queries"], 2)
             self.assertIn("recall@1", metrics)
+            self.assertIn("recall@3", metrics)
             self.assertIn("mrr", metrics)
             self.assertEqual(len(metrics["results"]), 2)
 
@@ -154,6 +155,91 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         comparison = MODULE.compare_eval_ordering(baseline, reranked, top_k=3)
         self.assertTrue(comparison["improves_against_baseline"])
         self.assertGreater(comparison["ordering_improved_queries"], 0)
+
+    def test_reranker_oversampling_can_improve_recall_at_top_k(self) -> None:
+        records: list[FunctionRecord] = [
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.target.parse_imports",
+                    "name": "parse_imports",
+                    "text": "parse pe import directory entries",
+                    "provenance": {
+                        "source": "test",
+                        "receipt_id": "receipt:test:target",
+                        "record_id": "fn.target.parse_imports",
+                    },
+                    "evidence_refs": [
+                        {
+                            "kind": "CALLSITE",
+                            "description": "callsite evidence iat thunk import resolver",
+                            "uri": "local-index://evidence/fn.target.parse_imports/callsite",
+                            "confidence": 0.99,
+                        },
+                        {
+                            "kind": "XREF",
+                            "description": "xref evidence links iat thunk references",
+                            "uri": "local-index://evidence/fn.target.parse_imports/xref",
+                            "confidence": 0.95,
+                        },
+                    ],
+                }
+            )
+        ]
+        for index in range(24):
+            records.append(
+                FunctionRecord.from_json(
+                    {
+                        "id": f"fn.aa.noise.{index:02d}",
+                        "name": f"noise_{index:02d}",
+                        "text": "auxiliary routine buffer state machine checksum handler",
+                    }
+                )
+            )
+        for index in range(12):
+            records.append(
+                FunctionRecord.from_json(
+                    {
+                        "id": f"fn.zz.noise.{index:02d}",
+                        "name": f"noise_tail_{index:02d}",
+                        "text": "auxiliary routine buffer state machine checksum handler",
+                    }
+                )
+            )
+
+        pipeline = LocalEmbeddingPipeline(vector_dimension=1024)
+        index = pipeline.build_index(records)
+        adapter = BaselineSimilarityAdapter(pipeline, index)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            queries_path = Path(tmpdir) / "queries.json"
+            queries_path.write_text(
+                json.dumps(
+                    {
+                        "queries": [
+                            {
+                                "text": "callsite evidence iat thunk",
+                                "ground_truth_id": "fn.target.parse_imports",
+                            }
+                        ]
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            baseline = evaluate_queries(adapter, queries_path, top_k=10)
+            reranked = evaluate_queries(
+                adapter,
+                queries_path,
+                top_k=10,
+                index=index,
+                reranker=EvidenceWeightedReranker(),
+                rerank_candidate_multiplier=4,
+            )
+
+            self.assertEqual(baseline["recall@10"], 0.0)
+            self.assertEqual(reranked["recall@10"], 1.0)
 
     def test_function_record_defaults_provenance_and_evidence_refs(self) -> None:
         record = FunctionRecord.from_json(

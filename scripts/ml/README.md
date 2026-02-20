@@ -87,8 +87,22 @@ python3 scripts/ml/local_embedding_pipeline.py evaluate \
 ```
 
 `evaluate` emits reranked metrics plus a baseline comparison block (`mrr_delta`,
-`recall@1_delta`, and per-query ordering deltas). Add `--disable-reranker` to
-evaluate baseline only.
+`recall@1_delta`, `recall_at_top_k_delta`, and per-query ordering deltas). The
+metrics payload always includes `recall@1` plus `recall@{top_k}`.
+
+When reranking is enabled, retrieval first gathers `top_k * multiplier`
+candidates before reranking and truncation, which allows `recall@{top_k}` to
+improve against stock baseline ordering:
+
+```bash
+python3 scripts/ml/local_embedding_pipeline.py evaluate \
+  --index-dir /tmp/ml301-index \
+  --queries scripts/ml/fixtures/toy_similarity_queries_slice.json \
+  --top-k 10 \
+  --rerank-candidate-multiplier 4
+```
+
+Add `--disable-reranker` to evaluate baseline only.
 
 ## Generate Type Suggestions (Confidence + Quarantine Policy)
 
