@@ -50,7 +50,7 @@ Ship one vertical slice:
 |---|---|---|---|---|---|---|
 | 1 | Bootstrap data-plane repo module and schema migrations | Create MVP workflow wireframes | Define retrieval feature set and ranking baseline | Threat model to control mapping | Pin datasets + baseline scripts | `M1`: evaluation harness skeleton in CI |
 | 2 | Implement receipt schema + append API | Build proposal inbox panel (read-only) | Baseline similarity run (stock) | Implement capability token spec | Run stock metric baselines | `M2`: baseline report v1 |
-| 3 | Add transaction-linked receipt writer | Add delta diff renderer (before/after) | Build triage feature extractor prototype | Add policy mode config (`offline`, `allowlist`, `cloud`) | Add per-commit smoke metrics | `M3`: receipts written for manual edits |
+| 3 | Add transaction-linked receipt writer | Add delta diff renderer (before/after) | Build triage feature extractor prototype | Add policy mode config (`offline`, `allowlist`, `cloud`) | Add per-commit smoke metrics + MVP gate dashboard/alerts from artifacts | `M3`: receipts written for manual edits |
 | 4 | Proposal state machine (`proposed`, `approved`, `rejected`) | Review actions (approve/reject/bulk) | Local embedding pipeline v1 | Guard MCP/tool calls by capability | Nightly regression job enabled | `M4`: review/apply path works in test project |
 | 5 | Rollback chain + idempotent apply API | Rollback UX + change history view | Similarity index + top-k retrieval API | Endpoint allowlist enforcement | Add latency/recall dashboards | `M5`: rollback integration test green |
 | 6 | Evidence-link storage (`xrefs`, strings, callsites) | Evidence drawer in review UI | Re-ranker using evidence weights | Permission audit logging | Add receipt completeness gate | `M6`: 100% proposal receipts in CI tests |
@@ -73,6 +73,7 @@ Ship one vertical slice:
 8. `SEC-417`: Policy mode enforcement and endpoint allowlist controls.
 9. `EVAL-501`: Dataset lock + deterministic baseline pipeline.
 10. `EVAL-529`: CI gates for receipt completeness, rollback, recall, latency.
+11. `EVAL-534`: Artifact-driven MVP gate dashboard (`eval/scripts/mvp_gate_dashboard.py`) with actionable alerts.
 
 ## 7. Risks and Kill Criteria
 

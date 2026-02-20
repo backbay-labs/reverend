@@ -500,6 +500,48 @@ alerts:
       action: "Schedule dataset update review"
 ```
 
+### 6.4 MVP Gate Dashboard (Repo Implementation)
+
+As of 2026-02-20, this repository includes a deterministic MVP gate dashboard builder that
+tracks the four release gates currently wired for CI decision support:
+
+1. `recall_at_10_delta_vs_stock` (`>= 0.10`)
+2. `search_latency_p95_ms` (`<= 300`)
+3. `receipt_completeness` (`== 1.0`)
+4. `rollback_success_rate` (`== 1.0`)
+
+Threshold definitions live in `eval/config/mvp_gate_thresholds.json`.
+
+Saved per-run artifacts are stored as JSON files under `eval/artifacts/mvp-gates/runs/`:
+
+```json
+{
+  "run_id": "smoke-2026-02-20T020000Z",
+  "timestamp": "2026-02-20T02:00:00Z",
+  "commit_sha": "4444444",
+  "metrics": {
+    "recall_at_10_delta_vs_stock": 0.112,
+    "search_latency_p95_ms": 315.9,
+    "receipt_completeness": 0.995,
+    "rollback_success_rate": 1.0
+  }
+}
+```
+
+Reproduce dashboard + alerts from saved artifacts:
+
+```bash
+python3 eval/scripts/mvp_gate_dashboard.py \
+  --artifacts-dir eval/artifacts/mvp-gates/runs \
+  --thresholds eval/config/mvp_gate_thresholds.json \
+  --output-dir eval/artifacts/mvp-gates
+```
+
+Generated outputs:
+- `eval/artifacts/mvp-gates/dashboard.json` (machine-readable current + trend values)
+- `eval/artifacts/mvp-gates/dashboard.md` (human-readable dashboard summary)
+- `eval/artifacts/mvp-gates/alerts.json` (actionable threshold breaches)
+
 ---
 
 ## 7. Automated Evaluation Pipeline
