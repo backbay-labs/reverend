@@ -1,0 +1,16 @@
+{
+  "queries": [
+    {
+      "text": "elf section table parser",
+      "ground_truth_id": "fn.elf.parse_headers"
+    },
+    {
+      "text": "connect socket to host",
+      "ground_truth_id": "fn.net.open_socket"
+    },
+    {
+      "text": "load PE imports from binary",
+      "ground_truth_id": "fn.pe.parse_imports"
+    }
+  ]
+}
