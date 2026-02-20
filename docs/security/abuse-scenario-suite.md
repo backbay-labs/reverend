@@ -184,6 +184,13 @@ now enforces per-project `offline` / `allowlist` / `cloud` policy modes in both
 sync and read runtime paths. Non-allowlisted destinations emit deterministic
 `EGRESS_BLOCKED` audit events and the worker denies the operation.
 
+**Implementation note (SEC-509, 2026-02-20)**: runtime permission checks now
+log explicit `actor` + `timestamp_utc` + `target` fields on
+`corpus_access_audit` events. Every denied policy/capability/provenance event
+emits a paired `corpus_violation_incident` record with `policy_context` and a
+deterministic `remediation_action`. Audit JSONL is queryable via
+`query_audit_log_records(...)` for compliance review.
+
 ---
 
 ## Scenario 4: Supply Chain Attack via Malicious Plugin

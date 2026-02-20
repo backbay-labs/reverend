@@ -27,6 +27,7 @@ ProposalArtifact = MODULE.ProposalArtifact
 SyncStateStore = MODULE.SyncStateStore
 run_read_job = MODULE.run_read_job
 run_sync_job = MODULE.run_sync_job
+query_audit_log_records = MODULE.query_audit_log_records
 
 
 class CorpusSyncWorkerTest(unittest.TestCase):
@@ -188,6 +189,10 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             self.assertEqual(events[0]["event_type"], "CAPABILITY_DENIED")
             self.assertEqual(events[0]["action"], "SYNC")
             self.assertEqual(events[0]["outcome"], "DENY")
+            self.assertEqual(events[0]["actor"], "agent:observer")
+            self.assertEqual(events[0]["target_type"], "proposal")
+            self.assertEqual(events[0]["target"], "p-denied")
+            self.assertTrue(events[0]["timestamp_utc"])
             self.assertEqual(events[0]["proposal_id"], "p-denied")
 
     def test_sync_denies_unauthorized_write_when_no_approved_proposals(self) -> None:
@@ -480,7 +485,7 @@ class CorpusSyncWorkerTest(unittest.TestCase):
 
             backend = json.loads(backend_store.read_text(encoding="utf-8"))
             events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            blocked = [event for event in events if event["event_type"] == "EGRESS_BLOCKED"]
+            blocked = [event for event in events if event.get("event_type") == "EGRESS_BLOCKED"]
 
             self.assertEqual(telemetry.synced_count, 1)
             self.assertEqual(telemetry.error_count, 1)
@@ -528,7 +533,7 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             )
 
             events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            blocked = [event for event in events if event["event_type"] == "EGRESS_BLOCKED"]
+            blocked = [event for event in events if event.get("event_type") == "EGRESS_BLOCKED"]
 
             self.assertEqual(telemetry.synced_count, 0)
             self.assertEqual(telemetry.error_count, 1)
@@ -539,7 +544,76 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             self.assertEqual(blocked[0]["action"], "SYNC")
             self.assertEqual(blocked[0]["outcome"], "DENY")
             self.assertEqual(blocked[0]["policy_mode"], "allowlist")
+            self.assertEqual(blocked[0]["target_type"], "destination")
+            self.assertEqual(blocked[0]["target"], "https://api.blocked.example/v1/corpus")
             self.assertEqual(blocked[0]["destination"], "https://api.blocked.example/v1/corpus")
+            incidents = [event for event in events if event.get("kind") == "corpus_violation_incident"]
+            self.assertEqual(len(incidents), 1)
+            self.assertEqual(incidents[0]["source_event_type"], "EGRESS_BLOCKED")
+            self.assertEqual(
+                incidents[0]["remediation_action"],
+                "DENY_EGRESS_AND_REQUIRE_ALLOWLIST_UPDATE",
+            )
+            self.assertEqual(incidents[0]["policy_context"]["policy_mode"], "allowlist")
+
+    def test_audit_log_query_filters_records_for_compliance_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            local_store = tmp / "local_store.json"
+            backend_store = tmp / "backend_store.json"
+            state_path = tmp / "state.json"
+            audit_path = tmp / "audit.jsonl"
+
+            self._write_local_store(
+                local_store,
+                [
+                    {
+                        "proposal_id": "p-query",
+                        "state": "APPROVED",
+                        "receipt_id": "r-query",
+                    }
+                ],
+            )
+
+            telemetry = run_sync_job(
+                local_store_path=local_store,
+                backend_store_path=backend_store,
+                state_path=state_path,
+                job_id="sync-query-audit",
+                access_context=AccessContext.from_values(
+                    principal="agent:auditor",
+                    capabilities={"READ.CORPUS"},
+                ),
+                audit_path=audit_path,
+            )
+            self.assertEqual(telemetry.error_count, 1)
+
+            deny_audits = query_audit_log_records(
+                audit_path,
+                kind="corpus_access_audit",
+                event_type="CAPABILITY_DENIED",
+                principal="agent:auditor",
+                action="SYNC",
+                outcome="DENY",
+                target="p-query",
+            )
+            self.assertEqual(len(deny_audits), 1)
+            self.assertEqual(deny_audits[0]["target_type"], "proposal")
+
+            deny_incidents = query_audit_log_records(
+                audit_path,
+                kind="corpus_violation_incident",
+                event_type="CAPABILITY_DENIED",
+                principal="agent:auditor",
+                action="SYNC",
+                outcome="DENY",
+                limit=1,
+            )
+            self.assertEqual(len(deny_incidents), 1)
+            self.assertEqual(
+                deny_incidents[0]["remediation_action"],
+                "DENY_ACTION_AND_REQUIRE_CAPABILITY_GRANT",
+            )
 
     def test_policy_violation_mitigation_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -594,7 +668,7 @@ class CorpusSyncWorkerTest(unittest.TestCase):
             )
 
             events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            blocked_reasons = [event["reason"] for event in events if event["event_type"] == "EGRESS_BLOCKED"]
+            blocked_reasons = [event["reason"] for event in events if event.get("event_type") == "EGRESS_BLOCKED"]
 
             self.assertEqual(first.synced_count, 0)
             self.assertEqual(second.synced_count, 0)

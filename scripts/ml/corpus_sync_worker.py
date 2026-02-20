@@ -25,6 +25,13 @@ POLICY_MODE_OFFLINE = "offline"
 POLICY_MODE_ALLOWLIST = "allowlist"
 POLICY_MODE_CLOUD = "cloud"
 _POLICY_MODES = frozenset({POLICY_MODE_OFFLINE, POLICY_MODE_ALLOWLIST, POLICY_MODE_CLOUD})
+_VIOLATION_REMEDIATION_ACTIONS = {
+    "ACCESS_DENIED": "DENY_ACTION_AND_REQUIRE_SCOPE_APPROVAL",
+    "CAPABILITY_DENIED": "DENY_ACTION_AND_REQUIRE_CAPABILITY_GRANT",
+    "EGRESS_BLOCKED": "DENY_EGRESS_AND_REQUIRE_ALLOWLIST_UPDATE",
+    "PROVENANCE_CHAIN_INVALID": "DENY_ACTION_AND_REQUIRE_PROVENANCE_REPAIR",
+}
+_VIOLATION_EVENT_TYPES = frozenset(_VIOLATION_REMEDIATION_ACTIONS.keys())
 
 
 def _utc_now() -> str:
@@ -68,6 +75,41 @@ def _normalize_endpoint(value: Any) -> str | None:
         return None
     normalized = str(value).strip()
     return normalized or None
+
+
+def _parse_timestamp_utc(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _resolve_target(
+    *,
+    proposal_id: str | None = None,
+    program_id: str | None = None,
+    project_id: str | None = None,
+    destination: str | None = None,
+) -> tuple[str | None, str | None]:
+    if destination is not None:
+        return ("destination", destination)
+    if proposal_id is not None:
+        return ("proposal", proposal_id)
+    if project_id is not None:
+        return ("project", project_id)
+    if program_id is not None:
+        return ("program", program_id)
+    return (None, None)
 
 
 def _is_remote_endpoint(endpoint: str) -> bool:
@@ -348,6 +390,9 @@ class AuditEvent:
     principal: str
     action: str
     outcome: str
+    actor: str | None = None
+    target: str | None = None
+    target_type: str | None = None
     proposal_id: str | None = None
     program_id: str | None = None
     project_id: str | None = None
@@ -365,9 +410,14 @@ class AuditEvent:
             "event_type": self.event_type,
             "severity": self.severity,
             "principal": self.principal,
+            "actor": self.actor or self.principal,
             "action": self.action,
             "outcome": self.outcome,
         }
+        if self.target is not None:
+            payload["target"] = self.target
+        if self.target_type is not None:
+            payload["target_type"] = self.target_type
         if self.proposal_id is not None:
             payload["proposal_id"] = self.proposal_id
         if self.program_id is not None:
@@ -385,24 +435,219 @@ class AuditEvent:
         return payload
 
 
+@dataclass(frozen=True)
+class ViolationIncident:
+    """Structured incident record emitted for denied security violations."""
+
+    source_event_type: str
+    severity: str
+    principal: str
+    action: str
+    outcome: str
+    reason: str
+    remediation_action: str
+    policy_context: Mapping[str, Any]
+    actor: str | None = None
+    target: str | None = None
+    target_type: str | None = None
+    proposal_id: str | None = None
+    program_id: str | None = None
+    project_id: str | None = None
+    required_capability: str | None = None
+    destination: str | None = None
+    policy_mode: str | None = None
+    timestamp_utc: str = field(default_factory=_utc_now)
+
+    @classmethod
+    def from_audit_event(cls, event: AuditEvent) -> "ViolationIncident" | None:
+        if event.outcome != "DENY" or event.event_type not in _VIOLATION_EVENT_TYPES:
+            return None
+
+        context: dict[str, Any] = {"source_event_type": event.event_type}
+        if event.policy_mode is not None:
+            context["policy_mode"] = event.policy_mode
+        if event.required_capability is not None:
+            context["required_capability"] = event.required_capability
+        if event.destination is not None:
+            context["destination"] = event.destination
+        if event.project_id is not None:
+            context["project_id"] = event.project_id
+        if event.program_id is not None:
+            context["program_id"] = event.program_id
+        if event.proposal_id is not None:
+            context["proposal_id"] = event.proposal_id
+
+        target_type = event.target_type
+        target = event.target
+        if target_type is None or target is None:
+            resolved_target_type, resolved_target = _resolve_target(
+                proposal_id=event.proposal_id,
+                program_id=event.program_id,
+                project_id=event.project_id,
+                destination=event.destination,
+            )
+            if target_type is None:
+                target_type = resolved_target_type
+            if target is None:
+                target = resolved_target
+
+        return cls(
+            source_event_type=event.event_type,
+            severity=event.severity,
+            principal=event.principal,
+            action=event.action,
+            outcome=event.outcome,
+            reason=event.reason or "security policy violation",
+            remediation_action=_VIOLATION_REMEDIATION_ACTIONS.get(event.event_type, "DENY_ACTION_AND_ESCALATE"),
+            policy_context=context,
+            actor=event.actor or event.principal,
+            target=target,
+            target_type=target_type,
+            proposal_id=event.proposal_id,
+            program_id=event.program_id,
+            project_id=event.project_id,
+            required_capability=event.required_capability,
+            destination=event.destination,
+            policy_mode=event.policy_mode,
+            timestamp_utc=event.timestamp_utc,
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "corpus_violation_incident",
+            "timestamp_utc": self.timestamp_utc,
+            "incident_type": "POLICY_VIOLATION",
+            "source_event_type": self.source_event_type,
+            "severity": self.severity,
+            "principal": self.principal,
+            "actor": self.actor or self.principal,
+            "action": self.action,
+            "outcome": self.outcome,
+            "reason": self.reason,
+            "policy_context": dict(self.policy_context),
+            "remediation_action": self.remediation_action,
+        }
+        if self.target is not None:
+            payload["target"] = self.target
+        if self.target_type is not None:
+            payload["target_type"] = self.target_type
+        if self.proposal_id is not None:
+            payload["proposal_id"] = self.proposal_id
+        if self.program_id is not None:
+            payload["program_id"] = self.program_id
+        if self.project_id is not None:
+            payload["project_id"] = self.project_id
+        if self.required_capability is not None:
+            payload["required_capability"] = self.required_capability
+        if self.destination is not None:
+            payload["destination"] = self.destination
+        if self.policy_mode is not None:
+            payload["policy_mode"] = self.policy_mode
+        return payload
+
+
 class AuditLogger:
     """Append-only structured audit logger."""
 
     def __init__(self, path: Path | None = None):
         self._path = path
         self._events: list[AuditEvent] = []
+        self._incidents: list[ViolationIncident] = []
 
     @property
     def events(self) -> tuple[AuditEvent, ...]:
         return tuple(self._events)
 
+    @property
+    def incidents(self) -> tuple[ViolationIncident, ...]:
+        return tuple(self._incidents)
+
     def log(self, event: AuditEvent) -> None:
         self._events.append(event)
+        incident = ViolationIncident.from_audit_event(event)
+        if incident is not None:
+            self._incidents.append(incident)
+
         if self._path is None:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        records = [event.to_json()]
+        if incident is not None:
+            records.append(incident.to_json())
         with self._path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event.to_json(), sort_keys=True) + "\n")
+            for record in records:
+                handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def query_audit_log_records(
+    audit_path: Path,
+    *,
+    kind: str | None = None,
+    event_type: str | None = None,
+    principal: str | None = None,
+    action: str | None = None,
+    outcome: str | None = None,
+    target: str | None = None,
+    target_type: str | None = None,
+    since_utc: str | None = None,
+    until_utc: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    if limit is not None and limit <= 0:
+        return []
+    if not audit_path.exists():
+        return []
+
+    since_ts = _parse_timestamp_utc(since_utc)
+    if since_utc is not None and since_ts is None:
+        raise ValueError("since_utc must be a valid ISO-8601 timestamp")
+
+    until_ts = _parse_timestamp_utc(until_utc)
+    if until_utc is not None and until_ts is None:
+        raise ValueError("until_utc must be a valid ISO-8601 timestamp")
+
+    matches: list[dict[str, Any]] = []
+    for raw_line in audit_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+
+        if kind is not None and record.get("kind") != kind:
+            continue
+        if event_type is not None and event_type not in {
+            str(record.get("event_type") or ""),
+            str(record.get("source_event_type") or ""),
+        }:
+            continue
+        if principal is not None and record.get("principal") != principal:
+            continue
+        if action is not None and record.get("action") != action:
+            continue
+        if outcome is not None and record.get("outcome") != outcome:
+            continue
+        if target is not None and record.get("target") != target:
+            continue
+        if target_type is not None and record.get("target_type") != target_type:
+            continue
+
+        timestamp = _parse_timestamp_utc(record.get("timestamp_utc"))
+        if since_ts is not None and (timestamp is None or timestamp < since_ts):
+            continue
+        if until_ts is not None and (timestamp is None or timestamp > until_ts):
+            continue
+
+        matches.append(record)
+        if limit is not None and len(matches) >= limit:
+            break
+
+    return matches
 
 
 @dataclass(frozen=True)
@@ -640,13 +885,17 @@ class EndpointPolicyEnforcer:
         if violation_reason is None:
             return
 
+        target_type, target = _resolve_target(destination=self._destination)
         self._audit_logger.log(
             AuditEvent(
                 event_type="EGRESS_BLOCKED",
                 severity="WARNING",
                 principal=self._context.principal,
+                actor=self._context.principal,
                 action=action,
                 outcome="DENY",
+                target=target,
+                target_type=target_type,
                 proposal_id=proposal_id,
                 program_id=resolved_program_id,
                 project_id=resolved_project_id,
@@ -828,19 +1077,42 @@ class AccessPolicy:
         outcome: str,
         proposal_id: str | None = None,
         program_id: str | None = None,
+        project_id: str | None = None,
         required_capability: str | None = None,
+        destination: str | None = None,
+        target: str | None = None,
+        target_type: str | None = None,
         reason: str | None = None,
     ) -> None:
+        resolved_target_type = target_type
+        resolved_target = target
+        if resolved_target_type is None or resolved_target is None:
+            default_target_type, default_target = _resolve_target(
+                proposal_id=proposal_id,
+                program_id=program_id,
+                project_id=project_id,
+                destination=destination,
+            )
+            if resolved_target_type is None:
+                resolved_target_type = default_target_type
+            if resolved_target is None:
+                resolved_target = default_target
+
         self._audit_logger.log(
             AuditEvent(
                 event_type=event_type,
                 severity=severity,
                 principal=self._context.principal,
+                actor=self._context.principal,
                 action=action,
                 outcome=outcome,
+                target=resolved_target,
+                target_type=resolved_target_type,
                 proposal_id=proposal_id,
                 program_id=program_id,
+                project_id=project_id,
                 required_capability=required_capability,
+                destination=destination,
                 reason=reason,
             )
         )
