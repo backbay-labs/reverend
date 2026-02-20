@@ -867,7 +867,21 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
                         "kind": "local_proposal_store",
                         "proposals": [
                             {"proposal_id": "p-1", "state": "PROPOSED", "receipt_id": "receipt:p-1"},
-                            {"proposal_id": "p-2", "state": "PROPOSED", "receipt_id": "receipt:p-2"},
+                            {
+                                "proposal_id": "p-2",
+                                "state": "PROPOSED",
+                                "receipt_id": "receipt:p-2",
+                                "artifact": {
+                                    "kind": "cross_binary_reuse_proposal",
+                                    "evidence_refs": [
+                                        {
+                                            "kind": "CALLSITE",
+                                            "description": "resolver callsite evidence",
+                                            "uri": "local-index://evidence/fn.local.parse_imports/callsite",
+                                        }
+                                    ],
+                                },
+                            },
                             {"proposal_id": "p-3", "state": "PROPOSED", "receipt_id": "receipt:p-3"},
                         ],
                     },
@@ -934,6 +948,14 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(query_report["metrics"]["matched_total"], 2)
             self.assertEqual(query_report["metrics"]["state_counts"]["APPROVED"], 1)
             self.assertEqual(query_report["metrics"]["state_counts"]["REJECTED"], 2)
+            rejected_by_id = {item["proposal_id"]: item for item in query_report["proposals"]}
+            self.assertIn("p-2", rejected_by_id)
+            p2 = rejected_by_id["p-2"]
+            self.assertEqual(len(p2["evidence_link_ids"]), 1)
+            self.assertEqual(len(p2["evidence_links"]), 1)
+            self.assertTrue(p2["evidence_link_ids"][0].startswith("evr_"))
+            self.assertEqual(p2["evidence_links"][0]["kind"], "CALLSITE")
+            self.assertEqual(p2["evidence_links"][0]["evidence_ref_id"], p2["evidence_link_ids"][0])
 
             local_doc = json.loads(local_store.read_text(encoding="utf-8"))
             by_id = {item["proposal_id"]: item for item in local_doc["proposals"]}
@@ -941,6 +963,8 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(by_id["p-2"]["state"], "REJECTED")
             self.assertEqual(by_id["p-3"]["state"], "REJECTED")
             self.assertTrue(all(len(item["lifecycle_transitions"]) >= 2 for item in by_id.values()))
+            self.assertEqual(by_id["p-2"]["evidence_link_ids"], p2["evidence_link_ids"])
+            self.assertEqual(by_id["p-2"]["artifact"]["evidence_refs"][0]["evidence_ref_id"], p2["evidence_link_ids"][0])
 
     def test_proposal_apply_requires_approved_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1027,7 +1051,30 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
                         "schema_version": 1,
                         "kind": "local_proposal_store",
                         "proposals": [
-                            {"proposal_id": "p-1", "state": "APPROVED", "receipt_id": "receipt:p-1"},
+                            {
+                                "proposal_id": "p-1",
+                                "state": "APPROVED",
+                                "receipt_id": "receipt:p-1",
+                                "evidence_refs": [
+                                    {
+                                        "evidence_ref_id": "evr_p1_xref",
+                                        "kind": "XREF",
+                                        "description": "xref evidence for parser target",
+                                        "uri": "local-index://evidence/fn.local.parse_imports/xref",
+                                    }
+                                ],
+                                "artifact": {
+                                    "kind": "cross_binary_reuse_proposal",
+                                    "evidence_refs": [
+                                        {
+                                            "evidence_ref_id": "evr_p1_xref",
+                                            "kind": "XREF",
+                                            "description": "xref evidence for parser target",
+                                            "uri": "local-index://evidence/fn.local.parse_imports/xref",
+                                        }
+                                    ],
+                                },
+                            },
                         ],
                     },
                     indent=2,
@@ -1052,6 +1099,12 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(apply_exit, 0)
             apply_report = json.loads(stdout.getvalue())
             apply_receipt_id = apply_report["apply_receipt_id"]
+            self.assertEqual(apply_report["evidence_link_ids"], ["evr_p1_xref"])
+            self.assertEqual(apply_report["transaction"]["evidence_link_ids"], ["evr_p1_xref"])
+            self.assertEqual(
+                apply_report["transaction"]["evidence_link_ids_by_proposal"]["p-1"],
+                ["evr_p1_xref"],
+            )
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -1073,21 +1126,30 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(rollback_report["metrics"]["restored_total"], 1)
             self.assertEqual(rollback_report["restored_proposal_ids"], ["p-1"])
             self.assertEqual(rollback_report["rolled_back_apply_receipt_ids"], [apply_receipt_id])
+            self.assertEqual(rollback_report["evidence_link_ids"], ["evr_p1_xref"])
 
             local_doc = json.loads(local_store.read_text(encoding="utf-8"))
             proposal = local_doc["proposals"][0]
             self.assertEqual(proposal["state"], "APPROVED")
+            self.assertEqual(proposal["evidence_link_ids"], ["evr_p1_xref"])
+            self.assertEqual(proposal["evidence_refs"][0]["evidence_ref_id"], "evr_p1_xref")
+            self.assertEqual(proposal["artifact"]["evidence_refs"][0]["evidence_ref_id"], "evr_p1_xref")
             rollback_events = [event for event in proposal["apply_events"] if event["action"] == "ROLLBACK"]
             self.assertEqual(len(rollback_events), 1)
             rollback_event = rollback_events[0]
             self.assertEqual(rollback_event["receipt_links"][0]["link_type"], "ROLLS_BACK_APPLY")
             self.assertEqual(rollback_event["receipt_links"][0]["receipt_id"], apply_receipt_id)
+            self.assertEqual(rollback_event["evidence_link_ids"], ["evr_p1_xref"])
 
             tx = local_doc["apply_transactions"][0]
             self.assertEqual(tx["status"], "rolled_back")
             self.assertEqual(tx["rollback_receipt_id"], rollback_report["rollback_receipt_ids"][0])
             self.assertEqual(tx["rollback_receipt_links"][0]["link_type"], "ROLLS_BACK_APPLY")
             self.assertEqual(tx["rollback_receipt_links"][0]["receipt_id"], apply_receipt_id)
+            self.assertEqual(tx["evidence_link_ids"], ["evr_p1_xref"])
+            self.assertEqual(tx["rollback_evidence_link_ids"], ["evr_p1_xref"])
+            self.assertEqual(tx["state_before"]["p-1"]["evidence_link_ids"], ["evr_p1_xref"])
+            self.assertEqual(tx["state_after"]["p-1"]["evidence_link_ids"], ["evr_p1_xref"])
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):

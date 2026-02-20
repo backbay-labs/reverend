@@ -1008,6 +1008,199 @@ def _new_proposal_transition(
     return transition
 
 
+def _normalize_evidence_kind(raw_kind: Any) -> str:
+    normalized = str(raw_kind or "").strip().upper()
+    return normalized or "OTHER"
+
+
+def _coerce_evidence_confidence(raw_confidence: Any) -> float | None:
+    if raw_confidence is None:
+        return None
+    try:
+        confidence = float(raw_confidence)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(confidence):
+        return None
+    return confidence
+
+
+def _stable_evidence_ref_id(
+    *,
+    kind: str,
+    uri: str,
+    description: str,
+    confidence: float | None,
+) -> str:
+    confidence_token = "" if confidence is None else f"{confidence:.6f}"
+    seed_payload = {
+        "kind": kind,
+        "uri": uri,
+        "description": description,
+        "confidence": confidence_token,
+    }
+    canonical_seed = json.dumps(
+        seed_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    digest = hashlib.sha256(canonical_seed.encode("utf-8")).hexdigest()
+    return f"evr_{digest}"
+
+
+def _normalize_proposal_evidence_ref(
+    raw_ref: Mapping[str, Any],
+    *,
+    proposal_id: str,
+) -> dict[str, Any]:
+    kind = _normalize_evidence_kind(raw_ref.get("kind") or raw_ref.get("type"))
+    description = str(raw_ref.get("description") or "").strip()
+    if not description:
+        description = f"{kind} evidence for {proposal_id}"
+
+    uri = str(raw_ref.get("uri") or "").strip()
+    if not uri:
+        uri = f"local-proposal://{proposal_id}/evidence/{kind.lower()}"
+
+    confidence = _coerce_evidence_confidence(raw_ref.get("confidence"))
+    evidence_ref_id = str(raw_ref.get("evidence_ref_id") or raw_ref.get("id") or "").strip()
+    if not evidence_ref_id:
+        evidence_ref_id = _stable_evidence_ref_id(
+            kind=kind,
+            uri=uri,
+            description=description,
+            confidence=confidence,
+        )
+
+    normalized: dict[str, Any] = {
+        "evidence_ref_id": evidence_ref_id,
+        "kind": kind,
+        "description": description,
+        "uri": uri,
+    }
+    if confidence is not None:
+        normalized["confidence"] = confidence
+    return normalized
+
+
+def _normalize_proposal_evidence_refs(
+    raw_refs: Any,
+    *,
+    proposal_id: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(raw_refs, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for item in raw_refs:
+        if not isinstance(item, Mapping):
+            continue
+        normalized.append(_normalize_proposal_evidence_ref(item, proposal_id=proposal_id))
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for item in normalized:
+        evidence_ref_id = str(item.get("evidence_ref_id") or "").strip()
+        if not evidence_ref_id:
+            continue
+        if evidence_ref_id not in deduped:
+            deduped[evidence_ref_id] = dict(item)
+
+    return sorted(
+        deduped.values(),
+        key=lambda item: (
+            str(item.get("evidence_ref_id") or ""),
+            str(item.get("kind") or ""),
+            str(item.get("uri") or ""),
+        ),
+    )
+
+
+def _collect_proposal_evidence_refs(
+    proposal: Mapping[str, Any],
+    *,
+    proposal_id: str,
+) -> list[dict[str, Any]]:
+    raw_collected: list[dict[str, Any]] = []
+    for field in ("evidence_refs", "evidence_links"):
+        field_value = proposal.get(field)
+        if isinstance(field_value, list):
+            raw_collected.extend(dict(item) for item in field_value if isinstance(item, Mapping))
+
+    artifact_raw = proposal.get("artifact")
+    if isinstance(artifact_raw, Mapping):
+        for field in ("evidence_refs", "evidence_links"):
+            field_value = artifact_raw.get(field)
+            if isinstance(field_value, list):
+                raw_collected.extend(dict(item) for item in field_value if isinstance(item, Mapping))
+
+    if not raw_collected:
+        evidence_link_ids_raw = proposal.get("evidence_link_ids")
+        if isinstance(evidence_link_ids_raw, list):
+            for evidence_ref_id in evidence_link_ids_raw:
+                normalized_id = str(evidence_ref_id).strip()
+                if not normalized_id:
+                    continue
+                raw_collected.append(
+                    {
+                        "evidence_ref_id": normalized_id,
+                        "kind": "OTHER",
+                        "description": f"Evidence link {normalized_id} for {proposal_id}",
+                        "uri": f"local-proposal://{proposal_id}/evidence/{normalized_id}",
+                    }
+                )
+
+    return _normalize_proposal_evidence_refs(raw_collected, proposal_id=proposal_id)
+
+
+def _proposal_evidence_link_ids(proposal: Mapping[str, Any]) -> list[str]:
+    evidence_link_ids_raw = proposal.get("evidence_link_ids")
+    if isinstance(evidence_link_ids_raw, list):
+        normalized = sorted(
+            {
+                str(item).strip()
+                for item in evidence_link_ids_raw
+                if str(item).strip()
+            }
+        )
+        if normalized:
+            return normalized
+
+    evidence_refs_raw = proposal.get("evidence_refs")
+    if not isinstance(evidence_refs_raw, list):
+        return []
+
+    return sorted(
+        {
+            str(item.get("evidence_ref_id") or "").strip()
+            for item in evidence_refs_raw
+            if isinstance(item, Mapping) and str(item.get("evidence_ref_id") or "").strip()
+        }
+    )
+
+
+def _proposal_evidence_links(proposal: Mapping[str, Any]) -> list[dict[str, Any]]:
+    evidence_refs_raw = proposal.get("evidence_refs")
+    if isinstance(evidence_refs_raw, list):
+        normalized = _normalize_proposal_evidence_refs(
+            evidence_refs_raw,
+            proposal_id=_proposal_id_from_doc(proposal) or "proposal",
+        )
+        if normalized:
+            return normalized
+
+    proposal_id = _proposal_id_from_doc(proposal) or "proposal"
+    return [
+        {
+            "evidence_ref_id": evidence_ref_id,
+            "kind": "OTHER",
+            "description": f"Evidence link {evidence_ref_id} for {proposal_id}",
+            "uri": f"local-proposal://{proposal_id}/evidence/{evidence_ref_id}",
+        }
+        for evidence_ref_id in _proposal_evidence_link_ids(proposal)
+    ]
+
+
 def _normalize_local_proposal(raw: Mapping[str, Any]) -> dict[str, Any]:
     proposal = dict(raw)
     proposal_id = _proposal_id_from_doc(proposal)
@@ -1036,6 +1229,23 @@ def _normalize_local_proposal(raw: Mapping[str, Any]) -> dict[str, Any]:
             )
         ]
     proposal["lifecycle_transitions"] = transitions
+
+    evidence_refs = _collect_proposal_evidence_refs(proposal, proposal_id=proposal_id)
+    proposal["evidence_refs"] = [dict(item) for item in evidence_refs]
+    proposal["evidence_link_ids"] = [
+        str(item.get("evidence_ref_id") or "").strip()
+        for item in evidence_refs
+        if str(item.get("evidence_ref_id") or "").strip()
+    ]
+    proposal["evidence_links"] = [dict(item) for item in evidence_refs]
+
+    artifact_raw = proposal.get("artifact")
+    if isinstance(artifact_raw, Mapping):
+        artifact_doc = dict(artifact_raw)
+        artifact_doc["evidence_refs"] = [dict(item) for item in evidence_refs]
+        artifact_doc["evidence_links"] = [dict(item) for item in evidence_refs]
+        proposal["artifact"] = artifact_doc
+
     return proposal
 
 
@@ -1060,10 +1270,18 @@ def _digest_json(payload: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _capture_proposal_snapshot(proposal: Mapping[str, Any]) -> dict[str, str]:
+def _capture_proposal_snapshot(proposal: Mapping[str, Any]) -> dict[str, Any]:
+    evidence_refs_raw = proposal.get("evidence_refs")
+    evidence_refs = (
+        [dict(item) for item in evidence_refs_raw if isinstance(item, Mapping)]
+        if isinstance(evidence_refs_raw, list)
+        else []
+    )
     return {
         "state": _normalize_proposal_state(proposal.get("state")),
         "receipt_id": str(proposal.get("receipt_id") or "").strip(),
+        "evidence_link_ids": _proposal_evidence_link_ids(proposal),
+        "evidence_refs": evidence_refs,
     }
 
 
@@ -1249,7 +1467,10 @@ def query_local_proposals(
         proposal_state = _normalize_proposal_state(proposal.get("state"))
         if normalized_state and proposal_state != normalized_state:
             continue
-        matched.append(dict(proposal))
+        rendered = dict(proposal)
+        rendered["evidence_link_ids"] = _proposal_evidence_link_ids(proposal)
+        rendered["evidence_links"] = _proposal_evidence_links(proposal)
+        matched.append(rendered)
 
     return {
         "schema_version": 1,
@@ -1401,6 +1622,8 @@ def apply_local_proposals(
     applied_ids: list[str] = []
     apply_receipt_id: str | None = None
     transaction_doc: dict[str, Any] | None = None
+    applied_evidence_link_ids: set[str] = set()
+    evidence_link_ids_by_proposal: dict[str, list[str]] = {}
     if candidate_ids:
         scope = "single" if len(candidate_ids) == 1 else "batch"
         apply_receipt_id = _new_receipt_id(action="apply")
@@ -1425,6 +1648,9 @@ def apply_local_proposals(
                 action=PROPOSAL_ACTION_APPLY,
                 actor_id=normalized_actor,
             )
+            proposal_evidence_link_ids = _proposal_evidence_link_ids(proposal)
+            applied_evidence_link_ids.update(proposal_evidence_link_ids)
+            evidence_link_ids_by_proposal[proposal_id] = list(proposal_evidence_link_ids)
             events_raw = proposal.get("apply_events")
             events = [dict(item) for item in events_raw if isinstance(item, Mapping)] if isinstance(events_raw, list) else []
             if events:
@@ -1441,6 +1667,8 @@ def apply_local_proposals(
                     "phase": "apply",
                     "program_transaction_id": program_transaction_id,
                 }
+                events[-1]["evidence_link_ids"] = list(proposal_evidence_link_ids)
+                events[-1]["evidence_links"] = _proposal_evidence_links(proposal)
                 proposal["apply_events"] = events
             applied_ids.append(proposal_id)
 
@@ -1471,6 +1699,8 @@ def apply_local_proposals(
             "state_before_hash": state_before_hash,
             "state_after_hash": state_after_hash,
             "receipt_links": receipt_links,
+            "evidence_link_ids": sorted(applied_evidence_link_ids),
+            "evidence_link_ids_by_proposal": evidence_link_ids_by_proposal,
             "applied_at_utc": _utc_now(),
         }
         if normalized_actor:
@@ -1482,8 +1712,16 @@ def apply_local_proposals(
 
     transaction_summary: dict[str, Any] | None = None
     receipt_links: list[dict[str, str]] = []
+    evidence_link_ids: list[str] = []
     if transaction_doc is not None:
         receipt_links = [dict(item) for item in transaction_doc.get("receipt_links", []) if isinstance(item, Mapping)]
+        evidence_link_ids_raw = transaction_doc.get("evidence_link_ids")
+        if isinstance(evidence_link_ids_raw, list):
+            evidence_link_ids = [
+                str(item).strip()
+                for item in evidence_link_ids_raw
+                if str(item).strip()
+            ]
         transaction_summary = {
             "transaction_id": transaction_doc["transaction_id"],
             "scope": transaction_doc["scope"],
@@ -1491,6 +1729,10 @@ def apply_local_proposals(
             "program_transaction_id": transaction_doc["program_transaction_id"],
             "pre_apply_state_hash": transaction_doc["state_before_hash"],
             "post_apply_state_hash": transaction_doc["state_after_hash"],
+            "evidence_link_ids": evidence_link_ids,
+            "evidence_link_ids_by_proposal": dict(
+                transaction_doc.get("evidence_link_ids_by_proposal", {})
+            ),
         }
 
     return {
@@ -1511,6 +1753,7 @@ def apply_local_proposals(
         "apply_receipt_id": apply_receipt_id,
         "transaction": transaction_summary,
         "receipt_links": receipt_links,
+        "evidence_link_ids": evidence_link_ids,
         "local_store": str(local_store),
     }
 
@@ -1558,6 +1801,7 @@ def rollback_local_proposals(
     already_rolled_back_apply_receipt_ids: list[str] = []
     rollback_receipt_ids: list[str] = []
     restored_proposal_ids: list[str] = []
+    rolled_back_evidence_link_ids: set[str] = set()
 
     for apply_receipt_id in target_apply_receipt_ids:
         transaction = transactions_by_apply_receipt[apply_receipt_id]
@@ -1620,6 +1864,7 @@ def rollback_local_proposals(
         restore_order = list(reversed(proposal_ids_in_tx)) if scope == "batch" else list(proposal_ids_in_tx)
         pre_apply_state_hash = str(transaction.get("state_before_hash") or _digest_json(state_before_raw)).strip()
         post_apply_state_hash = str(transaction.get("state_after_hash") or "").strip() or None
+        tx_evidence_link_ids: set[str] = set()
 
         for proposal_id in restore_order:
             proposal = by_id[proposal_id]
@@ -1635,6 +1880,38 @@ def rollback_local_proposals(
                     action=PROPOSAL_ACTION_ROLLBACK,
                     actor_id=normalized_actor,
                 )
+            snapshot_evidence_refs_raw = snapshot_raw.get("evidence_refs")
+            snapshot_evidence_refs = (
+                _normalize_proposal_evidence_refs(snapshot_evidence_refs_raw, proposal_id=proposal_id)
+                if isinstance(snapshot_evidence_refs_raw, list)
+                else []
+            )
+            snapshot_evidence_link_ids = (
+                [
+                    str(item).strip()
+                    for item in snapshot_raw.get("evidence_link_ids", [])
+                    if str(item).strip()
+                ]
+                if isinstance(snapshot_raw.get("evidence_link_ids"), list)
+                else [
+                    str(item.get("evidence_ref_id") or "").strip()
+                    for item in snapshot_evidence_refs
+                    if str(item.get("evidence_ref_id") or "").strip()
+                ]
+            )
+            snapshot_evidence_link_ids = sorted(
+                {evidence_ref_id for evidence_ref_id in snapshot_evidence_link_ids if evidence_ref_id}
+            )
+            proposal["evidence_refs"] = [dict(item) for item in snapshot_evidence_refs]
+            proposal["evidence_link_ids"] = list(snapshot_evidence_link_ids)
+            proposal["evidence_links"] = [dict(item) for item in snapshot_evidence_refs]
+            artifact_raw = proposal.get("artifact")
+            if isinstance(artifact_raw, Mapping):
+                artifact_doc = dict(artifact_raw)
+                artifact_doc["evidence_refs"] = [dict(item) for item in snapshot_evidence_refs]
+                artifact_doc["evidence_links"] = [dict(item) for item in snapshot_evidence_refs]
+                proposal["artifact"] = artifact_doc
+            tx_evidence_link_ids.update(snapshot_evidence_link_ids)
             rolled_back_at = str(proposal.get("updated_at_utc") or _utc_now())
             events_raw = proposal.get("apply_events")
             events = [dict(item) for item in events_raw if isinstance(item, Mapping)] if isinstance(events_raw, list) else []
@@ -1659,6 +1936,8 @@ def rollback_local_proposals(
                     "pre_apply_state_hash": pre_apply_state_hash,
                     "post_apply_state_hash": post_apply_state_hash,
                 },
+                "evidence_link_ids": list(snapshot_evidence_link_ids),
+                "evidence_links": [dict(item) for item in snapshot_evidence_refs],
             }
             if normalized_actor:
                 event["actor_id"] = normalized_actor
@@ -1683,11 +1962,13 @@ def rollback_local_proposals(
                 "link_type": PROPOSAL_LINK_ROLLS_BACK_APPLY,
             }
         ]
+        transaction["rollback_evidence_link_ids"] = sorted(tx_evidence_link_ids)
         if normalized_actor:
             transaction["rolled_back_by"] = normalized_actor
 
         rolled_back_apply_receipt_ids.append(apply_receipt_id)
         rollback_receipt_ids.append(rollback_receipt_id)
+        rolled_back_evidence_link_ids.update(tx_evidence_link_ids)
 
     store_doc["proposals"] = proposals
     _write_local_proposal_store(local_store, store_doc)
@@ -1713,6 +1994,7 @@ def rollback_local_proposals(
         "already_rolled_back_apply_receipt_ids": already_rolled_back_apply_receipt_ids,
         "rollback_receipt_ids": rollback_receipt_ids,
         "restored_proposal_ids": restored_proposal_ids,
+        "evidence_link_ids": sorted(rolled_back_evidence_link_ids),
         "local_store": str(local_store),
     }
 
@@ -1757,6 +2039,16 @@ def _build_pullback_proposal(
         receipt_link["previous_receipt_id"] = source_receipt_id
     provenance_chain.append(receipt_link)
 
+    proposal_evidence_refs = _normalize_proposal_evidence_refs(
+        [ref.to_json() for ref in local_function.evidence_refs],
+        proposal_id=proposal_id,
+    )
+    proposal_evidence_link_ids = [
+        str(item.get("evidence_ref_id") or "").strip()
+        for item in proposal_evidence_refs
+        if str(item.get("evidence_ref_id") or "").strip()
+    ]
+
     artifact_doc: dict[str, Any] = {
         "kind": "cross_binary_reuse_proposal",
         "proposal_origin": "cross_binary_pullback",
@@ -1769,7 +2061,8 @@ def _build_pullback_proposal(
         "source_receipt_id": source_candidate.receipt_id,
         "source_program_id": source_candidate.program_id,
         "match_score": round(match_score, 6),
-        "evidence_refs": [ref.to_json() for ref in local_function.evidence_refs],
+        "evidence_refs": [dict(item) for item in proposal_evidence_refs],
+        "evidence_links": [dict(item) for item in proposal_evidence_refs],
     }
     if reusable_artifact.confidence is not None:
         artifact_doc["reuse_confidence"] = round(reusable_artifact.confidence, 6)
@@ -1782,6 +2075,9 @@ def _build_pullback_proposal(
         "receipt_id": receipt_id,
         "updated_at_utc": updated_at_utc,
         "artifact": artifact_doc,
+        "evidence_refs": [dict(item) for item in proposal_evidence_refs],
+        "evidence_link_ids": list(proposal_evidence_link_ids),
+        "evidence_links": [dict(item) for item in proposal_evidence_refs],
         "provenance_chain": provenance_chain,
         "lifecycle_transitions": [
             _new_proposal_transition(
