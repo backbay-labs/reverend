@@ -16,10 +16,59 @@ import re
 import time
 from collections import Counter
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 _TOKEN_RE = re.compile(r"[a-z0-9_]+")
+
+
+@dataclass(frozen=True)
+class EvidenceRef:
+    """Stable evidence reference for a function-level result."""
+
+    evidence_ref_id: str
+    kind: str
+    description: str
+    uri: str
+    confidence: float | None = None
+
+    @classmethod
+    def from_json(cls, raw: Mapping[str, Any], *, function_id: str) -> "EvidenceRef":
+        base_id = str(raw.get("evidence_ref_id") or raw.get("id") or "").strip()
+        kind = str(raw.get("kind") or raw.get("type") or "OTHER").strip().upper() or "OTHER"
+        description = str(raw.get("description") or "").strip()
+        uri = str(raw.get("uri") or "").strip()
+        confidence_raw = raw.get("confidence")
+        confidence = float(confidence_raw) if confidence_raw is not None else None
+
+        if not description:
+            description = f"{kind} evidence for {function_id}"
+        if not uri:
+            uri = f"local-index://evidence/{function_id}/{kind.lower()}"
+        if not base_id:
+            seed = f"{function_id}:{kind}:{uri}:{description}"
+            digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+            base_id = f"evidence:{digest}"
+
+        return cls(
+            evidence_ref_id=base_id,
+            kind=kind,
+            description=description,
+            uri=uri,
+            confidence=confidence,
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        doc: dict[str, Any] = {
+            "evidence_ref_id": self.evidence_ref_id,
+            "kind": self.kind,
+            "description": self.description,
+            "uri": self.uri,
+        }
+        if self.confidence is not None:
+            doc["confidence"] = self.confidence
+        return doc
 
 
 @dataclass(frozen=True)
@@ -29,6 +78,8 @@ class FunctionRecord:
     function_id: str
     name: str
     text: str
+    provenance: tuple[tuple[str, str], ...] = ()
+    evidence_refs: tuple[EvidenceRef, ...] = ()
 
     @classmethod
     def from_json(cls, raw: Mapping[str, Any]) -> "FunctionRecord":
@@ -37,7 +88,68 @@ class FunctionRecord:
             raise ValueError("function record missing required id/function_id")
         name = str(raw.get("name") or "").strip()
         text = str(raw.get("text") or "").strip()
-        return cls(function_id=function_id, name=name, text=text)
+        provenance = cls._parse_provenance(raw, function_id)
+        evidence_refs = cls._parse_evidence_refs(raw, function_id)
+        return cls(
+            function_id=function_id,
+            name=name,
+            text=text,
+            provenance=provenance,
+            evidence_refs=evidence_refs,
+        )
+
+    @staticmethod
+    def _parse_provenance(raw: Mapping[str, Any], function_id: str) -> tuple[tuple[str, str], ...]:
+        provenance_raw = raw.get("provenance")
+        if isinstance(provenance_raw, Mapping):
+            items = [
+                (str(key).strip(), str(value).strip())
+                for key, value in provenance_raw.items()
+                if str(key).strip()
+            ]
+            if items:
+                return tuple(sorted(items, key=lambda item: item[0]))
+
+        fallback = {
+            "source": str(raw.get("source") or "local_corpus"),
+            "receipt_id": str(raw.get("receipt_id") or f"receipt:{function_id}"),
+            "record_id": function_id,
+        }
+        return tuple(sorted(fallback.items(), key=lambda item: item[0]))
+
+    @staticmethod
+    def _parse_evidence_refs(raw: Mapping[str, Any], function_id: str) -> tuple[EvidenceRef, ...]:
+        refs_raw = raw.get("evidence_refs")
+        refs: list[EvidenceRef] = []
+        if isinstance(refs_raw, list):
+            for item in refs_raw:
+                if isinstance(item, Mapping):
+                    refs.append(EvidenceRef.from_json(item, function_id=function_id))
+
+        if refs:
+            return tuple(refs)
+
+        default_ref = EvidenceRef.from_json(
+            {
+                "kind": "TEXT_FEATURE",
+                "description": f"Feature-hash token evidence for {function_id}",
+                "uri": f"local-index://features/{function_id}",
+            },
+            function_id=function_id,
+        )
+        return (default_ref,)
+
+    def provenance_map(self) -> dict[str, str]:
+        return dict(self.provenance)
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "function_id": self.function_id,
+            "name": self.name,
+            "text": self.text,
+            "provenance": self.provenance_map(),
+            "evidence_refs": [ref.to_json() for ref in self.evidence_refs],
+        }
 
 
 @dataclass(frozen=True)
@@ -47,6 +159,78 @@ class SearchResult:
     function_id: str
     name: str
     score: float
+
+
+@dataclass(frozen=True)
+class RankedSearchResult:
+    """Ranked semantic search hit enriched with provenance and evidence."""
+
+    rank: int
+    function_id: str
+    name: str
+    score: float
+    provenance: tuple[tuple[str, str], ...]
+    evidence_refs: tuple[EvidenceRef, ...]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "rank": self.rank,
+            "function_id": self.function_id,
+            "name": self.name,
+            "score": round(self.score, 6),
+            "provenance": dict(self.provenance),
+            "evidence_refs": [ref.to_json() for ref in self.evidence_refs],
+        }
+
+
+@dataclass(frozen=True)
+class SearchLatencyMetric:
+    """Latency metric emitted for semantic search interactions."""
+
+    mode: str
+    latency_ms: float
+    top_k: int
+    result_count: int
+    query_chars: int
+    query_tokens: int
+    timestamp_utc: str
+    seed_function_id: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "latency_ms": round(self.latency_ms, 3),
+            "top_k": self.top_k,
+            "result_count": self.result_count,
+            "query_chars": self.query_chars,
+            "query_tokens": self.query_tokens,
+            "timestamp_utc": self.timestamp_utc,
+            "seed_function_id": self.seed_function_id,
+        }
+
+
+@dataclass(frozen=True)
+class SemanticSearchResponse:
+    """Search service response for panel and API consumers."""
+
+    mode: str
+    query_text: str
+    top_k: int
+    results: tuple[RankedSearchResult, ...]
+    metrics: SearchLatencyMetric
+    seed_function_id: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "query": {
+                "mode": self.mode,
+                "text": self.query_text,
+                "top_k": self.top_k,
+                "seed_function_id": self.seed_function_id,
+            },
+            "results": [result.to_json() for result in self.results],
+            "metrics": self.metrics.to_json(),
+        }
 
 
 @dataclass(frozen=True)
@@ -179,11 +363,17 @@ class EmbeddingIndex:
     ):
         self.vector_dimension = vector_dimension
         self._records = indexed_records
+        self._record_by_id = {
+            indexed.record.function_id: indexed.record for indexed in indexed_records
+        }
         self._stats = stats
 
     @property
     def stats(self) -> IndexBuildStats:
         return self._stats
+
+    def get_record(self, function_id: str) -> FunctionRecord | None:
+        return self._record_by_id.get(function_id)
 
     def search(self, query_text: str, top_k: int, pipeline: LocalEmbeddingPipeline) -> list[SearchResult]:
         if top_k <= 0:
@@ -230,9 +420,8 @@ class EmbeddingIndex:
             "vector_dimension": self.vector_dimension,
             "records": [
                 {
-                    "function_id": indexed.record.function_id,
-                    "name": indexed.record.name,
-                    "text": indexed.record.text,
+                    **indexed.record.to_json(),
+                    "id": indexed.record.function_id,
                     "vector": indexed.vector,
                     "norm": indexed.norm,
                     "non_zero_dimensions": indexed.non_zero_dimensions,
@@ -271,11 +460,7 @@ class EmbeddingIndex:
         vector_dimension = int(index_doc["vector_dimension"])
         indexed_records: list[_IndexedRecord] = []
         for raw in index_doc.get("records", []):
-            record = FunctionRecord(
-                function_id=str(raw["function_id"]),
-                name=str(raw.get("name", "")),
-                text=str(raw.get("text", "")),
-            )
+            record = FunctionRecord.from_json(raw)
             vector = tuple(float(v) for v in raw["vector"])
             if len(vector) != vector_dimension:
                 raise ValueError("index vector length mismatch")
@@ -314,6 +499,147 @@ class BaselineSimilarityAdapter:
 
     def top_k(self, query_text: str, top_k: int = 5) -> list[SearchResult]:
         return self._index.search(query_text=query_text, top_k=top_k, pipeline=self._pipeline)
+
+
+def _utc_now() -> str:
+    return datetime.now(tz=timezone.utc).isoformat()
+
+
+class SemanticSearchQueryService:
+    """Intent and similar-function query service with latency instrumentation."""
+
+    MODE_INTENT = "intent"
+    MODE_SIMILAR_FUNCTION = "similar-function"
+
+    def __init__(self, adapter: BaselineSimilarityAdapter, index: EmbeddingIndex):
+        self._adapter = adapter
+        self._index = index
+
+    def search_intent(self, query_text: str, top_k: int = 5) -> SemanticSearchResponse:
+        normalized = query_text.strip()
+        start = _now_ns()
+        hits = self._adapter.top_k(normalized, top_k=top_k)
+        latency_ms = _ms(start, _now_ns())
+        return self._build_response(
+            mode=self.MODE_INTENT,
+            query_text=normalized,
+            top_k=top_k,
+            raw_hits=hits,
+            latency_ms=latency_ms,
+            seed_function_id=None,
+        )
+
+    def search_similar_function(self, function_id: str, top_k: int = 5) -> SemanticSearchResponse:
+        seed_record = self._index.get_record(function_id)
+        if seed_record is None:
+            raise ValueError(f"unknown function id: {function_id}")
+
+        query_text = f"{seed_record.name} {seed_record.text}".strip()
+        start = _now_ns()
+        raw_hits = self._adapter.top_k(query_text, top_k=top_k + 1)
+        filtered_hits = [item for item in raw_hits if item.function_id != function_id][:top_k]
+        latency_ms = _ms(start, _now_ns())
+        return self._build_response(
+            mode=self.MODE_SIMILAR_FUNCTION,
+            query_text=query_text,
+            top_k=top_k,
+            raw_hits=filtered_hits,
+            latency_ms=latency_ms,
+            seed_function_id=function_id,
+        )
+
+    def _build_response(
+        self,
+        *,
+        mode: str,
+        query_text: str,
+        top_k: int,
+        raw_hits: list[SearchResult],
+        latency_ms: float,
+        seed_function_id: str | None,
+    ) -> SemanticSearchResponse:
+        ranked: list[RankedSearchResult] = []
+        for rank, hit in enumerate(raw_hits, start=1):
+            record = self._index.get_record(hit.function_id)
+            provenance = record.provenance if record else ()
+            evidence_refs = record.evidence_refs if record else ()
+            ranked.append(
+                RankedSearchResult(
+                    rank=rank,
+                    function_id=hit.function_id,
+                    name=hit.name,
+                    score=hit.score,
+                    provenance=provenance,
+                    evidence_refs=evidence_refs,
+                )
+            )
+
+        metrics = SearchLatencyMetric(
+            mode=mode,
+            latency_ms=latency_ms,
+            top_k=top_k,
+            result_count=len(ranked),
+            query_chars=len(query_text),
+            query_tokens=len(_TOKEN_RE.findall(query_text.lower())),
+            timestamp_utc=_utc_now(),
+            seed_function_id=seed_function_id,
+        )
+        return SemanticSearchResponse(
+            mode=mode,
+            query_text=query_text,
+            top_k=top_k,
+            results=tuple(ranked),
+            metrics=metrics,
+            seed_function_id=seed_function_id,
+        )
+
+
+def render_search_panel(response: SemanticSearchResponse) -> dict[str, Any]:
+    """Build panel payload used by the in-tool semantic search UI."""
+    return {
+        "panel": {
+            "id": "semantic-search",
+            "title": "Semantic Search",
+            "query_mode": response.mode,
+            "query_text": response.query_text,
+            "seed_function_id": response.seed_function_id,
+            "result_count": len(response.results),
+        },
+        "results": [result.to_json() for result in response.results],
+        "metrics": response.metrics.to_json(),
+    }
+
+
+def _append_latency_metric(telemetry_path: Path | None, metric: SearchLatencyMetric) -> None:
+    if telemetry_path is None:
+        return
+    telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "schema_version": 1,
+        "kind": "semantic_search_latency",
+        **metric.to_json(),
+    }
+    with telemetry_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+
+def _run_semantic_search(
+    *,
+    service: SemanticSearchQueryService,
+    mode: str,
+    query: str | None,
+    function_id: str | None,
+    top_k: int,
+) -> SemanticSearchResponse:
+    if mode == SemanticSearchQueryService.MODE_INTENT:
+        if not query:
+            raise ValueError("--query is required when --mode=intent")
+        return service.search_intent(query, top_k=top_k)
+    if mode == SemanticSearchQueryService.MODE_SIMILAR_FUNCTION:
+        if not function_id:
+            raise ValueError("--function-id is required when --mode=similar-function")
+        return service.search_similar_function(function_id, top_k=top_k)
+    raise ValueError(f"unsupported mode: {mode}")
 
 
 def load_corpus(corpus_path: Path) -> list[FunctionRecord]:
@@ -391,17 +717,34 @@ def _search_command(args: argparse.Namespace) -> int:
     index = EmbeddingIndex.load(args.index_dir)
     pipeline = LocalEmbeddingPipeline(vector_dimension=index.vector_dimension)
     adapter = BaselineSimilarityAdapter(pipeline=pipeline, index=index)
-    hits = adapter.top_k(args.query, top_k=args.top_k)
+    service = SemanticSearchQueryService(adapter=adapter, index=index)
+    response = _run_semantic_search(
+        service=service,
+        mode=args.mode,
+        query=args.query,
+        function_id=args.function_id,
+        top_k=args.top_k,
+    )
+    _append_latency_metric(args.telemetry_path, response.metrics)
+    print(json.dumps(response.to_json(), indent=2, sort_keys=True))
+    return 0
 
-    output = {
-        "query": args.query,
-        "top_k": args.top_k,
-        "results": [
-            {"function_id": hit.function_id, "name": hit.name, "score": round(hit.score, 6)}
-            for hit in hits
-        ],
-    }
-    print(json.dumps(output, indent=2, sort_keys=True))
+
+def _panel_command(args: argparse.Namespace) -> int:
+    index = EmbeddingIndex.load(args.index_dir)
+    pipeline = LocalEmbeddingPipeline(vector_dimension=index.vector_dimension)
+    adapter = BaselineSimilarityAdapter(pipeline=pipeline, index=index)
+    service = SemanticSearchQueryService(adapter=adapter, index=index)
+    response = _run_semantic_search(
+        service=service,
+        mode=args.mode,
+        query=args.query,
+        function_id=args.function_id,
+        top_k=args.top_k,
+    )
+    _append_latency_metric(args.telemetry_path, response.metrics)
+    panel = render_search_panel(response)
+    print(json.dumps(panel, indent=2, sort_keys=True))
     return 0
 
 
@@ -433,9 +776,53 @@ def _parser() -> argparse.ArgumentParser:
 
     search_parser = subparsers.add_parser("search", help="Query top-k functions from index")
     search_parser.add_argument("--index-dir", type=Path, required=True, help="Directory containing index artifacts")
-    search_parser.add_argument("--query", type=str, required=True, help="Search query text")
+    search_parser.add_argument(
+        "--mode",
+        type=str,
+        default=SemanticSearchQueryService.MODE_INTENT,
+        choices=[SemanticSearchQueryService.MODE_INTENT, SemanticSearchQueryService.MODE_SIMILAR_FUNCTION],
+        help="Search mode: intent text query or similar-function lookup",
+    )
+    search_parser.add_argument("--query", type=str, default=None, help="Intent query text (required for mode=intent)")
+    search_parser.add_argument(
+        "--function-id",
+        type=str,
+        default=None,
+        help="Function id seed (required for mode=similar-function)",
+    )
     search_parser.add_argument("--top-k", type=int, default=5, help="Top-k result count")
+    search_parser.add_argument(
+        "--telemetry-path",
+        type=Path,
+        default=None,
+        help="Optional JSONL path for latency telemetry events",
+    )
     search_parser.set_defaults(func=_search_command)
+
+    panel_parser = subparsers.add_parser("panel", help="Render semantic search panel payload")
+    panel_parser.add_argument("--index-dir", type=Path, required=True, help="Directory containing index artifacts")
+    panel_parser.add_argument(
+        "--mode",
+        type=str,
+        default=SemanticSearchQueryService.MODE_INTENT,
+        choices=[SemanticSearchQueryService.MODE_INTENT, SemanticSearchQueryService.MODE_SIMILAR_FUNCTION],
+        help="Search mode: intent text query or similar-function lookup",
+    )
+    panel_parser.add_argument("--query", type=str, default=None, help="Intent query text (required for mode=intent)")
+    panel_parser.add_argument(
+        "--function-id",
+        type=str,
+        default=None,
+        help="Function id seed (required for mode=similar-function)",
+    )
+    panel_parser.add_argument("--top-k", type=int, default=5, help="Top-k result count")
+    panel_parser.add_argument(
+        "--telemetry-path",
+        type=Path,
+        default=None,
+        help="Optional JSONL path for latency telemetry events",
+    )
+    panel_parser.set_defaults(func=_panel_command)
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate retrieval metrics against query set")
     eval_parser.add_argument("--index-dir", type=Path, required=True, help="Directory containing index artifacts")
