@@ -190,10 +190,10 @@ class TypeLifecycleSchemaTest(unittest.TestCase):
                 "program_id": UUID_3,
                 "address": 4096,
                 "old_value": {
-                    "state": "PROPOSED",
+                    "state": "APPROVED",
                 },
                 "new_value": {
-                    "state": "ACCEPTED",
+                    "state": "APPLIED",
                 },
             },
             "evidence": [
@@ -327,6 +327,14 @@ class TypeLifecycleSchemaTest(unittest.TestCase):
                 "link_type": "APPLIES_PROPAGATION",
             }
         ]
+        self._assert_valid(self.receipt_validator, payload)
+
+    def test_apply_action_requires_approved_pre_state(self) -> None:
+        payload = self._base_receipt()
+        payload["target"]["old_value"]["state"] = "PROPOSED"
+        self._assert_invalid(self.receipt_validator, payload)
+
+        payload["target"]["old_value"]["state"] = "APPROVED"
         self._assert_valid(self.receipt_validator, payload)
 
     def test_rollback_propagation_receipt_requires_rollback_phase(self) -> None:

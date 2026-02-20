@@ -257,6 +257,24 @@
       },
       "then": {
         "properties": {
+          "target": {
+            "required": [
+              "old_value"
+            ],
+            "properties": {
+              "old_value": {
+                "type": "object",
+                "required": [
+                  "state"
+                ],
+                "properties": {
+                  "state": {
+                    "const": "APPROVED"
+                  }
+                }
+              }
+            }
+          },
           "transaction": {
             "properties": {
               "phase": {

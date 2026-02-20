@@ -782,6 +782,155 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(telemetry.synced_count, 1)
             self.assertEqual(len(synced["artifacts"]), 1)
 
+    def test_proposal_review_and_query_support_approve_reject_and_bulk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_store = Path(tmpdir) / "local_store.json"
+            local_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "local_proposal_store",
+                        "proposals": [
+                            {"proposal_id": "p-1", "state": "PROPOSED", "receipt_id": "receipt:p-1"},
+                            {"proposal_id": "p-2", "state": "PROPOSED", "receipt_id": "receipt:p-2"},
+                            {"proposal_id": "p-3", "state": "PROPOSED", "receipt_id": "receipt:p-3"},
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "proposal-review",
+                        "--local-store",
+                        str(local_store),
+                        "--action",
+                        "approve",
+                        "--proposal-id",
+                        "p-1",
+                        "--reviewer-id",
+                        "user:analyst",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            approve_report = json.loads(stdout.getvalue())
+            self.assertEqual(approve_report["kind"], "proposal_review_report")
+            self.assertEqual(approve_report["metrics"]["reviewed_total"], 1)
+            self.assertFalse(approve_report["bulk"])
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "proposal-review",
+                        "--local-store",
+                        str(local_store),
+                        "--action",
+                        "reject",
+                        "--rationale",
+                        "bulk cleanup",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            reject_report = json.loads(stdout.getvalue())
+            self.assertEqual(reject_report["metrics"]["reviewed_total"], 2)
+            self.assertEqual(reject_report["metrics"]["skipped_total"], 1)
+            self.assertTrue(reject_report["bulk"])
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "proposal-query",
+                        "--local-store",
+                        str(local_store),
+                        "--state",
+                        "REJECTED",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            query_report = json.loads(stdout.getvalue())
+            self.assertEqual(query_report["kind"], "proposal_query_report")
+            self.assertEqual(query_report["metrics"]["matched_total"], 2)
+            self.assertEqual(query_report["metrics"]["state_counts"]["APPROVED"], 1)
+            self.assertEqual(query_report["metrics"]["state_counts"]["REJECTED"], 2)
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            by_id = {item["proposal_id"]: item for item in local_doc["proposals"]}
+            self.assertEqual(by_id["p-1"]["state"], "APPROVED")
+            self.assertEqual(by_id["p-2"]["state"], "REJECTED")
+            self.assertEqual(by_id["p-3"]["state"], "REJECTED")
+            self.assertTrue(all(len(item["lifecycle_transitions"]) >= 2 for item in by_id.values()))
+
+    def test_proposal_apply_requires_approved_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_store = Path(tmpdir) / "local_store.json"
+            local_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "local_proposal_store",
+                        "proposals": [
+                            {"proposal_id": "p-approved", "state": "APPROVED", "receipt_id": "receipt:p-approved"},
+                            {"proposal_id": "p-proposed", "state": "PROPOSED", "receipt_id": "receipt:p-proposed"},
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "proposal-apply",
+                        "--local-store",
+                        str(local_store),
+                        "--proposal-id",
+                        "p-approved",
+                        "--proposal-id",
+                        "p-proposed",
+                    ]
+                )
+            self.assertEqual(exit_code, 1)
+            error_report = json.loads(stdout.getvalue())
+            self.assertEqual(error_report["kind"], "proposal_apply_error")
+            self.assertIn("only APPROVED proposals can enter apply workflow", error_report["error"])
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            by_id = {item["proposal_id"]: item for item in local_doc["proposals"]}
+            self.assertEqual(by_id["p-approved"]["state"], "APPROVED")
+            self.assertEqual(by_id["p-proposed"]["state"], "PROPOSED")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "proposal-apply",
+                        "--local-store",
+                        str(local_store),
+                        "--actor-id",
+                        "worker:apply",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            apply_report = json.loads(stdout.getvalue())
+            self.assertEqual(apply_report["kind"], "proposal_apply_report")
+            self.assertEqual(apply_report["metrics"]["applied_total"], 1)
+            self.assertEqual(apply_report["applied_proposal_ids"], ["p-approved"])
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            by_id = {item["proposal_id"]: item for item in local_doc["proposals"]}
+            self.assertEqual(by_id["p-approved"]["state"], "APPLIED")
+            self.assertEqual(by_id["p-proposed"]["state"], "PROPOSED")
+
     @staticmethod
     def _triage_fixture_records() -> list[FunctionRecord]:
         return [

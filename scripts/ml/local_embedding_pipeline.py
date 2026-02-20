@@ -37,6 +37,29 @@ DEFAULT_TRIAGE_HOTSPOT_THRESHOLD = 0.25
 DEFAULT_TRIAGE_UNKNOWN_THRESHOLD = 0.65
 DEFAULT_TRIAGE_CALIBRATION_STEP = 0.05
 
+PROPOSAL_STATE_PROPOSED = "PROPOSED"
+PROPOSAL_STATE_APPROVED = "APPROVED"
+PROPOSAL_STATE_REJECTED = "REJECTED"
+PROPOSAL_STATE_APPLIED = "APPLIED"
+PROPOSAL_REVIEW_ACTION_APPROVE = "APPROVE"
+PROPOSAL_REVIEW_ACTION_REJECT = "REJECT"
+PROPOSAL_ALLOWED_STATES = (
+    PROPOSAL_STATE_PROPOSED,
+    PROPOSAL_STATE_APPROVED,
+    PROPOSAL_STATE_REJECTED,
+    PROPOSAL_STATE_APPLIED,
+)
+PROPOSAL_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    PROPOSAL_STATE_PROPOSED: frozenset({PROPOSAL_STATE_APPROVED, PROPOSAL_STATE_REJECTED}),
+    PROPOSAL_STATE_APPROVED: frozenset({PROPOSAL_STATE_APPLIED}),
+    PROPOSAL_STATE_REJECTED: frozenset(),
+    PROPOSAL_STATE_APPLIED: frozenset(),
+}
+PROPOSAL_REVIEW_ACTION_TO_STATE = {
+    PROPOSAL_REVIEW_ACTION_APPROVE: PROPOSAL_STATE_APPROVED,
+    PROPOSAL_REVIEW_ACTION_REJECT: PROPOSAL_STATE_REJECTED,
+}
+
 
 @dataclass(frozen=True)
 class EvidenceRef:
@@ -931,10 +954,408 @@ def _load_local_proposal_store(local_store_path: Path) -> dict[str, Any]:
     proposals = doc.get("proposals")
     if not isinstance(proposals, list):
         raise ValueError("local store missing required 'proposals' array")
-    normalized = [dict(item) for item in proposals if isinstance(item, Mapping)]
+    normalized = [
+        normalized_item
+        for item in proposals
+        if isinstance(item, Mapping)
+        for normalized_item in (_normalize_local_proposal(item),)
+        if normalized_item
+    ]
     resolved = dict(doc)
     resolved["proposals"] = normalized
     return resolved
+
+
+def _proposal_id_from_doc(proposal: Mapping[str, Any]) -> str:
+    return str(proposal.get("proposal_id") or proposal.get("id") or "").strip()
+
+
+def _normalize_proposal_state(
+    raw_state: Any,
+    *,
+    default: str = PROPOSAL_STATE_PROPOSED,
+) -> str:
+    normalized = str(raw_state or "").strip().upper()
+    if not normalized:
+        return default
+    return normalized
+
+
+def _new_proposal_transition(
+    *,
+    from_state: str | None,
+    to_state: str,
+    action: str,
+    changed_at_utc: str | None = None,
+    actor_id: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    transition: dict[str, Any] = {
+        "from_state": from_state,
+        "to_state": to_state,
+        "action": action,
+        "changed_at_utc": changed_at_utc or _utc_now(),
+    }
+    if actor_id:
+        transition["actor_id"] = actor_id
+    if reason:
+        transition["reason"] = reason
+    return transition
+
+
+def _normalize_local_proposal(raw: Mapping[str, Any]) -> dict[str, Any]:
+    proposal = dict(raw)
+    proposal_id = _proposal_id_from_doc(proposal)
+    if not proposal_id:
+        return {}
+
+    proposal["proposal_id"] = proposal_id
+    proposal["state"] = _normalize_proposal_state(
+        proposal.get("state") or proposal.get("status"),
+    )
+
+    updated_at_utc = str(proposal.get("updated_at_utc") or proposal.get("updated_at") or "").strip()
+    if not updated_at_utc:
+        updated_at_utc = _utc_now()
+    proposal["updated_at_utc"] = updated_at_utc
+
+    transitions_raw = proposal.get("lifecycle_transitions")
+    transitions = [dict(item) for item in transitions_raw if isinstance(item, Mapping)] if isinstance(transitions_raw, list) else []
+    if not transitions:
+        transitions = [
+            _new_proposal_transition(
+                from_state=None,
+                to_state=proposal["state"],
+                action="CREATE",
+                changed_at_utc=updated_at_utc,
+            )
+        ]
+    proposal["lifecycle_transitions"] = transitions
+    return proposal
+
+
+def _proposal_state_counts(proposals: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(
+        _normalize_proposal_state(proposal.get("state"))
+        for proposal in proposals
+    )
+    return {state: int(counts.get(state, 0)) for state in sorted(counts)}
+
+
+def _write_local_proposal_store(
+    local_store_path: Path,
+    store_doc: Mapping[str, Any],
+) -> None:
+    persisted = dict(store_doc)
+    persisted["schema_version"] = int(persisted.get("schema_version") or 1)
+    persisted["kind"] = str(persisted.get("kind") or "local_proposal_store")
+
+    proposals_raw = persisted.get("proposals")
+    if isinstance(proposals_raw, list):
+        proposals = [
+            normalized_item
+            for item in proposals_raw
+            if isinstance(item, Mapping)
+            for normalized_item in (_normalize_local_proposal(item),)
+            if normalized_item
+        ]
+    else:
+        proposals = []
+    persisted["proposals"] = proposals
+
+    local_store_path.parent.mkdir(parents=True, exist_ok=True)
+    local_store_path.write_text(
+        json.dumps(persisted, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _set_proposal_state(
+    proposal: dict[str, Any],
+    *,
+    to_state: str,
+    action: str,
+    actor_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    from_state = _normalize_proposal_state(proposal.get("state"))
+    normalized_to_state = _normalize_proposal_state(to_state)
+    if from_state == normalized_to_state:
+        return
+
+    allowed = PROPOSAL_ALLOWED_TRANSITIONS.get(from_state, frozenset())
+    if normalized_to_state not in allowed:
+        raise ValueError(f"invalid proposal lifecycle transition: {from_state} -> {normalized_to_state}")
+
+    changed_at_utc = _utc_now()
+    proposal["state"] = normalized_to_state
+    proposal["updated_at_utc"] = changed_at_utc
+
+    transitions_raw = proposal.get("lifecycle_transitions")
+    transitions = [dict(item) for item in transitions_raw if isinstance(item, Mapping)] if isinstance(transitions_raw, list) else []
+    transitions.append(
+        _new_proposal_transition(
+            from_state=from_state,
+            to_state=normalized_to_state,
+            action=action,
+            changed_at_utc=changed_at_utc,
+            actor_id=actor_id,
+            reason=reason,
+        )
+    )
+    proposal["lifecycle_transitions"] = transitions
+
+    if action in PROPOSAL_REVIEW_ACTION_TO_STATE:
+        decisions_raw = proposal.get("review_decisions")
+        decisions = [dict(item) for item in decisions_raw if isinstance(item, Mapping)] if isinstance(decisions_raw, list) else []
+        decision: dict[str, Any] = {
+            "decision": action,
+            "resulting_state": normalized_to_state,
+            "decided_at_utc": changed_at_utc,
+        }
+        if actor_id:
+            decision["reviewer_id"] = actor_id
+        if reason:
+            decision["comment"] = reason
+        decisions.append(decision)
+        proposal["review_decisions"] = decisions
+    elif action == "APPLY":
+        events_raw = proposal.get("apply_events")
+        events = [dict(item) for item in events_raw if isinstance(item, Mapping)] if isinstance(events_raw, list) else []
+        event: dict[str, Any] = {
+            "action": "APPLY",
+            "resulting_state": normalized_to_state,
+            "applied_at_utc": changed_at_utc,
+        }
+        if actor_id:
+            event["actor_id"] = actor_id
+        events.append(event)
+        proposal["apply_events"] = events
+
+
+def _resolve_proposal_targets(
+    proposals: list[dict[str, Any]],
+    *,
+    proposal_ids: set[str] | None,
+) -> tuple[dict[str, dict[str, Any]], list[str], list[str]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    for proposal in proposals:
+        proposal_id = _proposal_id_from_doc(proposal)
+        if proposal_id and proposal_id not in by_id:
+            by_id[proposal_id] = proposal
+
+    if proposal_ids is None:
+        target_ids = sorted(by_id)
+        missing: list[str] = []
+    else:
+        target_ids = sorted(proposal_ids)
+        missing = [proposal_id for proposal_id in target_ids if proposal_id not in by_id]
+    return by_id, target_ids, missing
+
+
+def query_local_proposals(
+    *,
+    local_store: Path,
+    state: str | None = None,
+    proposal_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    store_doc = _load_local_proposal_store(local_store)
+    proposals = store_doc["proposals"]
+
+    filter_ids = {str(item).strip() for item in (proposal_ids or []) if str(item).strip()}
+    by_id, target_ids, missing = _resolve_proposal_targets(
+        proposals,
+        proposal_ids=filter_ids if filter_ids else None,
+    )
+    normalized_state = _normalize_proposal_state(state, default="") if state else None
+
+    matched: list[dict[str, Any]] = []
+    for proposal_id in target_ids:
+        proposal = by_id.get(proposal_id)
+        if proposal is None:
+            continue
+        proposal_state = _normalize_proposal_state(proposal.get("state"))
+        if normalized_state and proposal_state != normalized_state:
+            continue
+        matched.append(dict(proposal))
+
+    return {
+        "schema_version": 1,
+        "kind": "proposal_query_report",
+        "generated_at_utc": _utc_now(),
+        "query": {
+            "state": normalized_state,
+            "proposal_ids": sorted(filter_ids),
+        },
+        "metrics": {
+            "scanned_total": len(proposals),
+            "matched_total": len(matched),
+            "missing_total": len(missing),
+            "state_counts": _proposal_state_counts(proposals),
+        },
+        "missing_proposal_ids": missing,
+        "proposals": matched,
+        "local_store": str(local_store),
+    }
+
+
+def review_local_proposals(
+    *,
+    local_store: Path,
+    action: str,
+    proposal_ids: list[str] | None = None,
+    reviewer_id: str | None = None,
+    rationale: str | None = None,
+) -> dict[str, Any]:
+    normalized_action = str(action).strip().upper()
+    target_state = PROPOSAL_REVIEW_ACTION_TO_STATE.get(normalized_action)
+    if target_state is None:
+        allowed = ", ".join(sorted(PROPOSAL_REVIEW_ACTION_TO_STATE))
+        raise ValueError(f"unsupported review action '{action}'; expected one of: {allowed}")
+
+    normalized_reviewer = str(reviewer_id).strip() if reviewer_id is not None else None
+    if normalized_reviewer == "":
+        normalized_reviewer = None
+
+    normalized_rationale = str(rationale).strip() if rationale is not None else None
+    if normalized_rationale == "":
+        normalized_rationale = None
+
+    store_doc = _load_local_proposal_store(local_store)
+    proposals = store_doc["proposals"]
+
+    filter_ids = {str(item).strip() for item in (proposal_ids or []) if str(item).strip()}
+    by_id, target_ids, missing = _resolve_proposal_targets(
+        proposals,
+        proposal_ids=filter_ids if filter_ids else None,
+    )
+
+    reviewed_ids: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for proposal_id in target_ids:
+        proposal = by_id.get(proposal_id)
+        if proposal is None:
+            continue
+        current_state = _normalize_proposal_state(proposal.get("state"))
+        if current_state != PROPOSAL_STATE_PROPOSED:
+            skipped.append(
+                {
+                    "proposal_id": proposal_id,
+                    "state": current_state,
+                    "reason": "state_not_reviewable",
+                }
+            )
+            continue
+        _set_proposal_state(
+            proposal,
+            to_state=target_state,
+            action=normalized_action,
+            actor_id=normalized_reviewer,
+            reason=normalized_rationale,
+        )
+        reviewed_ids.append(proposal_id)
+
+    store_doc["proposals"] = proposals
+    _write_local_proposal_store(local_store, store_doc)
+
+    return {
+        "schema_version": 1,
+        "kind": "proposal_review_report",
+        "generated_at_utc": _utc_now(),
+        "action": normalized_action,
+        "target_state": target_state,
+        "bulk": not filter_ids,
+        "query": {
+            "proposal_ids": sorted(filter_ids),
+        },
+        "metrics": {
+            "scanned_total": len(proposals),
+            "targeted_total": len(target_ids),
+            "reviewed_total": len(reviewed_ids),
+            "skipped_total": len(skipped),
+            "missing_total": len(missing),
+            "state_counts": _proposal_state_counts(proposals),
+        },
+        "reviewed_proposal_ids": reviewed_ids,
+        "skipped": skipped,
+        "missing_proposal_ids": missing,
+        "local_store": str(local_store),
+    }
+
+
+def apply_local_proposals(
+    *,
+    local_store: Path,
+    proposal_ids: list[str] | None = None,
+    actor_id: str | None = None,
+) -> dict[str, Any]:
+    normalized_actor = str(actor_id).strip() if actor_id is not None else None
+    if normalized_actor == "":
+        normalized_actor = None
+
+    store_doc = _load_local_proposal_store(local_store)
+    proposals = store_doc["proposals"]
+
+    filter_ids = {str(item).strip() for item in (proposal_ids or []) if str(item).strip()}
+    by_id, target_ids, missing = _resolve_proposal_targets(
+        proposals,
+        proposal_ids=filter_ids if filter_ids else None,
+    )
+
+    if filter_ids:
+        candidate_ids = target_ids
+    else:
+        candidate_ids = [
+            proposal_id
+            for proposal_id in target_ids
+            if _normalize_proposal_state(by_id[proposal_id].get("state")) == PROPOSAL_STATE_APPROVED
+        ]
+
+    if missing:
+        raise ValueError(f"unknown proposal_id(s): {', '.join(missing)}")
+
+    non_approved: list[str] = []
+    for proposal_id in candidate_ids:
+        current_state = _normalize_proposal_state(by_id[proposal_id].get("state"))
+        if current_state != PROPOSAL_STATE_APPROVED:
+            non_approved.append(f"{proposal_id}={current_state}")
+    if non_approved:
+        raise ValueError(
+            "only APPROVED proposals can enter apply workflow; received: "
+            + ", ".join(non_approved)
+        )
+
+    applied_ids: list[str] = []
+    for proposal_id in candidate_ids:
+        proposal = by_id[proposal_id]
+        _set_proposal_state(
+            proposal,
+            to_state=PROPOSAL_STATE_APPLIED,
+            action="APPLY",
+            actor_id=normalized_actor,
+        )
+        applied_ids.append(proposal_id)
+
+    store_doc["proposals"] = proposals
+    _write_local_proposal_store(local_store, store_doc)
+
+    return {
+        "schema_version": 1,
+        "kind": "proposal_apply_report",
+        "generated_at_utc": _utc_now(),
+        "bulk": not filter_ids,
+        "query": {
+            "proposal_ids": sorted(filter_ids),
+        },
+        "metrics": {
+            "scanned_total": len(proposals),
+            "targeted_total": len(candidate_ids),
+            "applied_total": len(applied_ids),
+            "state_counts": _proposal_state_counts(proposals),
+        },
+        "applied_proposal_ids": applied_ids,
+        "local_store": str(local_store),
+    }
 
 
 def _pullback_proposal_id(
@@ -967,6 +1388,7 @@ def _build_pullback_proposal(
     match_score: float,
 ) -> dict[str, Any]:
     receipt_id = f"receipt:pullback:{proposal_id.removeprefix('pullback:')}"
+    updated_at_utc = _utc_now()
     provenance_chain: list[dict[str, str]] = []
     source_receipt_id = source_candidate.receipt_id
     if source_receipt_id:
@@ -997,11 +1419,19 @@ def _build_pullback_proposal(
 
     proposal: dict[str, Any] = {
         "proposal_id": proposal_id,
-        "state": "PROPOSED",
+        "state": PROPOSAL_STATE_PROPOSED,
         "receipt_id": receipt_id,
-        "updated_at_utc": _utc_now(),
+        "updated_at_utc": updated_at_utc,
         "artifact": artifact_doc,
         "provenance_chain": provenance_chain,
+        "lifecycle_transitions": [
+            _new_proposal_transition(
+                from_state=None,
+                to_state=PROPOSAL_STATE_PROPOSED,
+                action="CREATE",
+                changed_at_utc=updated_at_utc,
+            )
+        ],
     }
     if local_program_id is not None:
         proposal["program_id"] = local_program_id
@@ -1121,11 +1551,8 @@ def pullback_cross_binary_reuse(
                 }
             )
 
-    store_doc["schema_version"] = int(store_doc.get("schema_version") or 1)
-    store_doc["kind"] = str(store_doc.get("kind") or "local_proposal_store")
     store_doc["proposals"] = existing_proposals
-    local_store.parent.mkdir(parents=True, exist_ok=True)
-    local_store.write_text(json.dumps(store_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_local_proposal_store(local_store, store_doc)
 
     return {
         "schema_version": 1,
@@ -3427,6 +3854,63 @@ def _pullback_reuse_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _proposal_query_command(args: argparse.Namespace) -> int:
+    report = query_local_proposals(
+        local_store=args.local_store,
+        state=args.state,
+        proposal_ids=args.proposal_id,
+    )
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+def _proposal_review_command(args: argparse.Namespace) -> int:
+    report = review_local_proposals(
+        local_store=args.local_store,
+        action=args.action,
+        proposal_ids=args.proposal_id,
+        reviewer_id=args.reviewer_id,
+        rationale=args.rationale,
+    )
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+def _proposal_apply_command(args: argparse.Namespace) -> int:
+    try:
+        report = apply_local_proposals(
+            local_store=args.local_store,
+            proposal_ids=args.proposal_id,
+            actor_id=args.actor_id,
+        )
+    except ValueError as exc:
+        error_report = {
+            "schema_version": 1,
+            "kind": "proposal_apply_error",
+            "error": str(exc),
+        }
+        print(json.dumps(error_report, indent=2, sort_keys=True))
+        return 1
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def _add_triage_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--corpus", type=Path, required=True, help="Path to corpus JSON")
     parser.add_argument(
@@ -3820,6 +4304,110 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional path to write pullback report JSON",
     )
     pullback_parser.set_defaults(func=_pullback_reuse_command)
+
+    proposal_query_parser = subparsers.add_parser(
+        "proposal-query",
+        help="Query persisted local proposal lifecycle state",
+    )
+    proposal_query_parser.add_argument(
+        "--local-store",
+        type=Path,
+        required=True,
+        help="Path to local proposal store JSON",
+    )
+    proposal_query_parser.add_argument(
+        "--state",
+        type=str,
+        default=None,
+        choices=PROPOSAL_ALLOWED_STATES,
+        help="Optional lifecycle state filter",
+    )
+    proposal_query_parser.add_argument(
+        "--proposal-id",
+        action="append",
+        default=None,
+        help="Proposal id filter. Repeatable.",
+    )
+    proposal_query_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write proposal query report JSON",
+    )
+    proposal_query_parser.set_defaults(func=_proposal_query_command)
+
+    proposal_review_parser = subparsers.add_parser(
+        "proposal-review",
+        help="Review proposal state transitions (approve/reject), including bulk reviews",
+    )
+    proposal_review_parser.add_argument(
+        "--local-store",
+        type=Path,
+        required=True,
+        help="Path to local proposal store JSON",
+    )
+    proposal_review_parser.add_argument(
+        "--action",
+        type=str,
+        required=True,
+        choices=sorted(action.lower() for action in PROPOSAL_REVIEW_ACTION_TO_STATE),
+        help="Review action to apply",
+    )
+    proposal_review_parser.add_argument(
+        "--proposal-id",
+        action="append",
+        default=None,
+        help="Proposal id to review. Repeatable. Omit for bulk review across all proposals.",
+    )
+    proposal_review_parser.add_argument(
+        "--reviewer-id",
+        type=str,
+        default=None,
+        help="Optional reviewer identifier recorded with lifecycle transition",
+    )
+    proposal_review_parser.add_argument(
+        "--rationale",
+        type=str,
+        default=None,
+        help="Optional rationale/comment recorded with review decision",
+    )
+    proposal_review_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write proposal review report JSON",
+    )
+    proposal_review_parser.set_defaults(func=_proposal_review_command)
+
+    proposal_apply_parser = subparsers.add_parser(
+        "proposal-apply",
+        help="Enter apply workflow for approved proposals only",
+    )
+    proposal_apply_parser.add_argument(
+        "--local-store",
+        type=Path,
+        required=True,
+        help="Path to local proposal store JSON",
+    )
+    proposal_apply_parser.add_argument(
+        "--proposal-id",
+        action="append",
+        default=None,
+        help="Proposal id to apply. Repeatable. Omit for bulk apply of all approved proposals.",
+    )
+    proposal_apply_parser.add_argument(
+        "--actor-id",
+        type=str,
+        default=None,
+        help="Optional actor id recorded with apply transition",
+    )
+    proposal_apply_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write proposal apply report JSON",
+    )
+    proposal_apply_parser.set_defaults(func=_proposal_apply_command)
 
     return parser
 
