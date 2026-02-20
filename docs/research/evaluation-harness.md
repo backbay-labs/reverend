@@ -780,6 +780,8 @@ name: Evaluation Pipeline
 on:
   push:
     branches: [main, develop]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: '0 2 * * *'  # Nightly at 2 AM
   workflow_dispatch:
@@ -792,28 +794,46 @@ on:
 
 jobs:
   smoke:
-    if: github.event_name == 'push'
-    runs-on: self-hosted
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: make -C eval smoke
+      - run: bash eval/run_smoke.sh
+      - run: |
+          python3 eval/scripts/check_regression.py \
+            --current eval/output/smoke/metrics.json \
+            --baseline eval/snapshots/baseline.json \
+            --output eval/output/smoke/regression.json
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: smoke-results
-          path: eval/output/
+          name: smoke-metrics-${{ github.sha }}
+          path: eval/output/smoke/
 
   nightly:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'nightly')
-    runs-on: [self-hosted, gpu]
+    runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
-      - run: make -C eval nightly
-      - run: make -C eval dashboard
+      - run: bash eval/run_smoke.sh
+      # Resolve + download previous nightly baseline artifact
+      # (e.g. via actions/github-script and actions/download-artifact)
+      - run: |
+          python3 eval/scripts/compare_runs.py \
+            --current eval/output/smoke/metrics.json \
+            --previous eval/output/nightly-baseline/metrics.json \
+            --output eval/output/smoke/nightly-comparison.json
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: nightly-results
+          name: nightly-smoke-metrics
+          path: eval/output/smoke/metrics.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-results-${{ github.run_id }}
           path: eval/output/
 
   release:
@@ -825,6 +845,9 @@ jobs:
       - run: make -C eval release
       - run: make -C eval dashboard
 ```
+
+`check_regression.py` and `compare_runs.py` return non-zero on metric regressions,
+so smoke and nightly regressions surface as blocking CI failures.
 
 ---
 
