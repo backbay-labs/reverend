@@ -1047,6 +1047,10 @@ def load_shared_corpus_reuse_candidates(backend_store_path: Path) -> list[Shared
         if not isinstance(value, Mapping):
             continue
 
+        state = str(value.get("state") or "").strip().upper()
+        if state and state != PROPOSAL_STATE_APPROVED:
+            continue
+
         proposal_id = str(value.get("proposal_id") or key).strip()
         if not proposal_id:
             continue
@@ -4139,6 +4143,12 @@ def pullback_cross_binary_reuse(
         raise ValueError("local index contains no functions to query")
 
     shared_candidates = load_shared_corpus_reuse_candidates(backend_store)
+    if program_id is not None:
+        shared_candidates = [
+            candidate
+            for candidate in shared_candidates
+            if candidate.program_id != program_id
+        ]
     candidate_records = [candidate.to_function_record() for candidate in shared_candidates]
     candidate_index = local_pipeline.build_index(candidate_records)
     candidate_adapter = BaselineSimilarityAdapter(pipeline=local_pipeline, index=candidate_index)

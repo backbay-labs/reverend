@@ -892,6 +892,140 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             )
             self.assertTrue(all(item["program_id"] == "program:local" for item in proposals))
 
+    def test_pullback_reuse_filters_non_approved_and_same_program_candidates(self) -> None:
+        records = [
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.local.parse_imports",
+                    "name": "parse_pe_imports",
+                    "text": "parse pe import table and resolve imported function names",
+                }
+            )
+        ]
+        index = self.pipeline.build_index(records)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            index_dir = tmp / "index"
+            backend_store = tmp / "shared_backend.json"
+            local_store = tmp / "local_store.json"
+            index.save(index_dir)
+
+            backend_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "shared_corpus_backend",
+                        "artifacts": {
+                            "remote-approved": {
+                                "proposal_id": "remote-approved",
+                                "state": "APPROVED",
+                                "receipt_id": "receipt:remote:approved",
+                                "program_id": "program:remote",
+                                "artifact": {
+                                    "function_name": "parse_pe_imports",
+                                    "function_text": "parse pe import table and resolve imported symbol names",
+                                    "reusable_artifacts": [
+                                        {
+                                            "kind": "NAME",
+                                            "target_scope": "FUNCTION",
+                                            "value": "resolve_import_thunks",
+                                        }
+                                    ],
+                                },
+                            },
+                            "remote-proposed": {
+                                "proposal_id": "remote-proposed",
+                                "state": "PROPOSED",
+                                "receipt_id": "receipt:remote:proposed",
+                                "program_id": "program:remote",
+                                "artifact": {
+                                    "function_name": "parse_pe_imports",
+                                    "function_text": "parse pe import table and resolve imported symbol names",
+                                    "reusable_artifacts": [
+                                        {
+                                            "kind": "NAME",
+                                            "target_scope": "FUNCTION",
+                                            "value": "should_not_import_proposed",
+                                        }
+                                    ],
+                                },
+                            },
+                            "remote-rejected": {
+                                "proposal_id": "remote-rejected",
+                                "state": "REJECTED",
+                                "receipt_id": "receipt:remote:rejected",
+                                "program_id": "program:remote",
+                                "artifact": {
+                                    "function_name": "parse_pe_imports",
+                                    "function_text": "parse pe import table and resolve imported symbol names",
+                                    "reusable_artifacts": [
+                                        {
+                                            "kind": "NAME",
+                                            "target_scope": "FUNCTION",
+                                            "value": "should_not_import_rejected",
+                                        }
+                                    ],
+                                },
+                            },
+                            "same-program-approved": {
+                                "proposal_id": "same-program-approved",
+                                "state": "APPROVED",
+                                "receipt_id": "receipt:same-program:approved",
+                                "program_id": "program:local",
+                                "artifact": {
+                                    "function_name": "parse_pe_imports",
+                                    "function_text": "parse pe import table and resolve imported symbol names",
+                                    "reusable_artifacts": [
+                                        {
+                                            "kind": "NAME",
+                                            "target_scope": "FUNCTION",
+                                            "value": "should_not_import_same_program",
+                                        }
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = MODULE.main(
+                    [
+                        "pullback-reuse",
+                        "--index-dir",
+                        str(index_dir),
+                        "--backend-store",
+                        str(backend_store),
+                        "--local-store",
+                        str(local_store),
+                        "--function-id",
+                        "fn.local.parse_imports",
+                        "--program-id",
+                        "program:local",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(report["kind"], "cross_binary_pullback_report")
+            self.assertEqual(report["metrics"]["candidate_count"], 1)
+            self.assertEqual(report["metrics"]["matches"], 1)
+            self.assertEqual(report["metrics"]["inserted_count"], 1)
+            self.assertEqual(len(report["matches"]), 1)
+            self.assertEqual(report["matches"][0]["source_proposal_id"], "remote-approved")
+
+            local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+            proposals = local_doc["proposals"]
+            self.assertEqual(len(proposals), 1)
+            self.assertEqual(proposals[0]["artifact"]["source_proposal_id"], "remote-approved")
+            self.assertEqual(proposals[0]["state"], "PROPOSED")
+
     def test_pullback_proposals_work_with_accepted_rejected_sync_flow(self) -> None:
         records = [
             FunctionRecord.from_json(
