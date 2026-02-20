@@ -637,6 +637,516 @@ def generate_type_suggestion_report(
 
 
 @dataclass(frozen=True)
+class ReusableArtifact:
+    """Reusable cross-binary artifact pulled from shared corpus entries."""
+
+    kind: str
+    target_scope: str
+    value: str
+    confidence: float | None = None
+    target_id: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        doc: dict[str, Any] = {
+            "kind": self.kind,
+            "target_scope": self.target_scope,
+            "value": self.value,
+        }
+        if self.confidence is not None:
+            doc["confidence"] = round(self.confidence, 6)
+        if self.target_id is not None:
+            doc["target_id"] = self.target_id
+        return doc
+
+
+@dataclass(frozen=True)
+class SharedCorpusReuseCandidate:
+    """Shared-corpus proposal candidate used for cross-binary pullback retrieval."""
+
+    proposal_id: str
+    receipt_id: str
+    function_id: str
+    name: str
+    text: str
+    program_id: str | None
+    reusable_artifacts: tuple[ReusableArtifact, ...]
+
+    def to_function_record(self) -> FunctionRecord:
+        provenance: dict[str, str] = {
+            "source": "shared_corpus_backend",
+            "record_id": self.proposal_id,
+            "receipt_id": self.receipt_id,
+        }
+        if self.program_id is not None:
+            provenance["program_id"] = self.program_id
+        return FunctionRecord(
+            function_id=self.function_id,
+            name=self.name,
+            text=self.text,
+            provenance=tuple(sorted(provenance.items(), key=lambda item: item[0])),
+            evidence_refs=(
+                EvidenceRef.from_json(
+                    {
+                        "kind": "XREF",
+                        "description": f"shared corpus receipt reference {self.receipt_id}",
+                        "uri": f"shared-corpus://proposal/{self.proposal_id}",
+                        "confidence": 1.0,
+                    },
+                    function_id=self.function_id,
+                ),
+            ),
+        )
+
+
+def _normalize_reuse_kind(raw_kind: Any) -> str:
+    normalized = str(raw_kind or "").strip().upper()
+    if normalized in {"NAME", "SYMBOL_NAME", "FUNCTION_NAME"}:
+        return "NAME"
+    if normalized in {"TYPE", "TYPE_ASSERTION", "TYPE_HINT"}:
+        return "TYPE"
+    if normalized in {"ANNOTATION", "COMMENT", "TAG"}:
+        return "ANNOTATION"
+    return ""
+
+
+def _normalize_reuse_scope(raw_scope: Any, *, default: str) -> str:
+    normalized = str(raw_scope or "").strip().upper()
+    if not normalized:
+        normalized = default
+    return normalized
+
+
+def _extract_reusable_artifacts(artifact: Mapping[str, Any]) -> tuple[ReusableArtifact, ...]:
+    reusable: list[ReusableArtifact] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    explicit_reusable_loaded = False
+
+    def add(
+        *,
+        kind: Any,
+        value: Any,
+        target_scope: Any,
+        confidence: Any = None,
+        target_id: Any = None,
+    ) -> None:
+        normalized_kind = _normalize_reuse_kind(kind)
+        normalized_value = str(value or "").strip()
+        normalized_target_id = str(target_id).strip() if target_id is not None else None
+        if normalized_target_id == "":
+            normalized_target_id = None
+        if not normalized_kind or not normalized_value:
+            return
+
+        scope_default = "FUNCTION" if normalized_kind in {"NAME", "ANNOTATION"} else "VARIABLE"
+        normalized_scope = _normalize_reuse_scope(target_scope, default=scope_default)
+        key = (
+            normalized_kind,
+            normalized_scope,
+            normalized_value,
+            normalized_target_id or "",
+        )
+        if key in seen:
+            return
+        seen.add(key)
+
+        normalized_confidence = (
+            _coerce_confidence(confidence, default=0.0) if confidence is not None else None
+        )
+        reusable.append(
+            ReusableArtifact(
+                kind=normalized_kind,
+                target_scope=normalized_scope,
+                value=normalized_value,
+                confidence=normalized_confidence,
+                target_id=normalized_target_id,
+            )
+        )
+
+    reusable_raw = artifact.get("reusable_artifacts")
+    if isinstance(reusable_raw, list):
+        for item in reusable_raw:
+            if not isinstance(item, Mapping):
+                continue
+            explicit_reusable_loaded = True
+            add(
+                kind=item.get("kind"),
+                value=(
+                    item.get("value")
+                    or item.get("content")
+                    or item.get("name")
+                    or item.get("type")
+                    or item.get("text")
+                ),
+                target_scope=item.get("target_scope") or item.get("scope"),
+                confidence=item.get("confidence"),
+                target_id=item.get("target_id"),
+            )
+
+    if explicit_reusable_loaded:
+        return tuple(reusable)
+
+    add(
+        kind="NAME",
+        value=artifact.get("function_name") or artifact.get("name"),
+        target_scope="FUNCTION",
+        confidence=artifact.get("name_confidence"),
+    )
+
+    types_raw = artifact.get("types") or artifact.get("type_assertions")
+    if isinstance(types_raw, list):
+        for item in types_raw:
+            if isinstance(item, Mapping):
+                add(
+                    kind="TYPE",
+                    value=item.get("value") or item.get("asserted_type") or item.get("type"),
+                    target_scope=item.get("target_scope") or item.get("scope") or "VARIABLE",
+                    confidence=item.get("confidence"),
+                    target_id=item.get("target_id"),
+                )
+            else:
+                add(kind="TYPE", value=item, target_scope="VARIABLE")
+
+    annotations_raw = artifact.get("annotations") or artifact.get("comments")
+    if isinstance(annotations_raw, list):
+        for item in annotations_raw:
+            if isinstance(item, Mapping):
+                add(
+                    kind="ANNOTATION",
+                    value=item.get("value") or item.get("text") or item.get("comment"),
+                    target_scope=item.get("target_scope") or item.get("scope") or "FUNCTION",
+                    confidence=item.get("confidence"),
+                    target_id=item.get("target_id"),
+                )
+            else:
+                add(kind="ANNOTATION", value=item, target_scope="FUNCTION")
+
+    add(
+        kind="ANNOTATION",
+        value=artifact.get("annotation") or artifact.get("comment"),
+        target_scope="FUNCTION",
+    )
+    return tuple(reusable)
+
+
+def _build_candidate_text(
+    *,
+    proposal_id: str,
+    artifact: Mapping[str, Any],
+    reusable_artifacts: tuple[ReusableArtifact, ...],
+) -> str:
+    parts: list[str] = [
+        str(artifact.get("function_name") or ""),
+        str(artifact.get("name") or ""),
+        str(artifact.get("function_text") or ""),
+        str(artifact.get("summary") or ""),
+        str(artifact.get("description") or ""),
+    ]
+    parts.extend(item.value for item in reusable_artifacts)
+    normalized = [part.strip() for part in parts if part.strip()]
+    if not normalized:
+        normalized = [proposal_id]
+    return " ".join(normalized)
+
+
+def load_shared_corpus_reuse_candidates(backend_store_path: Path) -> list[SharedCorpusReuseCandidate]:
+    doc = json.loads(backend_store_path.read_text(encoding="utf-8"))
+    if not isinstance(doc, Mapping):
+        raise ValueError("backend store must be a JSON object with an 'artifacts' map")
+
+    artifacts_raw = doc.get("artifacts")
+    if not isinstance(artifacts_raw, Mapping):
+        raise ValueError("backend store missing required 'artifacts' object")
+
+    candidates: list[SharedCorpusReuseCandidate] = []
+    for key, value in artifacts_raw.items():
+        if not isinstance(value, Mapping):
+            continue
+
+        proposal_id = str(value.get("proposal_id") or key).strip()
+        if not proposal_id:
+            continue
+        receipt_id = str(value.get("receipt_id") or f"receipt:{proposal_id}").strip()
+        if not receipt_id:
+            receipt_id = f"receipt:{proposal_id}"
+
+        program_id_raw = value.get("program_id")
+        program_id = str(program_id_raw).strip() if program_id_raw is not None else None
+        if program_id == "":
+            program_id = None
+
+        artifact_raw = value.get("artifact")
+        artifact = artifact_raw if isinstance(artifact_raw, Mapping) else {}
+        reusable_artifacts = _extract_reusable_artifacts(artifact)
+        if not reusable_artifacts:
+            continue
+
+        function_seed = f"shared-corpus:{proposal_id}:{receipt_id}"
+        digest = hashlib.sha256(function_seed.encode("utf-8")).hexdigest()[:16]
+        function_id = f"fn.shared.{digest}"
+        name = str(artifact.get("function_name") or artifact.get("name") or proposal_id).strip() or proposal_id
+        text = _build_candidate_text(
+            proposal_id=proposal_id,
+            artifact=artifact,
+            reusable_artifacts=reusable_artifacts,
+        )
+        candidates.append(
+            SharedCorpusReuseCandidate(
+                proposal_id=proposal_id,
+                receipt_id=receipt_id,
+                function_id=function_id,
+                name=name,
+                text=text,
+                program_id=program_id,
+                reusable_artifacts=reusable_artifacts,
+            )
+        )
+
+    candidates.sort(key=lambda item: item.proposal_id)
+    return candidates
+
+
+def _load_local_proposal_store(local_store_path: Path) -> dict[str, Any]:
+    if not local_store_path.exists():
+        return {
+            "schema_version": 1,
+            "kind": "local_proposal_store",
+            "proposals": [],
+        }
+
+    doc = json.loads(local_store_path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict):
+        raise ValueError("local store must be a JSON object with a 'proposals' array")
+    proposals = doc.get("proposals")
+    if not isinstance(proposals, list):
+        raise ValueError("local store missing required 'proposals' array")
+    normalized = [dict(item) for item in proposals if isinstance(item, Mapping)]
+    resolved = dict(doc)
+    resolved["proposals"] = normalized
+    return resolved
+
+
+def _pullback_proposal_id(
+    *,
+    local_function_id: str,
+    source_proposal_id: str,
+    reusable_artifact: ReusableArtifact,
+) -> str:
+    seed = "|".join(
+        [
+            local_function_id,
+            source_proposal_id,
+            reusable_artifact.kind,
+            reusable_artifact.target_scope,
+            reusable_artifact.target_id or "",
+            reusable_artifact.value,
+        ]
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:20]
+    return f"pullback:{digest}"
+
+
+def _build_pullback_proposal(
+    *,
+    proposal_id: str,
+    local_program_id: str | None,
+    local_function: FunctionRecord,
+    source_candidate: SharedCorpusReuseCandidate,
+    reusable_artifact: ReusableArtifact,
+    match_score: float,
+) -> dict[str, Any]:
+    receipt_id = f"receipt:pullback:{proposal_id.removeprefix('pullback:')}"
+    provenance_chain: list[dict[str, str]] = []
+    source_receipt_id = source_candidate.receipt_id
+    if source_receipt_id:
+        provenance_chain.append({"receipt_id": source_receipt_id})
+    receipt_link: dict[str, str] = {"receipt_id": receipt_id}
+    if source_receipt_id:
+        receipt_link["previous_receipt_id"] = source_receipt_id
+    provenance_chain.append(receipt_link)
+
+    artifact_doc: dict[str, Any] = {
+        "kind": "cross_binary_reuse_proposal",
+        "proposal_origin": "cross_binary_pullback",
+        "target_function_id": local_function.function_id,
+        "target_function_name": local_function.name,
+        "reuse_kind": reusable_artifact.kind,
+        "target_scope": reusable_artifact.target_scope,
+        "suggested_value": reusable_artifact.value,
+        "source_proposal_id": source_candidate.proposal_id,
+        "source_receipt_id": source_candidate.receipt_id,
+        "source_program_id": source_candidate.program_id,
+        "match_score": round(match_score, 6),
+        "evidence_refs": [ref.to_json() for ref in local_function.evidence_refs],
+    }
+    if reusable_artifact.confidence is not None:
+        artifact_doc["reuse_confidence"] = round(reusable_artifact.confidence, 6)
+    if reusable_artifact.target_id is not None:
+        artifact_doc["target_id"] = reusable_artifact.target_id
+
+    proposal: dict[str, Any] = {
+        "proposal_id": proposal_id,
+        "state": "PROPOSED",
+        "receipt_id": receipt_id,
+        "updated_at_utc": _utc_now(),
+        "artifact": artifact_doc,
+        "provenance_chain": provenance_chain,
+    }
+    if local_program_id is not None:
+        proposal["program_id"] = local_program_id
+    return proposal
+
+
+def pullback_cross_binary_reuse(
+    *,
+    index_dir: Path,
+    backend_store: Path,
+    local_store: Path,
+    function_ids: list[str] | None = None,
+    top_k: int = 3,
+    min_score: float = 0.0,
+    program_id: str | None = None,
+    disable_reranker: bool = False,
+    rerank_candidate_multiplier: int = 4,
+) -> dict[str, Any]:
+    if top_k <= 0:
+        raise ValueError("top_k must be > 0")
+    if rerank_candidate_multiplier <= 0:
+        raise ValueError("rerank_candidate_multiplier must be > 0")
+
+    local_index = EmbeddingIndex.load(index_dir)
+    local_pipeline = LocalEmbeddingPipeline(vector_dimension=local_index.vector_dimension)
+
+    selected_function_ids = [item.strip() for item in (function_ids or []) if item and item.strip()]
+    if not selected_function_ids:
+        selected_function_ids = list(local_index.function_ids())
+    if not selected_function_ids:
+        raise ValueError("local index contains no functions to query")
+
+    shared_candidates = load_shared_corpus_reuse_candidates(backend_store)
+    candidate_records = [candidate.to_function_record() for candidate in shared_candidates]
+    candidate_index = local_pipeline.build_index(candidate_records)
+    candidate_adapter = BaselineSimilarityAdapter(pipeline=local_pipeline, index=candidate_index)
+    reranker = None if disable_reranker else EvidenceWeightedReranker()
+    candidate_by_function_id = {candidate.function_id: candidate for candidate in shared_candidates}
+
+    store_doc = _load_local_proposal_store(local_store)
+    existing_proposals = store_doc["proposals"]
+    existing_ids = {
+        str(item.get("proposal_id") or item.get("id") or "").strip()
+        for item in existing_proposals
+        if str(item.get("proposal_id") or item.get("id") or "").strip()
+    }
+
+    inserted_count = 0
+    already_present_count = 0
+    total_proposals_generated = 0
+    match_count = 0
+    matches: list[dict[str, Any]] = []
+
+    for local_function_id in selected_function_ids:
+        local_record = local_index.get_record(local_function_id)
+        if local_record is None:
+            raise ValueError(f"unknown local function id: {local_function_id}")
+
+        query_text = f"{local_record.name} {local_record.text}".strip()
+        candidate_k = top_k
+        if reranker is not None:
+            candidate_k = max(top_k, top_k * rerank_candidate_multiplier)
+            candidate_k = min(candidate_k, max(1, candidate_index.stats.corpus_size))
+
+        hits = candidate_adapter.top_k(query_text, top_k=candidate_k)
+        if reranker is not None:
+            hits = reranker.rerank(
+                query_text=query_text,
+                hits=hits,
+                index=candidate_index,
+                top_k=top_k,
+            )
+        else:
+            hits = hits[: min(top_k, len(hits))]
+
+        for hit in hits:
+            if hit.score < min_score:
+                continue
+            source_candidate = candidate_by_function_id.get(hit.function_id)
+            if source_candidate is None:
+                continue
+
+            generated_ids: list[str] = []
+            for reusable_artifact in source_candidate.reusable_artifacts:
+                proposal_id = _pullback_proposal_id(
+                    local_function_id=local_record.function_id,
+                    source_proposal_id=source_candidate.proposal_id,
+                    reusable_artifact=reusable_artifact,
+                )
+                total_proposals_generated += 1
+                generated_ids.append(proposal_id)
+                if proposal_id in existing_ids:
+                    already_present_count += 1
+                    continue
+                proposal = _build_pullback_proposal(
+                    proposal_id=proposal_id,
+                    local_program_id=program_id,
+                    local_function=local_record,
+                    source_candidate=source_candidate,
+                    reusable_artifact=reusable_artifact,
+                    match_score=hit.score,
+                )
+                existing_proposals.append(proposal)
+                existing_ids.add(proposal_id)
+                inserted_count += 1
+
+            match_count += 1
+            matches.append(
+                {
+                    "local_function_id": local_record.function_id,
+                    "source_proposal_id": source_candidate.proposal_id,
+                    "source_receipt_id": source_candidate.receipt_id,
+                    "source_program_id": source_candidate.program_id,
+                    "score": round(hit.score, 6),
+                    "reused_artifact_count": len(source_candidate.reusable_artifacts),
+                    "proposal_ids": generated_ids,
+                }
+            )
+
+    store_doc["schema_version"] = int(store_doc.get("schema_version") or 1)
+    store_doc["kind"] = str(store_doc.get("kind") or "local_proposal_store")
+    store_doc["proposals"] = existing_proposals
+    local_store.parent.mkdir(parents=True, exist_ok=True)
+    local_store.write_text(json.dumps(store_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    return {
+        "schema_version": 1,
+        "kind": "cross_binary_pullback_report",
+        "generated_at_utc": _utc_now(),
+        "query": {
+            "function_ids": selected_function_ids,
+            "top_k": top_k,
+            "min_score": round(min_score, 6),
+            "reranker_enabled": not disable_reranker,
+            "rerank_candidate_multiplier": rerank_candidate_multiplier,
+        },
+        "metrics": {
+            "local_function_count": len(selected_function_ids),
+            "candidate_count": len(shared_candidates),
+            "matches": match_count,
+            "proposals_generated": total_proposals_generated,
+            "inserted_count": inserted_count,
+            "already_present_count": already_present_count,
+        },
+        "matches": sorted(
+            matches,
+            key=lambda item: (
+                str(item.get("local_function_id") or ""),
+                -float(item.get("score") or 0.0),
+                str(item.get("source_proposal_id") or ""),
+            ),
+        ),
+        "local_store": str(local_store),
+    }
+
+
+@dataclass(frozen=True)
 class TriageFunctionFeatures:
     """Deterministic feature vector for mission-stage triage scoring."""
 
@@ -1181,6 +1691,9 @@ class EmbeddingIndex:
     @property
     def stats(self) -> IndexBuildStats:
         return self._stats
+
+    def function_ids(self) -> tuple[str, ...]:
+        return tuple(self._function_ids)
 
     def get_record(self, function_id: str) -> FunctionRecord | None:
         return self._record_by_id.get(function_id)
@@ -2122,6 +2635,31 @@ def _triage_mission_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pullback_reuse_command(args: argparse.Namespace) -> int:
+    normalized_program_id = str(args.program_id).strip() if args.program_id is not None else None
+    if normalized_program_id == "":
+        normalized_program_id = None
+    report = pullback_cross_binary_reuse(
+        index_dir=args.index_dir,
+        backend_store=args.backend_store,
+        local_store=args.local_store,
+        function_ids=args.function_id,
+        top_k=args.top_k,
+        min_score=args.min_score,
+        program_id=normalized_program_id,
+        disable_reranker=args.disable_reranker,
+        rerank_candidate_multiplier=max(1, args.rerank_candidate_multiplier),
+    )
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ml301] wrote {args.output}")
+    else:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ML-301/ML-327 deterministic ML utility commands")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -2379,6 +2917,66 @@ def _parser() -> argparse.ArgumentParser:
         help="Maximum hotspot rows to include in summary artifact",
     )
     triage_parser.set_defaults(func=_triage_mission_command)
+
+    pullback_parser = subparsers.add_parser(
+        "pullback-reuse",
+        help="Pull cross-binary reusable artifacts into local proposal store",
+    )
+    pullback_parser.add_argument("--index-dir", type=Path, required=True, help="Directory containing local index")
+    pullback_parser.add_argument(
+        "--backend-store",
+        type=Path,
+        required=True,
+        help="Path to shared corpus backend JSON produced by corpus sync worker",
+    )
+    pullback_parser.add_argument(
+        "--local-store",
+        type=Path,
+        required=True,
+        help="Path to local proposal store JSON to insert pulled proposals",
+    )
+    pullback_parser.add_argument(
+        "--function-id",
+        action="append",
+        default=None,
+        help="Local function id to query for cross-binary matches. Repeatable. Defaults to all local functions.",
+    )
+    pullback_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=3,
+        help="Top-k cross-binary matches to consider per local function",
+    )
+    pullback_parser.add_argument(
+        "--min-score",
+        type=float,
+        default=0.0,
+        help="Minimum similarity score required before proposals are generated",
+    )
+    pullback_parser.add_argument(
+        "--program-id",
+        type=str,
+        default=None,
+        help="Optional local program id attached to generated proposals",
+    )
+    pullback_parser.add_argument(
+        "--disable-reranker",
+        action="store_true",
+        help="Skip evidence-weighted reranking and use baseline ordering only",
+    )
+    pullback_parser.add_argument(
+        "--rerank-candidate-multiplier",
+        type=int,
+        default=4,
+        help="When reranker is enabled, retrieve top_k*multiplier candidates before reranking",
+    )
+    pullback_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write pullback report JSON",
+    )
+    pullback_parser.set_defaults(func=_pullback_reuse_command)
 
     return parser
 
