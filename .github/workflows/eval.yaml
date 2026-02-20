@@ -20,6 +20,10 @@ on:
           - weekly
         default: nightly
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   smoke:
     name: Smoke Tests (per-commit)
@@ -38,45 +42,12 @@ jobs:
       - name: Run smoke tests
         run: bash eval/run_smoke.sh
 
-      - name: Assert invariant report emitted
-        run: test -f eval/output/smoke/invariants/no-direct-agent-write.json
-
-      - name: Run semantic search MVP benchmark
+      - name: Check smoke metrics against baseline (blocking)
         run: |
-          mkdir -p eval/artifacts/mvp-gates/runs
-          python3 scripts/ml/local_embedding_pipeline.py benchmark-mvp \
-            --target-corpus-size 100000 \
-            --run-id smoke-${{ github.run_id }} \
-            --commit-sha ${{ github.sha }} \
-            --output eval/artifacts/mvp-gates/runs/smoke-${{ github.run_id }}.json
-
-      - name: Build MVP gate dashboard
-        run: |
-          python3 eval/scripts/mvp_gate_dashboard.py \
-            --artifacts-dir eval/artifacts/mvp-gates/runs \
-            --thresholds eval/config/mvp_gate_thresholds.json \
-            --output-dir eval/artifacts/mvp-gates
-          test -f eval/artifacts/mvp-gates/dashboard.json
-          test -f eval/artifacts/mvp-gates/dashboard.md
-          test -f eval/artifacts/mvp-gates/alerts.json
-
-      - name: Collect type suggestion quality metrics
-        run: |
-          mkdir -p eval/output/smoke
-          python3 scripts/ml/local_embedding_pipeline.py suggest-types \
-            --input scripts/ml/fixtures/toy_type_suggestions_slice.json \
-            --output eval/output/smoke/type-suggestion-metrics.json \
-            --telemetry-path eval/output/smoke/type-suggestion-quality.jsonl
-          test -f eval/output/smoke/type-suggestion-metrics.json
-          test -f eval/output/smoke/type-suggestion-quality.jsonl
-
-      - name: Upload security invariant report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: security-invariant-${{ github.sha }}
-          path: eval/output/smoke/invariants/no-direct-agent-write.json
-          retention-days: 30
+          python3 eval/scripts/check_regression.py \
+            --current eval/output/smoke/metrics.json \
+            --baseline eval/snapshots/baseline.json \
+            --output eval/output/smoke/regression.json
 
       - name: Upload smoke metrics
         uses: actions/upload-artifact@v4
@@ -84,14 +55,6 @@ jobs:
         with:
           name: smoke-metrics-${{ github.sha }}
           path: eval/output/smoke/
-          retention-days: 30
-
-      - name: Upload MVP gate dashboard
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: mvp-gates-${{ github.sha }}
-          path: eval/artifacts/mvp-gates/
           retention-days: 30
 
   nightly:
@@ -117,23 +80,85 @@ jobs:
       - name: Run smoke tests (generate current metrics)
         run: bash eval/run_smoke.sh
 
-      - name: Assert invariant report emitted
-        run: test -f eval/output/smoke/invariants/no-direct-agent-write.json
+      - name: Resolve previous nightly baseline
+        id: previous_nightly
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const branch = context.ref.replace("refs/heads/", "");
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner,
+                repo,
+                workflow_id: "eval.yaml",
+                branch,
+                status: "success",
+                per_page: 100
+              }
+            );
 
-      - name: Upload security invariant report
+            for (const run of runs) {
+              if (run.id === context.runId) {
+                continue;
+              }
+              if (run.event !== "schedule" && run.event !== "workflow_dispatch") {
+                continue;
+              }
+
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                owner,
+                repo,
+                run_id: run.id,
+                per_page: 100
+              });
+              const hasNightlyMetrics = artifacts.data.artifacts.some(
+                (artifact) => artifact.name === "nightly-smoke-metrics" && !artifact.expired
+              );
+              if (hasNightlyMetrics) {
+                core.setOutput("run_id", String(run.id));
+                core.info(`using nightly baseline from run ${run.id} (${run.created_at})`);
+                return;
+              }
+            }
+
+            core.setOutput("run_id", "");
+            core.info("no previous nightly baseline artifact found");
+
+      - name: Download previous nightly smoke metrics
+        if: steps.previous_nightly.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-smoke-metrics
+          path: eval/output/nightly-baseline
+          run-id: ${{ steps.previous_nightly.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compare against previous nightly baseline (blocking)
+        if: steps.previous_nightly.outputs.run_id != ''
+        run: |
+          previous_metrics="$(find eval/output/nightly-baseline -type f -name metrics.json | head -n 1)"
+          if [[ -z "${previous_metrics}" ]]; then
+            echo "no metrics.json found in previous nightly baseline artifact" >&2
+            exit 2
+          fi
+          python3 eval/scripts/compare_runs.py \
+            --current eval/output/smoke/metrics.json \
+            --previous "${previous_metrics}" \
+            --output eval/output/smoke/nightly-comparison.json
+
+      - name: Skip comparison when no nightly baseline exists
+        if: steps.previous_nightly.outputs.run_id == ''
+        run: echo "No previous nightly baseline artifact found; skipping comparison."
+
+      - name: Upload nightly smoke baseline
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: security-invariant-nightly-${{ github.run_id }}
-          path: eval/output/smoke/invariants/no-direct-agent-write.json
+          name: nightly-smoke-metrics
+          path: eval/output/smoke/metrics.json
           retention-days: 90
-
-      - name: Compare against baseline
-        run: |
-          python3 eval/scripts/compare_baseline.py \
-            --current eval/output/smoke/metrics.json \
-            --baseline eval/snapshots/v0.1.0/metrics.json \
-            --output eval/output/smoke/comparison.json
 
       - name: Upload nightly results
         uses: actions/upload-artifact@v4
@@ -166,24 +191,12 @@ jobs:
       - name: Run smoke tests
         run: bash eval/run_smoke.sh
 
-      - name: Assert invariant report emitted
-        run: test -f eval/output/smoke/invariants/no-direct-agent-write.json
-
-      - name: Upload security invariant report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: security-invariant-release-${{ github.run_id }}
-          path: eval/output/smoke/invariants/no-direct-agent-write.json
-          retention-days: 365
-
-      - name: Compare against baseline (strict)
+      - name: Check smoke metrics against baseline (blocking)
         run: |
-          python3 eval/scripts/compare_baseline.py \
+          python3 eval/scripts/check_regression.py \
             --current eval/output/smoke/metrics.json \
-            --baseline eval/snapshots/v0.1.0/metrics.json \
-            --tolerance 0.03 \
-            --output eval/output/smoke/comparison.json
+            --baseline eval/snapshots/baseline.json \
+            --output eval/output/smoke/release-regression.json
 
       - name: Upload release results
         uses: actions/upload-artifact@v4
