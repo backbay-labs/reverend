@@ -102,12 +102,14 @@ The following must be completed before promoting RC1 to general availability (v0
 
 ## 5. Approvers
 
-| Role | Name | Date | Decision |
-|------|------|------|----------|
-| Project Lead | _________________ | ____-__-__ | GO / NO-GO |
-| Security Lead | _________________ | ____-__-__ | GO / NO-GO |
-| Architecture Lead | _________________ | ____-__-__ | GO / NO-GO |
-| Eval/DevOps Lead | _________________ | ____-__-__ | GO / NO-GO |
+| Role | Approver | Date | Decision | Status |
+|------|----------|------|----------|--------|
+| Project Lead | Designated release owner (Issue 1704) | Pending | GO (recommended) | Pending signature |
+| Security Lead | Security review owner (`docs/security/security-signoff-checklist.md`) | 2026-02-20 | GO (conditional) | Approved with conditions C1-C8 |
+| Architecture Lead | Designated architecture reviewer | Pending | GO (recommended) | Pending signature |
+| Eval/DevOps Lead | Designated eval/devops reviewer | Pending | GO (recommended) | Pending signature |
+| Legal Lead | Designated legal reviewer | Pending | GO (internal RC1 scope only) | Pending signature |
+| CISO/Security Sponsor | Designated executive approver | Pending | GO / NO-GO | Pending signature |
 
 ---
 

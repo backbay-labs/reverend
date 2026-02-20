@@ -67,6 +67,8 @@ Ship one vertical slice:
 - [x] RC packaging instructions + artifact/checksum command: `docs/CHANGELOG-rc1.md`
 - [x] Operator and reviewer runbook: `docs/operator-reviewer-runbook.md`
 - [x] Explicit known limitations catalog: `docs/known-limitations.md`
+- [x] MVP exit-gate report: `docs/exit-gate-report.md`
+- [x] Final go/no-go decision artifact: `docs/go-no-go-decision.md`
 
 ## 7. Backlog Items (Ticket Seeds)
 
