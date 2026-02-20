@@ -73,6 +73,8 @@ The lifecycle distinguishes these by **source metadata** attached to every type 
 | `Propagated` -> `Deprecated` | Superseding type accepted; staleness timer expires; analyst marks deprecated | Either |
 | Any -> `Rejected` | Conflict detected with higher-priority source; manual rejection | Either |
 
+Lifecycle transitions are validated server-side against an allowlist (`from_state`, `to_state`) before persistence. Invalid transitions are rejected at write time, and valid transitions must reference the receipt that performed the mutation.
+
 ---
 
 ## 2. Confidence Model
@@ -857,6 +859,9 @@ The type lifecycle metadata is stored alongside the program database using Ghidr
 ```
 TypeAssertion:
   id: UniversalID
+  target: TargetRef
+    target_type: FUNCTION | DATA_TYPE | SYMBOL | VARIABLE | PARAMETER | RETURN_TYPE | STRUCT_FIELD
+    target_id: UUID | UniversalID
   target_address: Address
   target_scope: VARIABLE | PARAMETER | RETURN_TYPE | GLOBAL | STRUCT_FIELD
   data_type_id: long (DTM internal ID)
@@ -875,6 +880,19 @@ TypeAssertion:
   last_validated: timestamp
   type_pr_id: string (links to the batch this belongs to, if any)
   previous_assertion_id: UniversalID (for rollback chain)
+  created_receipt_id: UUID
+  last_receipt_id: UUID
+  evidence_ids: list<UUID> (references evidence rows)
+  transition_history: list<TypeAssertionTransition>
+
+TypeAssertionTransition:
+  id: UUID
+  assertion_id: UniversalID
+  from_state: INFERRED | PROPOSED | UNDER_REVIEW | ACCEPTED | PROPAGATED | DEPRECATED
+  to_state: PROPOSED | UNDER_REVIEW | ACCEPTED | PROPAGATED | DEPRECATED | REJECTED
+  receipt_id: UUID
+  changed_at: timestamp
+  reason: string (nullable)
 
 TypePR:
   id: string

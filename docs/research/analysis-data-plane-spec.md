@@ -10,7 +10,7 @@ Verification note: sizing estimates and benchmark numbers in this document are d
 
 ### 1.1 Entity Types
 
-The data plane models 18 entity types organized into four layers: **program structure**, **dynamic analysis**, **annotation/provenance**, and **embeddings/search**.
+The data plane models 20 core entity types organized into four layers: **program structure**, **dynamic analysis**, **annotation/provenance**, and **embeddings/search**.
 
 #### Program Structure Layer
 
@@ -42,6 +42,8 @@ The data plane models 18 entity types organized into four layers: **program stru
 | **Annotation** | A human or machine-generated annotation (comment, type assertion, rename) | `annotation_id` (UUID) | ~5M |
 | **Receipt** | An auditable record of a state change | `receipt_id` (UUID) | ~10M |
 | **Evidence** | A link from a receipt to supporting data | `evidence_id` (UUID) | ~30M |
+| **TypeAssertion** | Lifecycle-aware materialization of `annotation_type='type_assertion'` | `assertion_id` (UUID) | ~3M |
+| **TypeAssertionTransition** | Server-validated state transition history for type assertions | `transition_id` (UUID) | ~15M |
 
 #### Embedding and Search Layer
 
@@ -77,6 +79,10 @@ Annotation -[TARGETS]-> Function|BasicBlock|Instruction|DataType|Symbol  (N:1)
 Annotation -[CREATED_BY]-> Receipt      (N:1)
 Receipt -[CITES]-> Evidence             (1:N)
 Evidence -[SOURCED_FROM]-> Xref|MemEvent|RegEvent|PcodeOp|Embedding  (N:1)
+Annotation -[SPECIALIZES]-> TypeAssertion (1:0..1 when annotation_type='type_assertion')
+TypeAssertion -[LATEST_MUTATION]-> Receipt (N:1)
+TypeAssertion -[SUPPORTED_BY]-> Evidence (N:M, via type_assertion_evidence_link)
+TypeAssertion -[STATE_TRANSITION]-> TypeAssertionTransition (1:N)
 
 Embedding -[REPRESENTS]-> Function      (N:1, multiple models/versions)
 ```
@@ -106,6 +112,11 @@ erDiagram
 
     ANNOTATION }o--|| FUNCTION : targets
     ANNOTATION }o--|| RECEIPT : created_by
+    ANNOTATION ||--o| TYPE_ASSERTION : specializes
+    TYPE_ASSERTION }o--|| RECEIPT : last_mutation
+    TYPE_ASSERTION }o--o{ EVIDENCE : supported_by
+    TYPE_ASSERTION ||--o{ TYPE_ASSERTION_TRANSITION : state_transition
+    TYPE_ASSERTION_TRANSITION }o--|| RECEIPT : recorded_by
     RECEIPT ||--o{ EVIDENCE : cites
     EVIDENCE }o--o| XREF : sourced_from_xref
     EVIDENCE }o--o| MEM_EVENT : sourced_from_mem
@@ -339,6 +350,128 @@ CREATE TABLE evidence (
     description      TEXT,                         -- human-readable explanation
     metadata         JSONB DEFAULT '{}'::jsonb     -- additional structured evidence data
 );
+
+-- Type assertion lifecycle states
+CREATE TYPE type_assertion_lifecycle_state AS ENUM (
+    'INFERRED',
+    'PROPOSED',
+    'UNDER_REVIEW',
+    'ACCEPTED',
+    'PROPAGATED',
+    'DEPRECATED',
+    'REJECTED'
+);
+
+-- Type assertions (specialized lifecycle-aware annotations)
+CREATE TABLE type_assertion (
+    assertion_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    annotation_id     UUID NOT NULL UNIQUE REFERENCES annotation(annotation_id) ON DELETE CASCADE,
+    program_id        UUID NOT NULL REFERENCES program(program_id) ON DELETE CASCADE,
+    target_type       TEXT NOT NULL,               -- 'function', 'data_type', 'symbol', 'variable', etc.
+    target_id         UUID NOT NULL,
+    target_scope      TEXT NOT NULL,               -- 'VARIABLE', 'PARAMETER', 'RETURN_TYPE', 'GLOBAL', 'STRUCT_FIELD'
+    datatype_id       UUID REFERENCES data_type(datatype_id),
+    asserted_type     JSONB NOT NULL,              -- canonical serialized type payload
+    source_type       TEXT NOT NULL,               -- 'DWARF', 'ANALYST', 'ML_MODEL', 'CONSTRAINT_SOLVER', etc.
+    source_id         TEXT NOT NULL,               -- model name, username, or tool identifier
+    source_version    TEXT,
+    confidence        REAL NOT NULL CHECK (confidence >= 0.0 AND confidence <= 1.0),
+    lifecycle_state   type_assertion_lifecycle_state NOT NULL,
+    previous_assertion_id UUID REFERENCES type_assertion(assertion_id),
+    created_receipt_id UUID NOT NULL REFERENCES receipt(receipt_id),
+    last_receipt_id   UUID NOT NULL REFERENCES receipt(receipt_id),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Allowed lifecycle transitions; enforced by trigger on type_assertion writes
+CREATE TABLE type_assertion_lifecycle_rule (
+    from_state        type_assertion_lifecycle_state NOT NULL,
+    to_state          type_assertion_lifecycle_state NOT NULL,
+    PRIMARY KEY (from_state, to_state),
+    CHECK (from_state <> to_state)
+);
+
+INSERT INTO type_assertion_lifecycle_rule (from_state, to_state) VALUES
+    ('INFERRED', 'PROPOSED'),
+    ('INFERRED', 'REJECTED'),
+    ('PROPOSED', 'UNDER_REVIEW'),
+    ('PROPOSED', 'REJECTED'),
+    ('UNDER_REVIEW', 'PROPOSED'),
+    ('UNDER_REVIEW', 'ACCEPTED'),
+    ('UNDER_REVIEW', 'REJECTED'),
+    ('ACCEPTED', 'PROPAGATED'),
+    ('ACCEPTED', 'REJECTED'),
+    ('PROPAGATED', 'UNDER_REVIEW'),
+    ('PROPAGATED', 'DEPRECATED'),
+    ('PROPAGATED', 'REJECTED'),
+    ('DEPRECATED', 'REJECTED');
+
+-- History of lifecycle transitions for audit/review workflows
+CREATE TABLE type_assertion_transition (
+    transition_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    assertion_id      UUID NOT NULL REFERENCES type_assertion(assertion_id) ON DELETE CASCADE,
+    from_state        type_assertion_lifecycle_state NOT NULL,
+    to_state          type_assertion_lifecycle_state NOT NULL,
+    receipt_id        UUID NOT NULL REFERENCES receipt(receipt_id),
+    reason            TEXT,
+    changed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (from_state <> to_state)
+);
+
+-- Direct links from assertions to supporting evidence rows
+CREATE TABLE type_assertion_evidence_link (
+    assertion_id      UUID NOT NULL REFERENCES type_assertion(assertion_id) ON DELETE CASCADE,
+    evidence_id       UUID NOT NULL REFERENCES evidence(evidence_id) ON DELETE RESTRICT,
+    link_role         TEXT NOT NULL DEFAULT 'supporting',
+    PRIMARY KEY (assertion_id, evidence_id)
+);
+
+CREATE OR REPLACE FUNCTION validate_type_assertion_transition()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.lifecycle_state NOT IN ('INFERRED', 'PROPOSED') THEN
+            RAISE EXCEPTION
+                'type_assertion initial state must be INFERRED or PROPOSED, got %',
+                NEW.lifecycle_state;
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    IF NEW.lifecycle_state = OLD.lifecycle_state THEN
+        RETURN NEW;
+    END IF;
+
+    IF NEW.last_receipt_id = OLD.last_receipt_id THEN
+        RAISE EXCEPTION
+            'state transition % -> % requires a new last_receipt_id',
+            OLD.lifecycle_state, NEW.lifecycle_state;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM type_assertion_lifecycle_rule r
+        WHERE r.from_state = OLD.lifecycle_state
+          AND r.to_state = NEW.lifecycle_state
+    ) THEN
+        RAISE EXCEPTION
+            'invalid type_assertion lifecycle transition % -> %',
+            OLD.lifecycle_state, NEW.lifecycle_state;
+    END IF;
+
+    INSERT INTO type_assertion_transition (assertion_id, from_state, to_state, receipt_id)
+    VALUES (OLD.assertion_id, OLD.lifecycle_state, NEW.lifecycle_state, NEW.last_receipt_id);
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_type_assertion_validate_transition
+BEFORE INSERT OR UPDATE OF lifecycle_state ON type_assertion
+FOR EACH ROW EXECUTE FUNCTION validate_type_assertion_transition();
 ```
 
 #### Embedding and Search Tables
@@ -679,7 +812,50 @@ Evidence {
 }
 ```
 
-### 3.3 Provenance Query Patterns
+### 3.3 Type Assertion Lifecycle Schema
+
+Type assertions are persisted in a dedicated table so the system can enforce lifecycle semantics without requiring JSON payload parsing in write paths.
+
+```
+TypeAssertion {
+    assertion_id:     UUID
+    annotation_id:    UUID                    -- points to annotation row with annotation_type='type_assertion'
+    program_id:       UUID
+    target_type:      text
+    target_id:        UUID
+    target_scope:     enum('VARIABLE','PARAMETER','RETURN_TYPE','GLOBAL','STRUCT_FIELD')
+    datatype_id:      UUID | null             -- resolved datatype row, when available
+    asserted_type:    jsonb                   -- canonical serialized type payload
+    source_type:      enum('DWARF','ANALYST','ML_MODEL','CONSTRAINT_SOLVER','HEURISTIC','GHIDRA_DEFAULT')
+    source_id:        text                    -- model/tool/user identity
+    source_version:   text | null
+    confidence:       real                    -- [0.0, 1.0]
+    lifecycle_state:  enum('INFERRED','PROPOSED','UNDER_REVIEW','ACCEPTED','PROPAGATED','DEPRECATED','REJECTED')
+    previous_assertion_id: UUID | null
+    created_receipt_id: UUID                  -- receipt that created this assertion
+    last_receipt_id: UUID                     -- receipt that last changed this assertion
+    evidence_links:   [Evidence]              -- via type_assertion_evidence_link
+}
+
+TypeAssertionTransition {
+    transition_id:    UUID
+    assertion_id:     UUID
+    from_state:       type_assertion_lifecycle_state
+    to_state:         type_assertion_lifecycle_state
+    receipt_id:       UUID                    -- receipt documenting the transition
+    reason:           text | null
+    changed_at:       timestamptz
+}
+```
+
+**Type assertion invariants:**
+
+1. `target_type + target_id + target_scope`, `source_type + source_id`, `confidence`, and `lifecycle_state` are mandatory persisted fields.
+2. Every type assertion MUST have a `created_receipt_id`; every lifecycle mutation MUST update `last_receipt_id`.
+3. Lifecycle transitions are validated server-side by `trg_type_assertion_validate_transition` against `type_assertion_lifecycle_rule`.
+4. Type assertions link to evidence through `type_assertion_evidence_link(assertion_id, evidence_id)` and thus retain direct links to receipt-backed evidence records.
+
+### 3.4 Provenance Query Patterns
 
 **"Why was function X renamed to Y?"**
 
@@ -694,6 +870,28 @@ JOIN evidence ev ON r.receipt_id = ev.receipt_id
 WHERE r.target_id = :function_id
   AND r.action = 'rename'
 ORDER BY r.timestamp DESC;
+```
+
+**"What is the current lifecycle state and provenance for type assertion T?"**
+
+```sql
+SELECT ta.assertion_id,
+       ta.lifecycle_state,
+       ta.confidence,
+       ta.source_type,
+       ta.source_id,
+       ta.last_receipt_id,
+       r.actor,
+       r.timestamp,
+       ev.evidence_id,
+       ev.evidence_type,
+       ev.description
+FROM type_assertion ta
+JOIN receipt r ON r.receipt_id = ta.last_receipt_id
+LEFT JOIN type_assertion_evidence_link tael ON tael.assertion_id = ta.assertion_id
+LEFT JOIN evidence ev ON ev.evidence_id = tael.evidence_id
+WHERE ta.assertion_id = :assertion_id
+ORDER BY ev.evidence_id;
 ```
 
 **"What is the complete provenance chain for annotation Z?"**
@@ -769,6 +967,14 @@ CREATE INDEX idx_evidence_source ON evidence(source_type, source_id);
 CREATE INDEX idx_annotation_target ON annotation(target_id);
 CREATE INDEX idx_annotation_program ON annotation(program_id);
 CREATE INDEX idx_annotation_type ON annotation(program_id, annotation_type);
+CREATE INDEX idx_type_assertion_target ON type_assertion(program_id, target_type, target_id, target_scope);
+CREATE INDEX idx_type_assertion_state ON type_assertion(program_id, lifecycle_state);
+CREATE INDEX idx_type_assertion_source ON type_assertion(source_type, source_id);
+CREATE INDEX idx_type_assertion_last_receipt ON type_assertion(last_receipt_id);
+CREATE INDEX idx_type_assertion_transition_assertion ON type_assertion_transition(assertion_id, changed_at);
+CREATE INDEX idx_type_assertion_transition_receipt ON type_assertion_transition(receipt_id);
+CREATE INDEX idx_type_assertion_evidence_assertion ON type_assertion_evidence_link(assertion_id);
+CREATE INDEX idx_type_assertion_evidence_evidence ON type_assertion_evidence_link(evidence_id);
 
 -- Dynamic analysis indexes
 CREATE INDEX idx_snapshot_trace ON snapshot(trace_id, snap_number);
