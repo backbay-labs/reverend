@@ -103,13 +103,15 @@ datasets/
     ghidra_import.py       # Batch import into Ghidra project via headless
 ```
 
-**Repo implementation (as of 2026-02-19):**
+**Repo implementation (as of 2026-02-20):**
 
 This repository includes a deterministic, repo-local smoke harness (no network, no external deps) backed by `datasets/datasets.lock.json`.
 
 - Run smoke eval: `bash eval/run_smoke.sh` (writes `eval/output/smoke/metrics.json`)
-- Materialize datasets: `python3 eval/scripts/download.py --verify`
+- Materialize pinned datasets: `python3 eval/scripts/download.py --verify --output-dir datasets/data`
 - Validate checksums: `python3 eval/scripts/validate_checksums.py`
+
+Smoke output contains baseline metrics for similarity (`recall@1`, `recall@3`, `mrr`), type-suggestion quality (`overall_accuracy`, `accepted_precision`), and diffing (`function_match_rate`, `changed_function_detection_rate`, `false_positive_rate`).
 
 Determinism controls (enforced by `eval/run_smoke.sh` and checked by `eval/scripts/run_smoke.py`):
 - `PYTHONHASHSEED=0`
@@ -117,9 +119,11 @@ Determinism controls (enforced by `eval/run_smoke.sh` and checked by `eval/scrip
 - `LC_ALL=C`, `LANG=C`
 - `EVAL_SEED` (default `0`; override or pass `--seed`)
 
+`run_smoke.py` fails fast if any deterministic environment control is missing or mismatched.
+
 **Preparation steps:**
 
-1. `download.py` fetches archives from pinned URLs, verifies SHA-256 against `datasets/datasets.lock.json`.
+1. `download.py` materializes pinned repo-local fixtures into `datasets/data/` and verifies SHA-256 against `datasets/datasets.lock.json` when `--verify` is set.
 2. `extract_dwarf.py` extracts ground-truth type and symbol information from debug-info builds.
 3. `strip_binaries.py` creates stripped analysis targets (removing `.symtab`, `.debug_*` sections).
 4. `compile_corpus.py` compiles source corpora at specified compiler/optimization matrix (GCC 12/13/14, Clang 16/17/18 x O0/O1/O2/O3/Os).
@@ -137,17 +141,14 @@ Determinism controls (enforced by `eval/run_smoke.sh` and checked by `eval/scrip
 // datasets.lock.json (excerpt)
 {
   "schema_version": 1,
+  "kind": "deterministic_eval_dataset_lock",
   "datasets": {
-    "toy-similarity-v1": {
+    "toy-diff-v1": {
       "version": "1.0.0",
-      "source": {
-        "type": "local_directory",
-        "path": "datasets/registry/toy-similarity-v1"
-      },
       "files": {
-        "corpus.json": {
-          "bytes": 689,
-          "sha256": "02955005933fde7c83b145ba90512d686a1b3c4c16f60fb9904b57868945f9be"
+        "eval/fixtures/toy_diff_pairs_v1.json": {
+          "bytes": 1711,
+          "sha256": "739f497e10a36ea45b50fbd81b14cc19b67e3ee4dee1fe9c50747d26b7c866ee"
         }
       }
     }
