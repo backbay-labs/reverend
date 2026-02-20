@@ -104,3 +104,9 @@ eval/output/
 .cyntra/ralph/
 .cyntra/strategy/
 .cyntra/config.local.yaml
+
+# Workcell run artifacts (should never be committed at repo root)
+/.workcell
+/manifest.json
+/prompt.md
+/telemetry.jsonl
