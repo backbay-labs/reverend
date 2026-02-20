@@ -41,6 +41,25 @@ jobs:
       - name: Assert invariant report emitted
         run: test -f eval/output/smoke/invariants/no-direct-agent-write.json
 
+      - name: Run semantic search MVP benchmark
+        run: |
+          mkdir -p eval/artifacts/mvp-gates/runs
+          python3 scripts/ml/local_embedding_pipeline.py benchmark-mvp \
+            --target-corpus-size 100000 \
+            --run-id smoke-${{ github.run_id }} \
+            --commit-sha ${{ github.sha }} \
+            --output eval/artifacts/mvp-gates/runs/smoke-${{ github.run_id }}.json
+
+      - name: Build MVP gate dashboard
+        run: |
+          python3 eval/scripts/mvp_gate_dashboard.py \
+            --artifacts-dir eval/artifacts/mvp-gates/runs \
+            --thresholds eval/config/mvp_gate_thresholds.json \
+            --output-dir eval/artifacts/mvp-gates
+          test -f eval/artifacts/mvp-gates/dashboard.json
+          test -f eval/artifacts/mvp-gates/dashboard.md
+          test -f eval/artifacts/mvp-gates/alerts.json
+
       - name: Collect type suggestion quality metrics
         run: |
           mkdir -p eval/output/smoke
@@ -65,6 +84,14 @@ jobs:
         with:
           name: smoke-metrics-${{ github.sha }}
           path: eval/output/smoke/
+          retention-days: 30
+
+      - name: Upload MVP gate dashboard
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mvp-gates-${{ github.sha }}
+          path: eval/artifacts/mvp-gates/
           retention-days: 30
 
   nightly:

@@ -368,6 +368,41 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(telemetry_event["mode"], "intent")
             self.assertGreaterEqual(telemetry_event["latency_ms"], 0.0)
 
+    def test_benchmark_mvp_outputs_gate_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_path = Path(tmpdir) / "benchmark.json"
+            exit_code = MODULE.main(
+                [
+                    "benchmark-mvp",
+                    "--target-corpus-size",
+                    "2000",
+                    "--recall-query-count",
+                    "8",
+                    "--latency-sample-count",
+                    "40",
+                    "--output",
+                    str(report_path),
+                    "--run-id",
+                    "test-run",
+                    "--commit-sha",
+                    "abc123",
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(report["kind"], "semantic_search_mvp_benchmark")
+            self.assertEqual(report["run_id"], "test-run")
+            self.assertEqual(report["commit_sha"], "abc123")
+            self.assertEqual(report["status"], "passed")
+            self.assertEqual(report["corpus"]["actual_size"], 2000)
+
+            metrics = report["metrics"]
+            self.assertGreaterEqual(metrics["recall_at_10_delta_vs_stock"], 0.10)
+            self.assertLessEqual(metrics["search_latency_p95_ms"], 300.0)
+            self.assertEqual(metrics["receipt_completeness"], 1.0)
+            self.assertEqual(metrics["rollback_success_rate"], 1.0)
+
     def test_type_suggestion_generator_emits_confidence_and_evidence_summary(self) -> None:
         policy = TypeSuggestionPolicy(auto_apply_threshold=0.9, suggest_threshold=0.5)
         generator = TypeSuggestionGenerator(policy=policy)
