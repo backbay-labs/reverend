@@ -2079,6 +2079,69 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             ["evr:a", "evr:b"],
         )
 
+    def test_triage_feature_extractor_canonicalizes_evidence_sort_ties(self) -> None:
+        extractor = DeterministicTriageFeatureExtractor()
+        evidence_a = {
+            "evidence_ref_id": "evr:dup",
+            "kind": "CALLSITE",
+            "description": "a-first",
+            "uri": "local-index://evidence/fn.test/tie",
+            "confidence": 0.9,
+        }
+        evidence_b = {
+            "evidence_ref_id": "evr:dup",
+            "kind": "CALLSITE",
+            "description": "b-second",
+            "uri": "local-index://evidence/fn.test/tie",
+            "confidence": 0.8,
+        }
+        record_a = FunctionRecord.from_json(
+            {
+                "id": "fn.test.tie",
+                "name": "main_dispatch",
+                "text": "bootstrap entry dispatcher",
+                "evidence_refs": [evidence_a, evidence_b],
+            }
+        )
+        record_b = FunctionRecord.from_json(
+            {
+                "id": "fn.test.tie",
+                "name": "main_dispatch",
+                "text": "bootstrap entry dispatcher",
+                "evidence_refs": [evidence_b, evidence_a],
+            }
+        )
+
+        extracted_a = extractor.extract(record_a)
+        extracted_b = extractor.extract(record_b)
+        self.assertEqual(extracted_a, extracted_b)
+        self.assertEqual(
+            [ref.description for ref in extracted_a.evidence_refs],
+            ["a-first", "b-second"],
+        )
+
+    def test_triage_feature_extractor_synthesizes_fallback_evidence_when_empty(self) -> None:
+        extractor = DeterministicTriageFeatureExtractor()
+        record = FunctionRecord(
+            function_id="fn.manual.no_evidence",
+            name="FUN_00401090",
+            text="opaque unknown state machine over unresolved buffer",
+            evidence_refs=(),
+        )
+        features = extractor.extract(record)
+
+        self.assertEqual(len(features.evidence_refs), 1)
+        self.assertEqual(features.evidence_refs[0].kind, "TEXT_FEATURE")
+        self.assertEqual(
+            features.evidence_refs[0].uri,
+            "local-index://features/fn.manual.no_evidence/triage-fallback",
+        )
+
+        report = DeterministicTriageMission().run([record], mission_id="triage:test").to_json()
+        self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["entrypoints"]))
+        self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["hotspots"]))
+        self.assertTrue(all(len(row["evidence_refs"]) >= 1 for row in report["unknowns"]))
+
     def test_triage_mission_output_is_order_invariant_for_input_records(self) -> None:
         mission = DeterministicTriageMission()
         records = self._triage_fixture_records()
