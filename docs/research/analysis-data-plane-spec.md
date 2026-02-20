@@ -304,6 +304,10 @@ CREATE TABLE annotation (
 CREATE TABLE receipt (
     receipt_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     timestamp        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    chain_sequence   BIGINT NOT NULL,             -- monotonic receipt sequence (per program)
+    chain_prev_receipt_id UUID REFERENCES receipt(receipt_id),
+    chain_prev_hash  BYTEA,                       -- previous chain hash (SHA-256)
+    chain_hash       BYTEA NOT NULL,              -- hash of canonical receipt (SHA-256)
     actor            TEXT NOT NULL,                -- 'user:alice', 'agent:renamer-v2', 'analyzer:fid'
     actor_type       TEXT NOT NULL,                -- 'human', 'agent', 'analyzer', 'system'
     action           TEXT NOT NULL,                -- 'rename', 'retype', 'comment', 'create',
