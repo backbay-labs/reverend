@@ -1,6 +1,19 @@
 {
   "schema_version": 1,
   "datasets": {
+    "triage-curated-v2026.02.1": {
+      "version": "2026.02.1",
+      "source": {
+        "type": "local_directory",
+        "path": "datasets/registry/triage-curated-v2026.02.1"
+      },
+      "files": {
+        "benchmark.json": {
+          "bytes": 4292,
+          "sha256": "717f67798506a1b0616863e27102203e743e9dde18f1f712f6bb9f62da4625a9"
+        }
+      }
+    },
     "toy-diff-v1": {
       "version": "1.0.0",
       "source": {

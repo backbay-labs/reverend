@@ -103,7 +103,7 @@ datasets/
     ghidra_import.py       # Batch import into Ghidra project via headless
 ```
 
-**Repo implementation (as of 2026-02-20):**
+**Repo implementation (as of 2026-02-21):**
 
 This repository includes a deterministic, repo-local smoke harness (no network, no external deps) backed by `datasets/datasets.lock.json`.
 
@@ -111,6 +111,9 @@ This repository includes a deterministic, repo-local smoke harness (no network, 
 - Run stock baseline slices + publish comparator artifacts:
   - `bash eval/run_smoke.sh --slice semantic-search --slice type-recovery --output eval/output/stock-baseline/metrics.json`
   - `python3 eval/scripts/publish_baseline.py --metrics eval/output/stock-baseline/metrics.json --baseline-out eval/output/stock-baseline/baseline.json --report-out eval/output/stock-baseline/baseline-report.md`
+- Run a representative non-toy slice (triage curated benchmark) with stock-vs-current deltas:
+  - `python3 eval/scripts/datasets.py --lockfile datasets/datasets.lock.json materialize --dataset triage-curated-v2026.02.1`
+  - `PYTHONHASHSEED=0 TZ=UTC LC_ALL=C LANG=C EVAL_SEED=0 python3 eval/scripts/run_soak.py --iterations 3 --output eval/output/soak/non-toy-report.json --non-toy-benchmark datasets/data/triage-curated-v2026.02.1/benchmark.json`
 - Materialize pinned datasets: `python3 eval/scripts/download.py --verify --output-dir datasets/data`
 - Validate checksums: `python3 eval/scripts/validate_checksums.py`
 
@@ -229,6 +232,33 @@ Before/after benchmark metrics (same benchmark version):
 | Unknown precision | 0.750000 | 1.000000 | +0.250000 |
 
 All four target thresholds pass after calibration; none passed before calibration.
+
+### 3.5 R1-S4 Non-Toy Slice Execution Snapshot (2026-02-21)
+
+Pinned non-toy dataset slice:
+- `triage-curated-v2026.02.1` (materialized to `datasets/data/triage-curated-v2026.02.1/benchmark.json`)
+
+Execution artifact:
+- `eval/output/soak/non-toy-report.json`
+
+Measured stock-vs-current deltas from `run_soak.py`:
+
+| Metric | Stock Baseline | Current | Delta |
+|---|---:|---:|---:|
+| Macro F1 | 0.848677 | 0.969697 | +0.121020 |
+| Entrypoint recall | 0.666667 | 1.000000 | +0.333333 |
+| Hotspot recall | 0.800000 | 1.000000 | +0.200000 |
+| Unknown precision | 0.750000 | 1.000000 | +0.250000 |
+
+Confidence bounds (95% Wilson intervals; small-sample supports):
+- Entrypoint recall: stock `2/3` -> `0.208-0.939`; current `3/3` -> `0.438-1.000`
+- Hotspot recall: stock `4/5` -> `0.376-0.964`; current `5/5` -> `0.566-1.000`
+- Unknown precision: stock `3/4` -> `0.301-0.954`; current `3/3` -> `0.438-1.000`
+
+Known limitations:
+- The slice is curated and small (`12` functions); it improves confidence beyond toy fixtures but is not a replacement for full REFuSe-Bench/SURE/PatchCorpus sweeps.
+- Metrics are deterministic thresholded triage scores over labeled fixtures; they are not yet binary-level headless Ghidra outcomes.
+- Small denominators produce wide intervals, so this evidence should be treated as directional and regression-oriented.
 
 ---
 
