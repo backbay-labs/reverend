@@ -1,6 +1,6 @@
 # 12-Week Execution Board: Ghidra "Alien-Tech" MVP
 
-As-of: 2026-02-20
+As-of: 2026-02-21
 Scope: Deliver a production-credible MVP that turns binary analysis into an evidence-backed, reviewable, and continuously improving workflow.
 
 ## 1. Target Outcome (Week 12)
@@ -113,3 +113,14 @@ This board operationalizes:
 - `docs/research/type-lifecycle-ux.md`
 - `docs/research/collaboration-review-design.md`
 - `docs/research/corpus-kb-architecture.md`
+
+## 11. E8-S1 Reopen Closure (2026-02-21)
+
+- Story: `E8-S1` (`issue 1701`) reopened in Week 11 to require real executable gates and JDK21-enforced CI test execution.
+- Published run evidence: `docs/soak-test-report-1701.md`.
+- Blocking failures resolved:
+  - `scripts/cyntra/gates.sh --mode=all` upgraded from placeholder checks to executable Python + Java regression gates.
+  - Missing dashboard implementation added (`eval/scripts/mvp_gate_dashboard.py`) with threshold config (`eval/config/mvp_gate_thresholds.json`).
+  - CI now enforces JDK21 for Gradle test execution on affected module `eval/java-regression` in smoke/nightly/release lanes (`.github/workflows/eval.yaml`).
+- Soak outcome: `6/6` runs passed; recall delta vs stock stayed `1.000`; p95 latency stayed within `10.327-10.743 ms`; dashboard alert count `0`.
+- Waivers: none.
