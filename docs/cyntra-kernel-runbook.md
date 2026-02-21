@@ -108,50 +108,92 @@ Use `CYNTRA_ARCHIVE_RETENTION_DAYS` to tune archive pruning.
 ## 6. Backlog notes
 
 - `.beads/issues.jsonl` is the source of truth for backlog statuses.
-- Canonical statuses for epic/story backlog items are `open`, `done`, and `blocked`.
-- Snapshot as of `2026-02-21`: epics `1000`-`1700` are `done`; remediation epic `1800` is `blocked`; remediation stories `1802`-`1809` are `open` (`1801` is `done`).
+- `docs/backlog-jira-linear.csv` is the deterministic export of canonical roadmap entries only:
+  - include entries tagged `roadmap12w` with `type:epic` or `type:story`
+  - exclude synthetic operational beads tagged `merge-conflict` or `escalation` (for example `[MERGE CONFLICT]`/`[ESCALATION]` records)
+- Canonical statuses for exported epic/story backlog entries are `open`, `done`, and `blocked`.
+- Escalation/merge-conflict beads track operational incidents and are not exported to Jira/Linear CSV.
 - Dependency ordering is in `.beads/deps.jsonl`.
 
-Sync `docs/backlog-jira-linear.csv` status values from bead truth:
+Sync (or rebuild) `docs/backlog-jira-linear.csv` from bead truth:
+
+```bash
+scripts/cyntra/sync-backlog-csv.sh
+```
+
+Notes:
+- The sync command reads `.beads/issues.jsonl` from the worktree when present.
+- In sparse workcells where `.beads` is not checked out, it falls back to `git show HEAD:.beads/issues.jsonl`.
+
+Verification (status parity for exported rows):
 
 ```bash
 python3 - <<'PY'
 import csv
 import json
 import subprocess
+import sys
 from pathlib import Path
 
-issues_path = Path(".beads/issues.jsonl")
-if issues_path.exists():
-    lines = issues_path.read_text(encoding="utf-8").splitlines()
-else:
-    lines = subprocess.check_output(
+def issue_type(tags):
+    for tag in tags:
+        if tag.startswith("type:"):
+            return tag.split(":", 1)[1].lower()
+    return ""
+
+issues = [
+    json.loads(line)
+    for line in subprocess.check_output(
         ["git", "show", "HEAD:.beads/issues.jsonl"],
         text=True,
     ).splitlines()
+    if line.strip()
+]
 
-status_by_id = {}
-for line in lines:
-    if not line.strip():
+bead_status = {}
+for issue in issues:
+    tags = [str(tag) for tag in issue.get("tags") or []]
+    title = str(issue.get("title") or "")
+    if "roadmap12w" not in tags:
         continue
-    issue = json.loads(line)
-    status_by_id[str(issue["id"])] = str(issue.get("status", "")).lower()
+    if issue_type(tags) not in {"epic", "story"}:
+        continue
+    if "merge-conflict" in tags or "escalation" in tags:
+        continue
+    if title.startswith("[MERGE CONFLICT]") or title.startswith("[ESCALATION]"):
+        continue
+    bead_status[str(issue["id"])] = str(issue.get("status") or "").lower()
 
-csv_path = Path("docs/backlog-jira-linear.csv")
-rows = list(csv.DictReader(csv_path.open(newline="", encoding="utf-8")))
-for row in rows:
-    status = status_by_id.get(row["id"])
-    if status:
-        row["status"] = status
+rows = list(csv.DictReader(Path("docs/backlog-jira-linear.csv").open(newline="", encoding="utf-8")))
+csv_status = {row["id"]: row["status"].lower() for row in rows}
 
-with csv_path.open("w", newline="", encoding="utf-8") as handle:
-    writer = csv.DictWriter(handle, fieldnames=rows[0].keys())
-    writer.writeheader()
-    writer.writerows(rows)
+missing = sorted(set(bead_status) - set(csv_status), key=lambda value: int(value))
+extra = sorted(set(csv_status) - set(bead_status), key=lambda value: int(value))
+mismatch = sorted(
+    [issue_id for issue_id, status in bead_status.items() if csv_status.get(issue_id) != status],
+    key=lambda value: int(value),
+)
 
-print(f"synced {len(rows)} backlog rows from bead status")
+if missing or extra or mismatch:
+    print("status sync mismatch detected", file=sys.stderr)
+    print(f"missing={missing}", file=sys.stderr)
+    print(f"extra={extra}", file=sys.stderr)
+    print(
+        f"mismatch={[(issue_id, csv_status.get(issue_id), bead_status[issue_id]) for issue_id in mismatch]}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+print(f"status sync OK: {len(rows)} csv rows match {len(bead_status)} canonical roadmap beads")
 PY
 ```
+
+Execution evidence (`2026-02-21`):
+- `scripts/cyntra/sync-backlog-csv.sh`
+  - `[sync-backlog-csv] wrote 48 roadmap rows to docs/backlog-jira-linear.csv from HEAD:.beads/issues.jsonl (...)`
+  - first reconciliation run added the missing remediation rows (`added=10`); repeat runs are idempotent (`added=0`)
+- verification command above
+  - `status sync OK: 48 csv rows match 48 canonical roadmap beads`
 
 ## 7. Deterministic merge-failure recovery
 
