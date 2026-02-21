@@ -2,27 +2,30 @@
 
 > Executable abuse-scenario suite run against current controls.
 >
-> **Primary scope**: R1-S6 reopened security signoff story (Issue 1806)
+> **Primary scope**: E8-S2 security signoff story (Issue 1702, reopened)
 > **Spec under test**: `docs/research/agent-runtime-security-spec.md` (v1, 2026-02-19)
 > **Compliance reference**: `docs/research/legal-compliance-playbook.md` (v1.0, 2026-02-19)
 > **Executed**: 2026-02-21 (UTC)
-> **Evidence bundle**: `docs/security/evidence/abuse-scenario-suite-1806/README.md`
-> **Prior tabletop baseline**: E8-S2 security review (Issue 1702, 2026-02-20)
+> **Executable harness**: `python3 scripts/security/run_abuse_scenario_suite.py`
+> **Evidence bundle**: `docs/security/evidence/abuse-scenario-suite-1702/README.md`
+> **Machine-readable outcomes**: `docs/security/evidence/abuse-scenario-suite-1702/scenario-outcomes.json`
+> **Prior comparable rerun**: R1-S6 signoff story (Issue 1806, 2026-02-21)
 
 ---
 
-## Executable Scenario Run (R1-S6)
+## Executable Scenario Run (E8-S2 Reopen)
 
 All scenarios below are executable and were run in this workcell. Commands are
-listed exactly for reproducibility.
+listed exactly for reproducibility. Logs and checksum-verified artifacts are in
+`docs/security/evidence/abuse-scenario-suite-1702/`.
 
 | ID | Abuse scenario | Executable command | Expected controls | Observed outcome | Evidence link | Remediation note if failed |
 |---|---|---|---|---|---|---|
-| S1 | Direct or indirect agent write attempt to canonical corpus state | `python3 scripts/tests/no_direct_agent_write_invariant.py --output-dir docs/security/evidence/abuse-scenario-suite-1806/no-direct-agent-write` | Capability checks deny unauthorized sync writes; denied operations emit `corpus_access_audit` + `corpus_violation_incident` records | **PASS** (`3/3` invariant checks passed; denied paths left backend/state unwritten) | `docs/security/evidence/abuse-scenario-suite-1806/scenario-01-no-direct-agent-write.log` and `docs/security/evidence/abuse-scenario-suite-1806/no-direct-agent-write/no-direct-agent-write-invariant.json` | Fix or restore fail-closed authorization in `scripts/ml/corpus_sync_worker.py` (`WRITE.CORPUS_SYNC` precheck + deny/audit on violation). |
-| S2 | Egress policy bypass by targeting non-allowlisted cloud endpoint | `python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k allowlist_mode_blocks_non_approved_destination` | `allowlist` mode blocks non-approved destinations and emits deterministic `EGRESS_BLOCKED` incident remediation | **PASS** (`test_allowlist_mode_blocks_non_approved_destination ... ok`) | `docs/security/evidence/abuse-scenario-suite-1806/scenario-02-allowlist-egress.log` | Re-enable endpoint allowlist matching and `EGRESS_BLOCKED` incident emission in `scripts/ml/corpus_sync_worker.py`. |
-| S3 | Project-level policy override bypass (`offline` project tries remote sync) | `python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k sync_policy_modes_are_configurable_per_project` | Per-project policy modes override defaults; offline project is denied while cloud project proceeds | **PASS** (`test_sync_policy_modes_are_configurable_per_project ... ok`) | `docs/security/evidence/abuse-scenario-suite-1806/scenario-03-policy-mode-scope.log` | Repair project policy resolution in `EndpointPolicyConfig`/`EndpointPolicyRule` to enforce offline deny semantics. |
-| S4 | Provenance-chain tampering to bypass read-side trust checks | `python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k read_rejects_incomplete_provenance_chain` | Read path rejects malformed chain continuity and emits `PROVENANCE_CHAIN_INVALID` denial audit | **PASS** (`test_read_rejects_incomplete_provenance_chain ... ok`) | `docs/security/evidence/abuse-scenario-suite-1806/scenario-04-provenance-chain.log` | Reinstate provenance continuity validation in `_validate_provenance_chain(...)` and deny malformed artifacts. |
-| S5 | Receipt-history tampering (mutate historic record) | `python3 -m unittest -v scripts/ml/tests/test_receipt_store.py -k verify_integrity_detects_tampering` | Hash-chain integrity check detects mutation and blocks further appends | **PASS** (`test_verify_integrity_detects_tampering ... ok`) | `docs/security/evidence/abuse-scenario-suite-1806/scenario-05-receipt-tamper.log` | Restore canonical hash verification and append-time integrity guard in `scripts/ml/receipt_store.py`. |
+| S1 | Direct or indirect agent write attempt to canonical corpus state | `python3 scripts/tests/no_direct_agent_write_invariant.py --output-dir docs/security/evidence/abuse-scenario-suite-1702/no-direct-agent-write` | Capability checks deny unauthorized sync writes; denied operations emit `corpus_access_audit` + `corpus_violation_incident` records | **PASS** (`3/3` invariant checks passed; denied paths left backend/state unwritten) | `docs/security/evidence/abuse-scenario-suite-1702/scenario-01-no-direct-agent-write.log` and `docs/security/evidence/abuse-scenario-suite-1702/no-direct-agent-write/no-direct-agent-write-invariant.json` | Fix or restore fail-closed authorization in `scripts/ml/corpus_sync_worker.py` (`WRITE.CORPUS_SYNC` precheck + deny/audit on violation). |
+| S2 | Egress policy bypass by targeting non-allowlisted cloud endpoint | `python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k allowlist_mode_blocks_non_approved_destination` | `allowlist` mode blocks non-approved destinations and emits deterministic `EGRESS_BLOCKED` incident remediation | **PASS** (`test_allowlist_mode_blocks_non_approved_destination ... ok`) | `docs/security/evidence/abuse-scenario-suite-1702/scenario-02-allowlist-egress.log` | Re-enable endpoint allowlist matching and `EGRESS_BLOCKED` incident emission in `scripts/ml/corpus_sync_worker.py`. |
+| S3 | Project-level policy override bypass (`offline` project tries remote sync) | `python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k sync_policy_modes_are_configurable_per_project` | Per-project policy modes override defaults; offline project is denied while cloud project proceeds | **PASS** (`test_sync_policy_modes_are_configurable_per_project ... ok`) | `docs/security/evidence/abuse-scenario-suite-1702/scenario-03-policy-mode-scope.log` | Repair project policy resolution in `EndpointPolicyConfig`/`EndpointPolicyRule` to enforce offline deny semantics. |
+| S4 | Provenance-chain tampering to bypass read-side trust checks | `python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k read_rejects_incomplete_provenance_chain` | Read path rejects malformed chain continuity and emits `PROVENANCE_CHAIN_INVALID` denial audit | **PASS** (`test_read_rejects_incomplete_provenance_chain ... ok`) | `docs/security/evidence/abuse-scenario-suite-1702/scenario-04-provenance-chain.log` | Reinstate provenance continuity validation in `_validate_provenance_chain(...)` and deny malformed artifacts. |
+| S5 | Receipt-history tampering (mutate historic record) | `python3 -m unittest -v scripts/ml/tests/test_receipt_store.py -k verify_integrity_detects_tampering` | Hash-chain integrity check detects mutation and blocks further appends | **PASS** (`test_verify_integrity_detects_tampering ... ok`) | `docs/security/evidence/abuse-scenario-suite-1702/scenario-05-receipt-tamper.log` | Restore canonical hash verification and append-time integrity guard in `scripts/ml/receipt_store.py`. |
 
 ### Run Summary
 
@@ -741,6 +744,6 @@ All are formally accepted with documented justification.
 
 ---
 
-> **Document version**: 1.2
+> **Document version**: 1.3
 > **Classification**: Internal — Security Review
 > **Next review**: Next security signoff reopen or control-surface change
