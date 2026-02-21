@@ -1,3 +1,19 @@
+<p align="center">
+  <img src="docs/assets/reverend-hero.png" alt="Reverend hero banner" width="100%" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/backbay-labs/reverend/actions/workflows/eval.yaml">
+    <img src="https://img.shields.io/github/actions/workflow/status/backbay-labs/reverend/eval.yaml?branch=main&style=for-the-badge&label=Eval%20Gates&labelColor=02040A" alt="Eval Gates" />
+  </a>
+  <img src="https://img.shields.io/badge/Status-RC1-22D3EE?style=for-the-badge&labelColor=02040A" alt="Status RC1" />
+  <img src="https://img.shields.io/badge/Roadmap-48%2F48%20Done-10B981?style=for-the-badge&labelColor=02040A" alt="Roadmap 48/48 Done" />
+  <img src="https://img.shields.io/badge/Security-GA%20Conditional-F43F5E?style=for-the-badge&labelColor=02040A" alt="Security GA Conditional" />
+  <img src="https://img.shields.io/badge/JDK-21-22D3EE?style=for-the-badge&logo=openjdk&logoColor=white&labelColor=02040A" alt="JDK 21" />
+  <img src="https://img.shields.io/badge/Python-3.11%2B-8B5CF6?style=for-the-badge&logo=python&logoColor=white&labelColor=02040A" alt="Python 3.11+" />
+  <img src="https://img.shields.io/badge/License-Apache--2.0-64748B?style=for-the-badge&labelColor=02040A" alt="Apache 2.0 License" />
+</p>
+
 # Reverend
 
 Reverend is a production-oriented Ghidra fork focused on evidence-backed, agent-assisted reverse engineering.
