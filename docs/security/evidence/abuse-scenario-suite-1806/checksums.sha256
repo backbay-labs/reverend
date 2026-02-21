@@ -1,0 +1,7 @@
+a97806bcc2f85b818e0d429cb5173931d77db2d65b8dc1b4bed0783e31231b09  scenario-01-no-direct-agent-write.log
+c41571b26971615ec2d8a5741343f6def4d8f82406ba73f69e34431854df47a3  scenario-02-allowlist-egress.log
+a29fdc57e3f7486dc0dda2a73d8b4e022a769063b9934a13ff59b4d6b392308e  scenario-03-policy-mode-scope.log
+87c249a7c65a516abd34e0f55ff0568dbb34af18c8b705e02451067454821158  scenario-04-provenance-chain.log
+6313a04070b796bfb0f8a4d32fbff4a2d5047ea32218454c613652a4586e379a  scenario-05-receipt-tamper.log
+2c299211f156d904b4d36288458ed84439d695b5e29dccd5352216398886b286  no-direct-agent-write/no-direct-agent-write-invariant.json
+5118c04873bfde27afc5276b551c29bea90e2416f080fab28bfe08a041a8766e  no-direct-agent-write/no-direct-agent-write-invariant.md

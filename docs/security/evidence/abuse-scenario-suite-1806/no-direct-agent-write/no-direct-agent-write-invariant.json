@@ -1,0 +1,113 @@
+{
+  "checks": [
+    {
+      "check_id": "direct_sync_write_capability_denied",
+      "details": "Unauthorized agent write attempt was denied before canonical state mutation.",
+      "evidence": {
+        "backend_exists": false,
+        "deny_events": 1,
+        "incidents": 1,
+        "state_exists": false,
+        "telemetry": {
+          "already_synced_count": 0,
+          "approved_total": 1,
+          "completed_at_utc": "2026-02-21T00:40:02.873759+00:00",
+          "error_count": 1,
+          "errors": [
+            {
+              "error": "principal 'agent:observer' lacks capability 'WRITE.CORPUS_SYNC' for action 'SYNC'",
+              "proposal_id": "p-direct-denied"
+            }
+          ],
+          "job_id": "invariant-direct-sync-denied",
+          "kind": "corpus_sync_run",
+          "latency_ms": 0.416,
+          "resumed_from_checkpoint": false,
+          "scanned_total": 1,
+          "schema_version": 1,
+          "skipped_non_approved": 0,
+          "started_at_utc": "2026-02-21T00:40:02.873351+00:00",
+          "synced_count": 0
+        }
+      },
+      "path_type": "direct",
+      "status": "PASS"
+    },
+    {
+      "check_id": "indirect_sync_scope_denied",
+      "details": "Scoped token blocked indirect write path despite write capability grant.",
+      "evidence": {
+        "backend_exists": false,
+        "deny_events": 1,
+        "incidents": 1,
+        "state_exists": false,
+        "telemetry": {
+          "already_synced_count": 0,
+          "approved_total": 1,
+          "completed_at_utc": "2026-02-21T00:40:02.875418+00:00",
+          "error_count": 1,
+          "errors": [
+            {
+              "error": "principal 'agent:writer' cannot access program 'program:alpha' for action 'SYNC'",
+              "proposal_id": "p-indirect-scope"
+            }
+          ],
+          "job_id": "invariant-indirect-scope-denied",
+          "kind": "corpus_sync_run",
+          "latency_ms": 0.166,
+          "resumed_from_checkpoint": false,
+          "scanned_total": 1,
+          "schema_version": 1,
+          "skipped_non_approved": 0,
+          "started_at_utc": "2026-02-21T00:40:02.875259+00:00",
+          "synced_count": 0
+        }
+      },
+      "path_type": "indirect",
+      "status": "PASS"
+    },
+    {
+      "check_id": "indirect_sync_preflight_bypass_denied",
+      "details": "Preflight guard denied no-approved-proposal bypass attempt before state writes.",
+      "evidence": {
+        "backend_exists": false,
+        "deny_events": 1,
+        "incidents": 1,
+        "state_exists": false,
+        "telemetry": {
+          "already_synced_count": 0,
+          "approved_total": 0,
+          "completed_at_utc": "2026-02-21T00:40:02.876574+00:00",
+          "error_count": 1,
+          "errors": [
+            {
+              "error": "principal 'agent:observer' lacks capability 'WRITE.CORPUS_SYNC' for action 'SYNC'",
+              "proposal_id": "invariant-indirect-preflight-denied"
+            }
+          ],
+          "job_id": "invariant-indirect-preflight-denied",
+          "kind": "corpus_sync_run",
+          "latency_ms": 0.16,
+          "resumed_from_checkpoint": false,
+          "scanned_total": 1,
+          "schema_version": 1,
+          "skipped_non_approved": 1,
+          "started_at_utc": "2026-02-21T00:40:02.876419+00:00",
+          "synced_count": 0
+        }
+      },
+      "path_type": "indirect",
+      "status": "PASS"
+    }
+  ],
+  "generated_at_utc": "2026-02-21T00:40:02.877068+00:00",
+  "invariant_id": "NO_DIRECT_AGENT_WRITE",
+  "kind": "no_direct_agent_write_invariant_report",
+  "schema_version": 1,
+  "summary": {
+    "failed_checks": 0,
+    "passed_checks": 3,
+    "status": "PASS",
+    "total_checks": 3
+  }
+}
