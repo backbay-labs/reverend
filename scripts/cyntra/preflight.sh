@@ -10,6 +10,8 @@ max_active_workcells="${CYNTRA_MAX_ACTIVE_WORKCELLS:-}"
 auto_fix_main="${CYNTRA_AUTO_FIX_MAIN:-1}"
 run_status_check="${CYNTRA_PREFLIGHT_STATUS_CHECK:-1}"
 strict_context_main="${CYNTRA_STRICT_CONTEXT_MAIN:-1}"
+required_python_minor="${CYNTRA_REQUIRED_PYTHON_MINOR:-11}"
+required_java_major="${CYNTRA_REQUIRED_JAVA_MAJOR:-21}"
 
 fail() {
   echo "[preflight] ERROR: $*" >&2
@@ -20,7 +22,43 @@ info() {
   echo "[preflight] $*"
 }
 
+parse_java_major() {
+  local java_version_line java_version java_major
+  java_version_line="$(java -version 2>&1 | head -n 1)"
+  java_version="$(sed -n 's/.*version "\(.*\)".*/\1/p' <<<"$java_version_line")"
+  [[ -n "$java_version" ]] || return 1
+  java_major="${java_version%%.*}"
+  if [[ "$java_major" == "1" ]]; then
+    java_major="$(cut -d. -f2 <<<"$java_version")"
+  fi
+  [[ "$java_major" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$java_major"
+}
+
 command -v uv >/dev/null 2>&1 || fail "uv is required but not found in PATH"
+command -v python3 >/dev/null 2>&1 || fail "python3 is required but not found in PATH (install Python 3.${required_python_minor}+)"
+read -r python_major python_minor python_patch < <(
+  python3 - <<'PY'
+import sys
+print(sys.version_info.major, sys.version_info.minor, sys.version_info.micro)
+PY
+)
+if (( python_major != 3 || python_minor < required_python_minor )); then
+  fail "Python 3.${required_python_minor}+ is required; found ${python_major}.${python_minor}.${python_patch}. Install/select a compatible interpreter and verify with: python3 --version"
+fi
+info "python toolchain OK: ${python_major}.${python_minor}.${python_patch} (require >=3.${required_python_minor})"
+
+command -v java >/dev/null 2>&1 || fail "java is required but not found in PATH (install Temurin JDK ${required_java_major} and set JAVA_HOME)"
+command -v javac >/dev/null 2>&1 || fail "javac is required but not found in PATH (install full JDK ${required_java_major}, not JRE-only)"
+java_major="$(parse_java_major || true)"
+if [[ -z "$java_major" ]]; then
+  fail "unable to parse Java version from 'java -version'. Verify installation with: java -version && javac -version"
+fi
+if (( java_major != required_java_major )); then
+  fail "JDK ${required_java_major} is required for reproducible runs; found Java ${java_major}. Install/select Temurin ${required_java_major} and verify with: java -version && javac -version"
+fi
+info "java toolchain OK: $(java -version 2>&1 | head -n 1)"
+
 [[ -d "$kernel_path" ]] || fail "kernel path not found: $kernel_path"
 [[ -f .beads/issues.jsonl ]] || fail "missing .beads/issues.jsonl"
 [[ -f .beads/deps.jsonl ]] || fail "missing .beads/deps.jsonl"

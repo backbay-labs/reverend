@@ -537,6 +537,32 @@ Ghidra Bridge avoids these issues because Python runs in a completely separate p
 | **Timeout** | `-analysisTimeoutPerFile 1800` (30 min) | Prevent runaway analysis |
 | **Lockfiles** | `uv lock` or `pip-compile` | Reproducible dependencies |
 
+### Developer Runbook: Local Toolchain Guardrails
+
+For this repository's evaluation pipeline, use the same pinned runtime pair as CI:
+
+1. JDK: Temurin 21 (`java` + `javac`)
+2. Python: 3.11.x (`python3`)
+
+Use your package manager/version manager of choice to install those versions, then verify locally before running heavy workflows:
+
+```bash
+python3 --version
+java -version
+javac -version
+bash scripts/cyntra/preflight.sh
+```
+
+Recommended command set before opening a PR:
+
+```bash
+bash scripts/cyntra/gates.sh --mode=context
+bash scripts/cyntra/gates.sh --mode=diff
+bash scripts/cyntra/gates.sh --mode=all
+```
+
+If preflight reports a Java mismatch, reset `JAVA_HOME` to a JDK 21 installation and ensure `$JAVA_HOME/bin` appears before other Java paths in `PATH`.
+
 ### Jupyter Notebook Analysis
 
 | Aspect | Recommendation | Rationale |
