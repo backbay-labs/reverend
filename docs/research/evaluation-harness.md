@@ -649,6 +649,18 @@ Soak summary from `2026-02-20`/`2026-02-21` UTC six-run sequence (`soak-20260220
 - Dashboard alerts: `0` (`eval/artifacts/mvp-gates/alerts.json`)
 - Waivers: none
 
+### 6.7 R1-S8 Final Exit-Gate Packet (2026-02-21)
+
+Final decision publication for issue `1808` is captured in:
+- `docs/exit-gate-packet-1808.md`
+
+The packet consolidates reopened evidence streams into one decision artifact:
+- regression/soak evidence from `docs/soak-test-report-1701.md`
+- security evidence from `docs/security/evidence/abuse-scenario-suite-1806/README.md`
+- benchmark evidence and gate-aligned metrics from this document (Sections 3.5 and 6.6)
+
+Recorded outcome: **GO for internal RC1 scope**, with production promotion explicitly blocked on unresolved `C1-C11` conditions.
+
 ---
 
 ## 7. Automated Evaluation Pipeline

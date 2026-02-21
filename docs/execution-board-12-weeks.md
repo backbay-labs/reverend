@@ -131,3 +131,12 @@ This board operationalizes:
 - Published suite results: `docs/security/abuse-scenario-suite.md` (v1.2, executable run matrix).
 - Published run evidence bundle: `docs/security/evidence/abuse-scenario-suite-1806/README.md`.
 - Scenario execution summary: `5/5` scenarios passed; no failed controls; no waivers.
+
+## 13. R1-S8 Exit-Gate Packet Publication (2026-02-21)
+
+- Story: `R1-S8` (`issue 1808`) published the final MVP exit-gate decision packet grounded in reopened regression/security/benchmark evidence.
+- Published packet: `docs/exit-gate-packet-1808.md`.
+- Packet contents:
+  - full gate register with artifact paths and `pass`/`fail`/`waived` status
+  - waiver registry with owner, justification, and review date
+  - formal go/no-go record with date, approvers, and final rationale
