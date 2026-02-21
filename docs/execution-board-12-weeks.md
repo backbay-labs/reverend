@@ -167,3 +167,17 @@ This board operationalizes:
 - Export sync result: `scripts/cyntra/sync-backlog-csv.sh` rewrote `docs/backlog-jira-linear.csv` to full-row canonical parity (`status_updates=2`, `row_updates=22`).
 - Completion validator result: `scripts/cyntra/validate-roadmap-completion.sh` reports `48/48` roadmap rows done with CSV full-row parity and required evidence present.
 - Reconciliation evidence bundle: `docs/evidence/state-reconciliation-1702-1704.md`.
+
+## 17. Frontier Buildout Launch (E9)
+
+- E1-E8 and R1-R2 are closed as RC baseline and remediation completion.
+- New frontier execution scope is now tracked in:
+  - `docs/e9-frontier-roadmap.md`
+  - `docs/backlog-jira-linear.md`
+  - `docs/backlog-e9.csv`
+- E9 bead graph:
+  - Epic `2000` (`EPIC E9: SOTA Reverse Engineering Acceleration`)
+  - Stories `2001-2008` (`E9-S1` through `E9-S8`)
+- Initial dispatch posture:
+  - `2001` seeded as `ready`
+  - `2002-2008` seeded as `open` with explicit dependency edges in `.beads/deps.jsonl`
