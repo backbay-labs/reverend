@@ -27,6 +27,8 @@ permissions:
 env:
   STOCK_BASELINE_OUTPUT_DIR: eval/output/stock-baseline
   STOCK_BASELINE_SLICES: semantic-search,type-recovery
+  REQUIRED_PYTHON_VERSION: '3.11'
+  REQUIRED_JAVA_VERSION: '21'
 
 jobs:
   smoke:
@@ -41,18 +43,50 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ env.REQUIRED_PYTHON_VERSION }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: ${{ env.REQUIRED_JAVA_VERSION }}
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
+
+      - name: Verify Python + JDK toolchain versions
+        run: |
+          python3 --version
+          python3 - <<'PY'
+          import os
+          import sys
+          required = tuple(int(part) for part in os.environ["REQUIRED_PYTHON_VERSION"].split("."))
+          current = sys.version_info[:2]
+          if current != required:
+              raise SystemExit(
+                  f"Expected Python {required[0]}.{required[1]}, found {current[0]}.{current[1]}"
+              )
+          print(f"Python version OK: {current[0]}.{current[1]}")
+          PY
+
+          java_version_line="$(java -version 2>&1 | head -n 1)"
+          java_version="$(sed -n 's/.*version "\(.*\)".*/\1/p' <<<"${java_version_line}")"
+          if [[ -z "${java_version}" ]]; then
+            echo "Unable to parse Java version from: ${java_version_line}" >&2
+            exit 1
+          fi
+          java_major="${java_version%%.*}"
+          if [[ "${java_major}" == "1" ]]; then
+            java_major="$(cut -d. -f2 <<<"${java_version}")"
+          fi
+          if [[ "${java_major}" != "${REQUIRED_JAVA_VERSION}" ]]; then
+            echo "Expected JDK ${REQUIRED_JAVA_VERSION}, found Java ${java_version}" >&2
+            exit 1
+          fi
+          echo "Java version OK: ${java_version_line}"
+          javac -version
 
       - name: Run no-direct-agent-write security regression suite (blocking)
         run: |
@@ -63,8 +97,8 @@ jobs:
       - name: Run Java regression module tests (Gradle + JDK 21, blocking)
         run: |
           java -version
-          if ! java -version 2>&1 | head -n 1 | grep -q '"21'; then
-            echo "Expected JDK 21 for Gradle test execution" >&2
+          if ! java -version 2>&1 | head -n 1 | grep -q "\"${REQUIRED_JAVA_VERSION}"; then
+            echo "Expected JDK ${REQUIRED_JAVA_VERSION} for Gradle test execution" >&2
             exit 1
           fi
           gradle -p eval/java-regression --no-daemon test
@@ -145,24 +179,56 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ env.REQUIRED_PYTHON_VERSION }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: ${{ env.REQUIRED_JAVA_VERSION }}
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
 
+      - name: Verify Python + JDK toolchain versions
+        run: |
+          python3 --version
+          python3 - <<'PY'
+          import os
+          import sys
+          required = tuple(int(part) for part in os.environ["REQUIRED_PYTHON_VERSION"].split("."))
+          current = sys.version_info[:2]
+          if current != required:
+              raise SystemExit(
+                  f"Expected Python {required[0]}.{required[1]}, found {current[0]}.{current[1]}"
+              )
+          print(f"Python version OK: {current[0]}.{current[1]}")
+          PY
+
+          java_version_line="$(java -version 2>&1 | head -n 1)"
+          java_version="$(sed -n 's/.*version "\(.*\)".*/\1/p' <<<"${java_version_line}")"
+          if [[ -z "${java_version}" ]]; then
+            echo "Unable to parse Java version from: ${java_version_line}" >&2
+            exit 1
+          fi
+          java_major="${java_version%%.*}"
+          if [[ "${java_major}" == "1" ]]; then
+            java_major="$(cut -d. -f2 <<<"${java_version}")"
+          fi
+          if [[ "${java_major}" != "${REQUIRED_JAVA_VERSION}" ]]; then
+            echo "Expected JDK ${REQUIRED_JAVA_VERSION}, found Java ${java_version}" >&2
+            exit 1
+          fi
+          echo "Java version OK: ${java_version_line}"
+          javac -version
+
       - name: Run Java regression module tests (Gradle + JDK 21, blocking)
         run: |
           java -version
-          if ! java -version 2>&1 | head -n 1 | grep -q '"21'; then
-            echo "Expected JDK 21 for Gradle test execution" >&2
+          if ! java -version 2>&1 | head -n 1 | grep -q "\"${REQUIRED_JAVA_VERSION}"; then
+            echo "Expected JDK ${REQUIRED_JAVA_VERSION} for Gradle test execution" >&2
             exit 1
           fi
           gradle -p eval/java-regression --no-daemon test
@@ -308,24 +374,56 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ env.REQUIRED_PYTHON_VERSION }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: ${{ env.REQUIRED_JAVA_VERSION }}
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
 
+      - name: Verify Python + JDK toolchain versions
+        run: |
+          python3 --version
+          python3 - <<'PY'
+          import os
+          import sys
+          required = tuple(int(part) for part in os.environ["REQUIRED_PYTHON_VERSION"].split("."))
+          current = sys.version_info[:2]
+          if current != required:
+              raise SystemExit(
+                  f"Expected Python {required[0]}.{required[1]}, found {current[0]}.{current[1]}"
+              )
+          print(f"Python version OK: {current[0]}.{current[1]}")
+          PY
+
+          java_version_line="$(java -version 2>&1 | head -n 1)"
+          java_version="$(sed -n 's/.*version "\(.*\)".*/\1/p' <<<"${java_version_line}")"
+          if [[ -z "${java_version}" ]]; then
+            echo "Unable to parse Java version from: ${java_version_line}" >&2
+            exit 1
+          fi
+          java_major="${java_version%%.*}"
+          if [[ "${java_major}" == "1" ]]; then
+            java_major="$(cut -d. -f2 <<<"${java_version}")"
+          fi
+          if [[ "${java_major}" != "${REQUIRED_JAVA_VERSION}" ]]; then
+            echo "Expected JDK ${REQUIRED_JAVA_VERSION}, found Java ${java_version}" >&2
+            exit 1
+          fi
+          echo "Java version OK: ${java_version_line}"
+          javac -version
+
       - name: Run Java regression module tests (Gradle + JDK 21, blocking)
         run: |
           java -version
-          if ! java -version 2>&1 | head -n 1 | grep -q '"21'; then
-            echo "Expected JDK 21 for Gradle test execution" >&2
+          if ! java -version 2>&1 | head -n 1 | grep -q "\"${REQUIRED_JAVA_VERSION}"; then
+            echo "Expected JDK ${REQUIRED_JAVA_VERSION} for Gradle test execution" >&2
             exit 1
           fi
           gradle -p eval/java-regression --no-daemon test
