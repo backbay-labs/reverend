@@ -1,15 +1,15 @@
 # Abuse Scenario Suite Evidence (Issue 1702)
 
-Executed: 2026-02-21T01:11:54+00:00
-Branch: `wc/1702/20260221T010903Z`
-Workcell: `wc-1702-20260221T010903Z`
+Executed: 2026-02-21T06:29:42+00:00
+Branch: `unknown`
+Workcell: `unknown`
 
 ## Execution
 
 Run from repository root:
 
 ```bash
-python3 scripts/security/run_abuse_scenario_suite.py
+python3 scripts/security/run_abuse_scenario_suite.py --issue-id 1702 --output-dir docs/security/evidence/abuse-scenario-suite-1702
 ```
 
 ## Scenario Evidence Files

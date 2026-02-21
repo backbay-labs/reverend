@@ -28,6 +28,10 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
 /**
  * File-based persistent implementation of {@link SecurityAuditLogger}.
  * Provides append-only audit logging suitable for compliance requirements.
@@ -512,117 +516,41 @@ public class FileSecurityAuditLogger implements SecurityAuditLogger, Closeable {
 
 	private Map<String, String> parseSimpleJson(String json) {
 		Map<String, String> result = new LinkedHashMap<>();
-		// Simple parser for our known JSON format
-		json = json.trim();
-		if (!json.startsWith("{") || !json.endsWith("}")) {
+		if (json == null || json.isBlank()) {
 			return result;
 		}
-		json = json.substring(1, json.length() - 1);
 
-		String currentKey = null;
-		String currentNested = null;
-		StringBuilder value = new StringBuilder();
-		boolean inString = false;
-		boolean escaped = false;
-		int braceDepth = 0;
+		try {
+			JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+			for (Map.Entry<String, JsonElement> entry : root.entrySet()) {
+				String key = entry.getKey();
+				JsonElement value = entry.getValue();
 
-		for (int i = 0; i < json.length(); i++) {
-			char c = json.charAt(i);
-
-			if (escaped) {
-				value.append(c);
-				escaped = false;
-				continue;
-			}
-
-			if (c == '\\') {
-				escaped = true;
-				value.append(c);
-				continue;
-			}
-
-			if (c == '"' && braceDepth == 0) {
-				inString = !inString;
-				continue;
-			}
-
-			if (inString) {
-				value.append(c);
-				continue;
-			}
-
-			if (c == '{') {
-				braceDepth++;
-				if (braceDepth == 1 && currentKey != null) {
-					currentNested = currentKey;
-					currentKey = null;
-					value = new StringBuilder();
+				if (value == null || value.isJsonNull()) {
+					result.put(key, null);
+					continue;
 				}
-				continue;
-			}
 
-			if (c == '}') {
-				braceDepth--;
-				if (braceDepth == 0 && currentNested != null) {
-					currentNested = null;
-				}
-				continue;
-			}
-
-			if (braceDepth > 0) {
-				// Inside nested object
-				if (c == ':' && currentKey == null) {
-					currentKey = value.toString().trim();
-					value = new StringBuilder();
-				}
-				else if (c == ',') {
-					if (currentKey != null && currentNested != null) {
-						result.put(currentNested + "." + currentKey,
-							unescapeJson(value.toString().trim()));
+				if (value.isJsonObject()) {
+					JsonObject nested = value.getAsJsonObject();
+					for (Map.Entry<String, JsonElement> nestedEntry : nested.entrySet()) {
+						JsonElement nestedValue = nestedEntry.getValue();
+						result.put(key + "." + nestedEntry.getKey(),
+							nestedValue == null || nestedValue.isJsonNull()
+								? null
+								: nestedValue.getAsString());
 					}
-					currentKey = null;
-					value = new StringBuilder();
+					continue;
 				}
-				else {
-					value.append(c);
-				}
-				continue;
-			}
 
-			if (c == ':' && currentKey == null) {
-				currentKey = value.toString().trim();
-				value = new StringBuilder();
-			}
-			else if (c == ',') {
-				if (currentKey != null) {
-					result.put(currentKey, unescapeJson(value.toString().trim()));
-				}
-				currentKey = null;
-				value = new StringBuilder();
-			}
-			else {
-				value.append(c);
+				result.put(key, value.getAsString());
 			}
 		}
-
-		// Handle last key if inside nested
-		if (currentKey != null && currentNested != null) {
-			result.put(currentNested + "." + currentKey,
-				unescapeJson(value.toString().trim()));
-		}
-		else if (currentKey != null) {
-			result.put(currentKey, unescapeJson(value.toString().trim()));
+		catch (Exception e) {
+			return Collections.emptyMap();
 		}
 
 		return result;
-	}
-
-	private String unescapeJson(String value) {
-		return value.replace("\\n", "\n")
-			.replace("\\r", "\r")
-			.replace("\\t", "\t")
-			.replace("\\\"", "\"")
-			.replace("\\\\", "\\");
 	}
 
 	private SecurityAuditEventType parseEventType(String value) {

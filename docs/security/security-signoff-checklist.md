@@ -85,8 +85,10 @@
 - [x] Executable harness is versioned at `scripts/security/run_abuse_scenario_suite.py`
 - [x] Scenario logs, machine-readable outcomes, and checksums are stored in
       `docs/security/evidence/abuse-scenario-suite-1702/`
-- [x] 8 additional scenarios covering remaining STRIDE threats executed
-- [x] 13 total scenarios with documented outcomes (see abuse-scenario-suite.md)
+- [x] 8 additional STRIDE scenarios are documented as **legacy tabletop** coverage
+      (non-executable appendix)
+- [x] 13 total scenarios documented (`5` executable runtime + `8` legacy tabletop),
+      with executable outcomes tracked in `scenario-outcomes.json`
 - [x] Zero critical findings requiring immediate remediation
 - [x] Five findings with MEDIUM residual risk formally accepted (T1: prompt injection,
       T3: cloud exfiltration, T5: compromised weights, T9: hallucination,

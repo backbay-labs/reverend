@@ -1,0 +1,14 @@
+$ python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k allowlist_mode_blocks_non_approved_destination
+
+--- stdout ---
+
+
+--- stderr ---
+test_allowlist_mode_blocks_non_approved_destination (scripts.ml.tests.test_corpus_sync_worker.CorpusSyncWorkerTest.test_allowlist_mode_blocks_non_approved_destination) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
+
+exit_code=0

@@ -1,0 +1,14 @@
+$ python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k read_rejects_incomplete_provenance_chain
+
+--- stdout ---
+
+
+--- stderr ---
+test_read_rejects_incomplete_provenance_chain (scripts.ml.tests.test_corpus_sync_worker.CorpusSyncWorkerTest.test_read_rejects_incomplete_provenance_chain) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.016s
+
+OK
+
+exit_code=0

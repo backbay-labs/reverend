@@ -14,7 +14,7 @@
 
 This report consolidates gate outcomes across all seven MVP exit criteria, summarizes the risk register and unresolved items, and provides the data backing the formal go/no-go decision (see `docs/go-no-go-decision.md`).
 
-**Overall result: All seven exit gates PASS.** Four MEDIUM residual security risks are formally accepted. Eight implementation-phase conditions remain open and are tracked as post-RC1 items.
+**Overall result: All seven exit gates PASS for RC scope.** Four MEDIUM residual security risks are formally accepted. GA remains **NO-GO** until conditions `C1-C11` are closed.
 
 ---
 
@@ -189,7 +189,7 @@ Based on the data in this report:
 4. **27 known limitations documented** with workarounds; none are release-blockers.
 5. **Eight security implementation conditions remain open** — these are post-RC1 items required before production deployment, not before RC1 release.
 
-**Recommendation: GO** — proceed to formal go/no-go decision.
+**Recommendation: GO for internal RC1 scope; NO-GO for GA** until conditions `C1-C11` are closed.
 
 See `docs/go-no-go-decision.md` for the formal decision record.
 

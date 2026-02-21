@@ -1,0 +1,45 @@
+[soak] Starting soak test (1 iterations)
+[soak]   iter 1/1: 23.9ms
+
+[soak] Performance: mean=23.9ms p50=23.9ms p95=23.9ms p99=23.9ms
+
+[soak] Stability analysis (1 iterations):
+
+  [diff]
+    coverage: mean=0.666667 stddev=0.000000 range=[0.666667, 0.666667] [STABLE]
+    match_rate: mean=0.666667 stddev=0.000000 range=[0.666667, 0.666667] [STABLE]
+    pairs: mean=3.000000 stddev=0.000000 range=[3.000000, 3.000000] [STABLE]
+
+  [similarity]
+    mrr: mean=1.000000 stddev=0.000000 range=[1.000000, 1.000000] [STABLE]
+    queries: mean=3.000000 stddev=0.000000 range=[3.000000, 3.000000] [STABLE]
+    recall@1: mean=1.000000 stddev=0.000000 range=[1.000000, 1.000000] [STABLE]
+
+  [triage_non_toy]
+    cases: mean=12.000000 stddev=0.000000 range=[12.000000, 12.000000] [STABLE]
+    current_entrypoint_recall: mean=1.000000 stddev=0.000000 range=[1.000000, 1.000000] [STABLE]
+    current_hotspot_recall: mean=1.000000 stddev=0.000000 range=[1.000000, 1.000000] [STABLE]
+    current_macro_f1: mean=0.969697 stddev=0.000000 range=[0.969697, 0.969697] [STABLE]
+    current_unknown_precision: mean=1.000000 stddev=0.000000 range=[1.000000, 1.000000] [STABLE]
+    entrypoint_recall_delta: mean=0.333333 stddev=0.000000 range=[0.333333, 0.333333] [STABLE]
+    hotspot_recall_delta: mean=0.200000 stddev=0.000000 range=[0.200000, 0.200000] [STABLE]
+    macro_f1_delta: mean=0.121020 stddev=0.000000 range=[0.121020, 0.121020] [STABLE]
+    stock_entrypoint_recall: mean=0.666667 stddev=0.000000 range=[0.666667, 0.666667] [STABLE]
+    stock_hotspot_recall: mean=0.800000 stddev=0.000000 range=[0.800000, 0.800000] [STABLE]
+    stock_macro_f1: mean=0.848677 stddev=0.000000 range=[0.848677, 0.848677] [STABLE]
+    stock_unknown_precision: mean=0.750000 stddev=0.000000 range=[0.750000, 0.750000] [STABLE]
+    unknown_precision_delta: mean=0.250000 stddev=0.000000 range=[0.250000, 0.250000] [STABLE]
+
+  [type]
+    accuracy: mean=1.000000 stddev=0.000000 range=[1.000000, 1.000000] [STABLE]
+    cases: mean=5.000000 stddev=0.000000 range=[5.000000, 5.000000] [STABLE]
+
+[soak] Regression check (worst-case across 1 iterations):
+  similarity/recall@1: worst=1.0000 threshold=0.9500 [PASS]
+  similarity/mrr: worst=1.0000 threshold=0.9500 [PASS]
+  type/accuracy: worst=1.0000 threshold=0.9500 [PASS]
+  diff/match_rate: worst=0.6667 threshold=0.6167 [PASS]
+  diff/coverage: worst=0.6667 threshold=0.6167 [PASS]
+
+[soak] wrote docs/evidence/rc-functional-validation/09b-soak-wrapper-report.json
+[soak] PASSED (stable=True, regression=True)

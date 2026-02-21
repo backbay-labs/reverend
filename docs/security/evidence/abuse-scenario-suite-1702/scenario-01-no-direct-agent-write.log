@@ -1,0 +1,14 @@
+$ python3 scripts/tests/no_direct_agent_write_invariant.py --output-dir docs/security/evidence/abuse-scenario-suite-1702/no-direct-agent-write
+
+--- stdout ---
+{
+  "json_report": "docs/security/evidence/abuse-scenario-suite-1702/no-direct-agent-write/no-direct-agent-write-invariant.json",
+  "kind": "no_direct_agent_write_invariant_artifacts",
+  "markdown_report": "docs/security/evidence/abuse-scenario-suite-1702/no-direct-agent-write/no-direct-agent-write-invariant.md",
+  "status": "PASS"
+}
+
+--- stderr ---
+
+
+exit_code=0

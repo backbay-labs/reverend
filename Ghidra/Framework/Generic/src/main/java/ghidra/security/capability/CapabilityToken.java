@@ -58,8 +58,12 @@ public final class CapabilityToken {
 		this.expiresAt = Objects.requireNonNull(builder.expiresAt, "expiresAt is required");
 		this.principal = Objects.requireNonNull(builder.principal, "principal is required");
 		this.profile = Objects.requireNonNull(builder.profile, "profile is required");
-		this.capabilities = Collections.unmodifiableSet(
-			EnumSet.copyOf(Objects.requireNonNull(builder.capabilities, "capabilities is required")));
+		Set<Capability> granted =
+			Objects.requireNonNull(builder.capabilities, "capabilities is required");
+		EnumSet<Capability> capabilitySet = granted.isEmpty()
+			? EnumSet.noneOf(Capability.class)
+			: EnumSet.copyOf(granted);
+		this.capabilities = Collections.unmodifiableSet(capabilitySet);
 		this.scope = builder.scope != null ? builder.scope : TokenScope.UNRESTRICTED;
 	}
 

@@ -171,7 +171,7 @@ public class CapabilityGuard {
 			.tokenId("deny-all")
 			.principal("system:deny-all")
 			.profile("none")
-			.capabilities(java.util.Collections.emptySet())
+			.capabilities(java.util.Collections.<Capability>emptySet())
 			.expiresAt(java.time.Instant.EPOCH)
 			.build());
 	}

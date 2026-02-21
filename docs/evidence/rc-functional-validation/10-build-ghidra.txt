@@ -1,0 +1,1160 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :
+Java: 21
+Gradle: 9.3.1
+Python3 command: [python3.14] (3.14, /opt/homebrew/opt/python@3.14/bin/python3.14)
+Python3 pip version: 25.3
+OS: Mac OS X
+Arch: aarch64
+Using platform: mac_arm_64
+
+> Task :Base:buildCPPParser
+Java Compiler Compiler Version 5.0 (Parser Generator)
+(type "javacc" with no arguments for help)
+Reading from file CPP.jj . . .
+Note: UNICODE_INPUT option is specified. Please make sure you create the parser/lexer using a Reader with the correct character encoding.
+File "TokenMgrError.java" does not exist.  Will create one.
+File "ParseException.java" does not exist.  Will create one.
+File "Token.java" does not exist.  Will create one.
+File "SimpleCharStream.java" does not exist.  Will create one.
+Parser generated with 0 errors and 2 warnings.
+
+> Task :Base:buildCParser
+Java Compiler Compiler Version 5.0 (Parser Generator)
+(type "javacc" with no arguments for help)
+Reading from file C.jj . . .
+Note: UNICODE_INPUT option is specified. Please make sure you create the parser/lexer using a Reader with the correct character encoding.
+File "TokenMgrError.java" does not exist.  Will create one.
+File "ParseException.java" does not exist.  Will create one.
+File "Token.java" does not exist.  Will create one.
+File "SimpleCharStream.java" does not exist.  Will create one.
+Parser generated with 0 errors and 34 warnings.
+
+> Task :Base:buildJavacc
+> Task :Utility:compileJava UP-TO-DATE
+> Task :Generic:compileJava UP-TO-DATE
+> Task :DB:compileJava UP-TO-DATE
+> Task :Gui:compileJava UP-TO-DATE
+> Task :Help:compileJava UP-TO-DATE
+> Task :Docking:compileJava UP-TO-DATE
+> Task :FileSystem:compileJava UP-TO-DATE
+> Task :Graph:compileJava UP-TO-DATE
+> Task :Project:compileJava UP-TO-DATE
+> Task :SoftwareModeling:generateGrammarSource UP-TO-DATE
+> Task :SoftwareModeling:compileJava UP-TO-DATE
+
+> Task :Emulation:compileJava
+
+> Task :Base:compileJava
+
+> Task :Decompiler:compileJava
+
+> Task :GraphServices:compileJava
+
+> Task :FunctionGraph:compileJava
+
+> Task :CodeCompare:compileJava
+
+> Task :BSim:compileJava
+
+> Task :BytePatterns:compileJava
+> Task :ByteViewer:compileJava
+
+> Task :DataGraph:compileJava
+
+> Task :ProposedUtils:compileJava
+
+> Task :AnnotationValidator:compileJava
+> Task :AnnotationValidator:processResources
+> Task :AnnotationValidator:classes
+> Task :AnnotationValidator:jar
+> Task :MarkdownSupport:compileJava UP-TO-DATE
+> Task :MarkdownSupport:processResources NO-SOURCE
+> Task :MarkdownSupport:classes UP-TO-DATE
+> Task :Base:buildGlobalMarkdown SKIPPED
+> Task :Base:generateExtraHelpFiles
+> Task :Base:indexHelp
+> Task :Docking:buildGlobalMarkdown SKIPPED
+> Task :Docking:indexHelp UP-TO-DATE
+> Task :Generic:processResources UP-TO-DATE
+> Task :Generic:classes UP-TO-DATE
+> Task :Generic:jar UP-TO-DATE
+> Task :Gui:processResources UP-TO-DATE
+> Task :Gui:classes UP-TO-DATE
+> Task :Gui:jar UP-TO-DATE
+> Task :Help:processResources UP-TO-DATE
+> Task :Help:classes UP-TO-DATE
+> Task :Help:jar UP-TO-DATE
+> Task :Utility:processResources NO-SOURCE
+> Task :Utility:classes UP-TO-DATE
+> Task :Utility:jar UP-TO-DATE
+> Task :Docking:buildHelpFiles UP-TO-DATE
+> Task :Docking:buildModuleHelp UP-TO-DATE
+> Task :Graph:buildGlobalMarkdown SKIPPED
+> Task :Graph:indexHelp UP-TO-DATE
+> Task :Graph:buildHelpFiles UP-TO-DATE
+> Task :Graph:buildModuleHelp UP-TO-DATE
+> Task :Base:buildHelpFiles
+> Task :Base:buildModuleHelp
+> Task :Base:processResources
+> Task :Base:classes
+> Task :Base:jar
+> Task :DB:processResources NO-SOURCE
+> Task :DB:classes UP-TO-DATE
+> Task :DB:jar UP-TO-DATE
+> Task :Docking:processResources UP-TO-DATE
+> Task :Docking:classes UP-TO-DATE
+> Task :Docking:jar UP-TO-DATE
+> Task :Emulation:processResources NO-SOURCE
+> Task :Emulation:classes
+> Task :Emulation:jar
+> Task :FileSystem:processResources NO-SOURCE
+> Task :FileSystem:classes UP-TO-DATE
+> Task :FileSystem:jar UP-TO-DATE
+> Task :Graph:processResources UP-TO-DATE
+> Task :Graph:classes UP-TO-DATE
+> Task :Graph:jar UP-TO-DATE
+> Task :Project:processResources UP-TO-DATE
+> Task :Project:classes UP-TO-DATE
+> Task :Project:jar UP-TO-DATE
+> Task :ProposedUtils:processResources NO-SOURCE
+> Task :ProposedUtils:classes
+> Task :ProposedUtils:jar
+> Task :SoftwareModeling:processResources UP-TO-DATE
+> Task :SoftwareModeling:classes UP-TO-DATE
+> Task :SoftwareModeling:jar UP-TO-DATE
+
+> Task :Framework-TraceModeling:compileJava
+
+> Task :Debugger-api:compileJava
+> Task :Debugger-isf:configureGenerateProto
+> Task :Debugger-isf:generateProto
+> Task :Debugger-isf:compileJava
+
+> Task :Sarif:compileJava
+
+> Task :DecompilerDependent:compileJava
+
+> Task :Debugger:compileJava
+
+> Task :Debugger-rmi-trace:configureGenerateProto
+> Task :Debugger-rmi-trace:generateProto
+> Task :Pty:compileJava
+> Task :Debugger-rmi-trace:compileJava
+> Task :Debugger-agent-gdb:compileJava NO-SOURCE
+> Task :Doclets:compileJava
+> Task :Doclets:processResources NO-SOURCE
+> Task :Doclets:classes
+> Task :Doclets:jar
+
+> Task :MicrosoftDmang:compileJava
+
+> Task :MicrosoftDemangler:compileJava
+
+> Task :PDB:compileJava
+
+> Task :Recognizers:compileJava
+
+> Task :FileFormats:compileJava
+
+> Task :SystemEmulation:compileJava
+
+> Task :VersionTracking:compileJava
+
+> Task :createPythonTypeStubs
+
+> Task :createGhidraStubsWheel
+
+> Task :createJavadocs
+
+> Task :createJsondocs
+> Task :zipJavadocs
+> Task :6502:ip
+> Task :6502:saveSleighArgs
+> Task :6502:sleighCompile UP-TO-DATE
+
+> Task :68000:compileJava
+
+> Task :68000:processResources NO-SOURCE
+> Task :68000:classes
+> Task :68000:jar
+> Task :68000:assemble
+> Task :68000:ip
+> Task :68000:saveSleighArgs
+> Task :68000:sleighCompile UP-TO-DATE
+> Task :8048:ip
+> Task :8048:saveSleighArgs
+> Task :8048:sleighCompile UP-TO-DATE
+> Task :8051:compileJava NO-SOURCE
+> Task :8051:processResources NO-SOURCE
+> Task :8051:classes UP-TO-DATE
+> Task :8051:jar
+> Task :8051:assemble
+> Task :8051:ip
+> Task :8051:saveSleighArgs
+> Task :8051:sleighCompile UP-TO-DATE
+> Task :8085:ip
+> Task :8085:saveSleighArgs
+> Task :8085:sleighCompile UP-TO-DATE
+
+> Task :AARCH64:compileJava
+
+> Task :AARCH64:processResources NO-SOURCE
+> Task :AARCH64:classes
+> Task :AARCH64:jar
+> Task :AARCH64:assemble
+> Task :AARCH64:ip
+> Task :AARCH64:saveSleighArgs
+> Task :AARCH64:sleighCompile UP-TO-DATE
+> Task :AnnotationValidator:assemble
+> Task :AnnotationValidator:ip
+
+> Task :ARM:compileJava
+
+> Task :ARM:processResources NO-SOURCE
+> Task :ARM:classes
+> Task :ARM:jar
+> Task :ARM:assemble
+> Task :ARM:ip
+> Task :ARM:saveSleighArgs
+> Task :ARM:sleighCompile UP-TO-DATE
+> Task :Atmel:compileJava
+> Task :Atmel:processResources NO-SOURCE
+> Task :Atmel:classes
+> Task :Atmel:jar
+> Task :Atmel:assemble
+> Task :Atmel:ip
+> Task :Atmel:saveSleighArgs
+> Task :Atmel:sleighCompile UP-TO-DATE
+> Task :Base:assemble
+> Task :Base:ip
+> Task :BPF:ip
+> Task :BPF:saveSleighArgs
+> Task :BPF:sleighCompile UP-TO-DATE
+> Task :BSim:buildNatives UP-TO-DATE
+> Task :BSim:buildGlobalMarkdown SKIPPED
+> Task :BSim:indexHelp
+> Task :Decompiler:buildGlobalMarkdown SKIPPED
+> Task :Decompiler:indexHelp
+> Task :Decompiler:buildHelpFiles
+> Task :Decompiler:buildModuleHelp
+> Task :FunctionGraph:buildGlobalMarkdown SKIPPED
+> Task :FunctionGraph:indexHelp
+> Task :GraphServices:buildGlobalMarkdown SKIPPED
+> Task :GraphServices:indexHelp
+> Task :GraphServices:buildHelpFiles
+> Task :GraphServices:buildModuleHelp
+> Task :FunctionGraph:buildHelpFiles
+> Task :FunctionGraph:buildModuleHelp
+> Task :BSim:buildHelpFiles
+> Task :BSim:buildModuleHelp
+> Task :BSim:processResources
+> Task :BSim:classes
+> Task :BSim:jar
+> Task :BSim:assemble
+> Task :BSim:ip
+> Task :BSimElasticPlugin:ip
+> Task :BSimFeatureVisualizer:buildGlobalMarkdown SKIPPED
+> Task :BSimFeatureVisualizer:indexHelp
+> Task :BSimFeatureVisualizer:buildHelpFiles
+> Task :BSimFeatureVisualizer:buildModuleHelp
+> Task :BSimFeatureVisualizer:compileJava
+> Task :BSimFeatureVisualizer:processResources
+> Task :BSimFeatureVisualizer:classes
+> Task :BSimFeatureVisualizer:jar
+> Task :BSimFeatureVisualizer:assemble
+> Task :BSimFeatureVisualizer:ip
+> Task :BytePatterns:buildGlobalMarkdown SKIPPED
+> Task :BytePatterns:indexHelp
+> Task :BytePatterns:buildHelpFiles
+> Task :BytePatterns:buildModuleHelp
+> Task :BytePatterns:processResources
+> Task :BytePatterns:classes
+> Task :BytePatterns:jar
+> Task :BytePatterns:assemble
+> Task :BytePatterns:ip
+> Task :ByteViewer:buildGlobalMarkdown SKIPPED
+> Task :ByteViewer:indexHelp
+> Task :ByteViewer:buildHelpFiles
+> Task :ByteViewer:buildModuleHelp
+> Task :ByteViewer:processResources
+> Task :ByteViewer:classes
+> Task :ByteViewer:jar
+> Task :ByteViewer:assemble
+> Task :ByteViewer:ip
+> Task :CodeCompare:processResources NO-SOURCE
+> Task :CodeCompare:classes
+> Task :CodeCompare:jar
+> Task :CodeCompare:assemble
+> Task :CodeCompare:ip
+> Task :CP1600:ip
+> Task :CP1600:saveSleighArgs
+> Task :CP1600:sleighCompile UP-TO-DATE
+> Task :CR16:ip
+> Task :CR16:saveSleighArgs
+> Task :CR16:sleighCompile UP-TO-DATE
+> Task :Dalvik:compileJava
+> Task :Dalvik:processResources NO-SOURCE
+> Task :Dalvik:classes
+> Task :Dalvik:jar
+> Task :Dalvik:assemble
+> Task :Dalvik:ip
+> Task :Dalvik:saveSleighArgs
+> Task :Dalvik:sleighCompile UP-TO-DATE
+> Task :DATA:compileJava
+> Task :DATA:processResources NO-SOURCE
+> Task :DATA:classes
+> Task :DATA:jar
+> Task :DATA:assemble
+> Task :DATA:ip
+> Task :DATA:saveSleighArgs
+> Task :DATA:sleighCompile UP-TO-DATE
+> Task :DataGraph:buildGlobalMarkdown SKIPPED
+> Task :DataGraph:indexHelp
+> Task :DataGraph:buildHelpFiles
+> Task :DataGraph:buildModuleHelp
+> Task :DataGraph:processResources
+> Task :DataGraph:classes
+> Task :DataGraph:jar
+> Task :DataGraph:assemble
+> Task :DataGraph:ip
+> Task :DB:assemble UP-TO-DATE
+> Task :DB:ip
+> Task :Debugger:buildGlobalMarkdown SKIPPED
+> Task :Debugger:indexHelp
+> Task :DecompilerDependent:buildGlobalMarkdown SKIPPED
+> Task :DecompilerDependent:indexHelp
+> Task :Sarif:buildGlobalMarkdown SKIPPED
+> Task :Sarif:indexHelp
+> Task :Sarif:buildHelpFiles
+> Task :Sarif:buildModuleHelp
+> Task :DecompilerDependent:buildHelpFiles
+> Task :DecompilerDependent:buildModuleHelp
+> Task :Debugger:buildHelpFiles
+> Task :Debugger:buildModuleHelp
+> Task :Debugger:processResources
+> Task :Debugger:classes
+> Task :Debugger:jar
+> Task :Debugger:assemble
+> Task :Debugger:ip
+> Task :Debugger-agent-dbgeng:buildNatives UP-TO-DATE
+> Task :Debugger-agent-dbgeng:buildGlobalMarkdown SKIPPED
+> Task :Debugger-agent-dbgeng:indexHelp
+> Task :Debugger-rmi-trace:buildGlobalMarkdown SKIPPED
+> Task :Debugger-rmi-trace:indexHelp
+> Task :Debugger-rmi-trace:buildHelpFiles
+> Task :Debugger-rmi-trace:buildModuleHelp
+> Task :Debugger-agent-dbgeng:buildHelpFiles
+> Task :Debugger-agent-dbgeng:buildModuleHelp
+> Task :Debugger-agent-dbgeng:compileJava NO-SOURCE
+> Task :Debugger-agent-dbgeng:processResources
+> Task :Debugger-agent-dbgeng:classes
+> Task :Debugger-agent-dbgeng:jar
+> Task :Debugger-agent-dbgeng:assemble
+> Task :Debugger-agent-dbgeng:assemblePyPackage
+> Task :Debugger-agent-dbgeng:buildPyPackage
+> Task :Debugger-agent-dbgeng:ip
+> Task :Debugger-agent-drgn:buildGlobalMarkdown SKIPPED
+> Task :Debugger-agent-drgn:indexHelp
+> Task :Debugger-agent-drgn:buildHelpFiles
+> Task :Debugger-agent-drgn:buildModuleHelp
+> Task :Debugger-agent-drgn:compileJava NO-SOURCE
+> Task :Debugger-agent-drgn:processResources
+> Task :Debugger-agent-drgn:classes
+> Task :Debugger-agent-drgn:jar
+> Task :Debugger-agent-drgn:assemble
+> Task :Debugger-agent-drgn:assemblePyPackage
+> Task :Debugger-agent-drgn:buildPyPackage
+> Task :Debugger-agent-drgn:ip
+> Task :Debugger-agent-gdb:buildGlobalMarkdown SKIPPED
+> Task :Debugger-agent-gdb:indexHelp
+> Task :Debugger-agent-gdb:buildHelpFiles
+> Task :Debugger-agent-gdb:buildModuleHelp
+> Task :Debugger-agent-gdb:processResources
+> Task :Debugger-agent-gdb:classes
+> Task :Debugger-agent-gdb:jar
+> Task :Debugger-agent-gdb:assemble
+> Task :Debugger-agent-gdb:assemblePyPackage
+> Task :Debugger-agent-gdb:buildPyPackage
+> Task :Debugger-agent-gdb:ip
+> Task :Debugger-agent-lldb:buildGlobalMarkdown SKIPPED
+> Task :Debugger-agent-lldb:indexHelp
+> Task :Debugger-agent-lldb:buildHelpFiles
+> Task :Debugger-agent-lldb:buildModuleHelp
+> Task :Debugger-agent-lldb:compileJava NO-SOURCE
+> Task :Debugger-agent-lldb:processResources
+> Task :Debugger-agent-lldb:classes
+> Task :Debugger-agent-lldb:jar
+> Task :Debugger-agent-lldb:assemble
+> Task :Debugger-agent-lldb:assemblePyPackage
+> Task :Debugger-agent-lldb:buildPyPackage
+> Task :Debugger-agent-lldb:ip
+> Task :Debugger-agent-x64dbg:buildNatives UP-TO-DATE
+> Task :Debugger-agent-x64dbg:buildGlobalMarkdown SKIPPED
+> Task :Debugger-agent-x64dbg:indexHelp
+> Task :Debugger-agent-x64dbg:buildHelpFiles
+> Task :Debugger-agent-x64dbg:buildModuleHelp
+> Task :Debugger-agent-x64dbg:compileJava NO-SOURCE
+> Task :Debugger-agent-x64dbg:processResources
+> Task :Debugger-agent-x64dbg:classes
+> Task :Debugger-agent-x64dbg:jar
+> Task :Debugger-agent-x64dbg:assemble
+> Task :Debugger-agent-x64dbg:assemblePyPackage
+> Task :Debugger-agent-x64dbg:buildPyPackage
+> Task :Debugger-agent-x64dbg:ip
+> Task :Debugger-api:processResources NO-SOURCE
+> Task :Debugger-api:classes
+> Task :Debugger-api:jar
+> Task :Debugger-api:assemble
+> Task :Debugger-api:ip
+> Task :Debugger-importers:buildGlobalMarkdown SKIPPED
+> Task :Debugger-importers:indexHelp SKIPPED
+> Task :Debugger-importers:buildHelpFiles SKIPPED
+> Task :Debugger-importers:buildModuleHelp
+> Task :Debugger-importers:compileJava
+> Task :Debugger-importers:processResources NO-SOURCE
+> Task :Debugger-importers:classes
+> Task :Debugger-importers:jar
+> Task :Debugger-importers:assemble
+> Task :Debugger-importers:ip
+> Task :Debugger-isf:processResources NO-SOURCE
+> Task :Debugger-isf:classes
+> Task :Debugger-isf:jar
+> Task :Debugger-isf:assemble
+> Task :Debugger-isf:ip
+> Task :Debugger-jpda:buildGlobalMarkdown SKIPPED
+> Task :Debugger-jpda:indexHelp
+> Task :Debugger-jpda:buildHelpFiles
+> Task :Debugger-jpda:buildModuleHelp
+
+> Task :Debugger-jpda:compileJava
+
+> Task :Debugger-jpda:processResources
+> Task :Debugger-jpda:classes
+> Task :Debugger-jpda:jar
+> Task :Debugger-jpda:assemble
+> Task :Debugger-jpda:ip
+> Task :Debugger-rmi-trace:processResources
+> Task :Debugger-rmi-trace:classes
+> Task :Debugger-rmi-trace:jar
+> Task :Debugger-rmi-trace:assemble
+> Task :Debugger-rmi-trace:configureGenerateProtoPy
+> Task :Debugger-rmi-trace:generateProtoPy
+> Task :Debugger-rmi-trace:assemblePyPackage
+> Task :Debugger-rmi-trace:buildPyPackage
+> Task :Debugger-rmi-trace:ip
+> Task :DebugUtils:compileJava
+> Task :DebugUtils:processResources NO-SOURCE
+> Task :DebugUtils:classes
+> Task :DebugUtils:jar
+> Task :DebugUtils:assemble
+> Task :DebugUtils:ip
+> Task :Decompiler:CheckToolChain
+> Task :Decompiler:processResources
+> Task :Decompiler:classes
+> Task :Decompiler:jar
+> Task :Decompiler:compileSleighMac_x86_64ExecutableSleighC
+> Task :Decompiler:ip
+> Task :DecompilerDependent:processResources
+> Task :DecompilerDependent:classes
+> Task :DecompilerDependent:jar
+> Task :DecompilerDependent:assemble
+> Task :DecompilerDependent:ip
+> Task :DemanglerGnu:ip
+> Task :DMG:compileJava NO-SOURCE
+> Task :DMG:processResources NO-SOURCE
+> Task :DMG:classes UP-TO-DATE
+> Task :Decompiler:compileDecompileMac_arm_64ExecutableDecompileCpp
+> Task :Decompiler:compileSleighMac_arm_64ExecutableSleighC
+> Task :Decompiler:compileSleighMac_arm_64ExecutableSleighCpp
+
+> Task :DMG:compileDmgJava
+
+> Task :DMG:processDmgResources NO-SOURCE
+> Task :DMG:dmgClasses
+> Task :DMG:jar
+> Task :DMG:assemble
+> Task :DMG:ip
+> Task :Docking:assemble UP-TO-DATE
+> Task :Docking:ip
+> Task :eBPF:compileJava
+> Task :eBPF:processResources NO-SOURCE
+> Task :eBPF:classes
+> Task :eBPF:jar
+> Task :eBPF:assemble
+> Task :eBPF:ip
+> Task :eBPF:saveSleighArgs
+> Task :eBPF:sleighCompile UP-TO-DATE
+> Task :Emulation:assemble
+> Task :Emulation:ip
+> Task :FileFormats:CheckToolChain
+> Task :FileFormats:buildGlobalMarkdown SKIPPED
+> Task :FileFormats:indexHelp
+> Task :PDB:buildGlobalMarkdown SKIPPED
+> Task :PDB:indexHelp
+> Task :PDB:buildHelpFiles
+> Task :PDB:buildModuleHelp
+> Task :FileFormats:buildHelpFiles
+> Task :FileFormats:buildModuleHelp
+> Task :FileFormats:processResources
+> Task :FileFormats:classes
+> Task :FileFormats:extractSevenZipNativeLibs
+> Task :FileFormats:jar
+> Task :FileFormats:compileLzfseMac_arm_64ExecutableLzfseC
+> Task :Decompiler:compileSleighMac_x86_64ExecutableSleighCpp
+> Task :Decompiler:compileDecompileMac_x86_64ExecutableDecompileCpp
+> Task :FileFormats:ip
+> Task :FileSystem:assemble UP-TO-DATE
+> Task :FileSystem:ip
+> Task :Framework-TraceModeling:processResources NO-SOURCE
+> Task :Framework-TraceModeling:classes
+> Task :Framework-TraceModeling:jar
+> Task :Framework-TraceModeling:assemble
+> Task :Framework-TraceModeling:ip
+> Task :FunctionGraph:processResources
+> Task :FunctionGraph:classes
+> Task :FunctionGraph:jar
+> Task :FunctionGraph:assemble
+> Task :FunctionGraph:ip
+> Task :FunctionGraphDecompilerExtension:compileJava
+> Task :FunctionGraphDecompilerExtension:processResources
+> Task :FunctionGraphDecompilerExtension:classes
+> Task :FunctionGraphDecompilerExtension:jar
+> Task :FunctionGraphDecompilerExtension:assemble
+> Task :FunctionGraphDecompilerExtension:ip
+> Task :FunctionID:buildGlobalMarkdown SKIPPED
+> Task :FunctionID:indexHelp
+> Task :FunctionID:buildHelpFiles
+> Task :FunctionID:buildModuleHelp
+
+> Task :FunctionID:compileJava
+
+> Task :FunctionID:processResources
+> Task :FunctionID:classes
+> Task :FunctionID:jar
+> Task :FunctionID:assemble
+> Task :FunctionID:ip
+> Task :FunctionID:unpackFidDatabases
+> Task :Generic:assemble UP-TO-DATE
+> Task :Generic:ip
+> Task :GhidraGo:buildGlobalMarkdown SKIPPED
+> Task :GhidraGo:indexHelp
+> Task :GhidraGo:buildHelpFiles
+> Task :GhidraGo:buildModuleHelp
+
+> Task :GhidraGo:compileJava
+
+> Task :GhidraGo:processResources
+> Task :GhidraGo:classes
+> Task :GhidraGo:jar
+> Task :GhidraGo:assemble
+> Task :GhidraGo:ip
+> Task :GhidraServer:compileJava
+> Task :GhidraServer:processResources NO-SOURCE
+> Task :GhidraServer:classes
+> Task :GhidraServer:jar
+> Task :GhidraServer:assemble
+> Task :GhidraServer:generateGhidraServerClasspath
+> Task :GhidraServer:ip
+
+> Task :GnuDemangler:compileJava
+
+> Task :GnuDemangler:processResources NO-SOURCE
+> Task :GnuDemangler:classes
+> Task :GnuDemangler:jar
+> Task :GnuDemangler:assemble
+> Task :GnuDemangler:ip
+> Task :GnuDisassembler:ip
+> Task :Graph:assemble UP-TO-DATE
+> Task :Graph:ip
+> Task :GraphFunctionCalls:buildGlobalMarkdown SKIPPED
+> Task :GraphFunctionCalls:indexHelp
+> Task :GraphFunctionCalls:buildHelpFiles
+> Task :GraphFunctionCalls:buildModuleHelp
+
+> Task :GraphFunctionCalls:compileJava
+
+> Task :GraphFunctionCalls:processResources
+> Task :GraphFunctionCalls:classes
+> Task :GraphFunctionCalls:jar
+> Task :GraphFunctionCalls:assemble
+> Task :GraphFunctionCalls:ip
+> Task :GraphServices:processResources
+> Task :GraphServices:classes
+> Task :GraphServices:jar
+> Task :GraphServices:assemble
+> Task :GraphServices:ip
+> Task :Gui:assemble UP-TO-DATE
+> Task :Gui:ip
+> Task :HCS08:ip
+> Task :HCS08:saveSleighArgs
+> Task :HCS08:sleighCompile UP-TO-DATE
+> Task :HCS12:compileJava
+> Task :HCS12:processResources NO-SOURCE
+> Task :HCS12:classes
+> Task :HCS12:jar
+> Task :HCS12:assemble
+> Task :HCS12:ip
+> Task :HCS12:saveSleighArgs
+> Task :HCS12:sleighCompile UP-TO-DATE
+> Task :Help:assemble UP-TO-DATE
+> Task :Help:ip
+
+> Task :JVM:compileJava
+
+> Task :JVM:processResources NO-SOURCE
+> Task :JVM:classes
+> Task :JVM:jar
+> Task :JVM:assemble
+> Task :JVM:ip
+> Task :JVM:saveSleighArgs
+> Task :JVM:sleighCompile UP-TO-DATE
+> Task :Jython:buildGlobalMarkdown SKIPPED
+> Task :Jython:indexHelp
+> Task :Jython:buildHelpFiles
+> Task :Jython:buildModuleHelp
+
+> Task :Jython:compileJava
+
+> Task :Jython:processResources
+> Task :Jython:classes
+> Task :Jython:jythonSrcCopy
+> Task :Jython:jythonUnpack
+> Task :Jython:jar
+> Task :Jython:assemble
+> Task :Jython:ip
+
+> Task :LaunchSupport:compileJava
+
+> Task :LaunchSupport:processResources NO-SOURCE
+> Task :LaunchSupport:classes
+> Task :LaunchSupport:jar
+> Task :Lisa:ip
+> Task :Loongarch:compileJava
+> Task :Loongarch:processResources NO-SOURCE
+> Task :Loongarch:classes
+> Task :Loongarch:jar
+> Task :Loongarch:assemble
+> Task :Loongarch:ip
+> Task :Loongarch:saveSleighArgs
+> Task :Loongarch:sleighCompile UP-TO-DATE
+> Task :M16C:ip
+> Task :M16C:saveSleighArgs
+> Task :M16C:sleighCompile UP-TO-DATE
+> Task :M8C:ip
+> Task :M8C:saveSleighArgs
+> Task :M8C:sleighCompile UP-TO-DATE
+> Task :MachineLearning:ip
+> Task :Decompiler:linkSleighMac_arm_64Executable
+> Task :Decompiler:sleighMac_arm_64Executable
+> Task :MC6800:ip
+> Task :MC6800:saveSleighArgs
+> Task :MC6800:sleighCompile UP-TO-DATE
+> Task :MCS96:ip
+> Task :MCS96:saveSleighArgs
+> Task :MCS96:sleighCompile UP-TO-DATE
+> Task :MicrosoftCodeAnalyzer:compileJava
+> Task :MicrosoftCodeAnalyzer:processResources NO-SOURCE
+> Task :MicrosoftCodeAnalyzer:classes
+> Task :MicrosoftCodeAnalyzer:jar
+> Task :MicrosoftCodeAnalyzer:assemble
+> Task :Decompiler:linkSleighMac_x86_64Executable
+> Task :Decompiler:sleighMac_x86_64Executable
+> Task :MicrosoftCodeAnalyzer:ip
+> Task :MicrosoftDemangler:processResources NO-SOURCE
+> Task :MicrosoftDemangler:classes
+> Task :MicrosoftDemangler:jar
+> Task :MicrosoftDemangler:assemble
+> Task :MicrosoftDemangler:ip
+> Task :MicrosoftDmang:processResources NO-SOURCE
+> Task :MicrosoftDmang:classes
+> Task :MicrosoftDmang:jar
+> Task :MicrosoftDmang:assemble
+> Task :MicrosoftDmang:ip
+
+> Task :MIPS:compileJava
+
+> Task :FileFormats:linkLzfseMac_arm_64Executable
+> Task :FileFormats:buildNatives
+> Task :FileFormats:lzfseMac_arm_64Executable
+> Task :MIPS:processResources NO-SOURCE
+> Task :MIPS:classes
+> Task :MIPS:jar
+> Task :MIPS:assemble
+> Task :MIPS:ip
+> Task :MIPS:saveSleighArgs
+> Task :MIPS:sleighCompile UP-TO-DATE
+> Task :NDS32:compileJava
+> Task :NDS32:processResources NO-SOURCE
+> Task :NDS32:classes
+> Task :NDS32:jar
+> Task :NDS32:assemble
+> Task :NDS32:ip
+> Task :NDS32:saveSleighArgs
+> Task :NDS32:sleighCompile UP-TO-DATE
+> Task :PA-RISC:compileJava NO-SOURCE
+> Task :PA-RISC:processResources NO-SOURCE
+> Task :PA-RISC:classes UP-TO-DATE
+> Task :PA-RISC:jar
+> Task :PA-RISC:assemble
+> Task :PA-RISC:ip
+> Task :PA-RISC:saveSleighArgs
+> Task :PA-RISC:sleighCompile UP-TO-DATE
+> Task :PDB:buildNatives UP-TO-DATE
+> Task :PDB:processResources
+> Task :PDB:classes
+> Task :PDB:jar
+> Task :PDB:assemble
+> Task :PDB:ip
+
+> Task :PIC:compileJava
+
+> Task :PIC:processResources NO-SOURCE
+> Task :PIC:classes
+> Task :PIC:jar
+> Task :PIC:assemble
+> Task :PIC:ip
+> Task :PIC:saveSleighArgs
+> Task :PIC:sleighCompile UP-TO-DATE
+
+> Task :PowerPC:compileJava
+
+> Task :PowerPC:processResources NO-SOURCE
+> Task :PowerPC:classes
+> Task :PowerPC:jar
+> Task :Decompiler:linkDecompileMac_arm_64Executable
+> Task :Decompiler:buildNatives
+> Task :Decompiler:decompileMac_arm_64Executable
+> Task :PowerPC:assemble
+> Task :PowerPC:ip
+> Task :PowerPC:saveSleighArgs
+> Task :PowerPC:sleighCompile UP-TO-DATE
+> Task :ProgramDiff:buildGlobalMarkdown SKIPPED
+> Task :ProgramDiff:indexHelp
+> Task :ProgramDiff:buildHelpFiles
+> Task :ProgramDiff:buildModuleHelp
+
+> Task :ProgramDiff:compileJava
+
+> Task :ProgramDiff:processResources
+> Task :ProgramDiff:classes
+> Task :ProgramDiff:jar
+> Task :ProgramDiff:assemble
+> Task :ProgramDiff:ip
+> Task :ProgramGraph:buildGlobalMarkdown SKIPPED
+> Task :ProgramGraph:indexHelp
+> Task :FileFormats:compileLzfseMac_x86_64ExecutableLzfseC
+> Task :ProgramGraph:buildHelpFiles
+> Task :ProgramGraph:buildModuleHelp
+> Task :ProgramGraph:compileJava
+> Task :ProgramGraph:processResources
+> Task :ProgramGraph:classes
+> Task :ProgramGraph:jar
+> Task :ProgramGraph:assemble
+> Task :ProgramGraph:ip
+> Task :Project:assemble UP-TO-DATE
+> Task :Project:ip
+> Task :ProposedUtils:assemble
+> Task :ProposedUtils:ip
+> Task :Pty:processResources
+> Task :Pty:classes
+> Task :Pty:jar
+> Task :Pty:assemble
+> Task :Pty:ip
+> Task :Public_Release:buildGlobalMarkdown
+> Task :Public_Release:indexHelp SKIPPED
+> Task :Public_Release:buildHelpFiles SKIPPED
+> Task :Public_Release:buildModuleHelp
+> Task :Public_Release:compileJava NO-SOURCE
+> Task :Public_Release:processResources
+> Task :Public_Release:classes
+> Task :Public_Release:jar
+> Task :Public_Release:assemble
+> Task :Public_Release:ip
+> Task :PyGhidra:buildGlobalMarkdown SKIPPED
+> Task :PyGhidra:indexHelp
+> Task :PyGhidra:buildHelpFiles
+> Task :PyGhidra:buildModuleHelp
+
+> Task :PyGhidra:compileJava
+
+> Task :PyGhidra:processResources
+> Task :PyGhidra:classes
+> Task :PyGhidra:jar
+> Task :PyGhidra:assemble
+> Task :PyGhidra:assemblePyPackage
+> Task :PyGhidra:buildPyPackage
+> Task :PyGhidra:ip
+> Task :Recognizers:processResources NO-SOURCE
+> Task :Recognizers:classes
+> Task :Recognizers:jar
+> Task :Recognizers:assemble
+> Task :Recognizers:ip
+
+> Task :RISCV:compileJava
+
+> Task :RISCV:processResources NO-SOURCE
+> Task :RISCV:classes
+> Task :RISCV:jar
+> Task :RISCV:assemble
+> Task :RISCV:ip
+> Task :RISCV:saveSleighArgs
+> Task :RISCV:sleighCompile UP-TO-DATE
+> Task :sample:ip
+> Task :SampleTablePlugin:ip
+> Task :Sarif:processResources
+> Task :Sarif:classes
+> Task :Sarif:jar
+> Task :Sarif:assemble
+> Task :Sarif:ip
+> Task :SleighDevTools:ip
+> Task :SoftwareModeling:assemble UP-TO-DATE
+> Task :SoftwareModeling:ip
+> Task :SourceCodeLookup:buildGlobalMarkdown SKIPPED
+> Task :SourceCodeLookup:indexHelp
+> Task :SourceCodeLookup:buildHelpFiles
+> Task :SourceCodeLookup:buildModuleHelp
+
+> Task :SourceCodeLookup:compileJava
+
+> Task :SourceCodeLookup:processResources
+> Task :SourceCodeLookup:classes
+> Task :SourceCodeLookup:jar
+> Task :SourceCodeLookup:assemble
+> Task :SourceCodeLookup:ip
+> Task :Sparc:compileJava
+> Task :Sparc:processResources NO-SOURCE
+> Task :Sparc:classes
+> Task :Sparc:jar
+> Task :Sparc:assemble
+> Task :Sparc:ip
+> Task :Sparc:saveSleighArgs
+> Task :Sparc:sleighCompile UP-TO-DATE
+> Task :SuperH:ip
+> Task :SuperH:saveSleighArgs
+> Task :SuperH:sleighCompile UP-TO-DATE
+> Task :SuperH4:compileJava
+> Task :SuperH4:processResources NO-SOURCE
+> Task :SuperH4:classes
+> Task :SuperH4:jar
+> Task :SuperH4:assemble
+> Task :SuperH4:ip
+> Task :SuperH4:saveSleighArgs
+> Task :SuperH4:sleighCompile UP-TO-DATE
+> Task :SwiftDemangler:compileJava
+> Task :SwiftDemangler:processResources NO-SOURCE
+> Task :SwiftDemangler:classes
+> Task :SwiftDemangler:jar
+> Task :SwiftDemangler:assemble
+> Task :SwiftDemangler:ip
+> Task :SymbolicSummaryZ3:ip
+> Task :SystemEmulation:processResources NO-SOURCE
+> Task :SystemEmulation:classes
+> Task :SystemEmulation:jar
+> Task :SystemEmulation:assemble
+> Task :SystemEmulation:ip
+> Task :TaintAnalysis:compileJava
+> Task :TaintAnalysis:processResources NO-SOURCE
+> Task :TaintAnalysis:classes
+> Task :TaintAnalysis:jar
+> Task :TaintAnalysis:assemble
+> Task :TaintAnalysis:ip
+> Task :TI_MSP430:compileJava
+> Task :TI_MSP430:processResources NO-SOURCE
+> Task :TI_MSP430:classes
+> Task :TI_MSP430:jar
+> Task :TI_MSP430:assemble
+> Task :TI_MSP430:ip
+> Task :TI_MSP430:saveSleighArgs
+> Task :TI_MSP430:sleighCompile UP-TO-DATE
+> Task :Toy:saveSleighArgs
+> Task :Toy:sleighCompile UP-TO-DATE
+
+> Task :tricore:compileJava
+
+> Task :tricore:processResources NO-SOURCE
+> Task :tricore:classes
+> Task :tricore:jar
+> Task :tricore:assemble
+> Task :tricore:ip
+> Task :tricore:saveSleighArgs
+> Task :tricore:sleighCompile UP-TO-DATE
+> Task :FileFormats:linkLzfseMac_x86_64Executable
+> Task :FileFormats:lzfseMac_x86_64Executable
+> Task :FileFormats:assemble
+> Task :Utility:assemble UP-TO-DATE
+> Task :Utility:ip
+> Task :V850:compileJava NO-SOURCE
+> Task :V850:processResources NO-SOURCE
+> Task :V850:classes UP-TO-DATE
+> Task :V850:jar
+> Task :V850:assemble
+> Task :V850:ip
+> Task :V850:saveSleighArgs
+> Task :V850:sleighCompile UP-TO-DATE
+> Task :VersionTracking:buildGlobalMarkdown SKIPPED
+> Task :VersionTracking:indexHelp
+> Task :VersionTracking:buildHelpFiles
+> Task :VersionTracking:buildModuleHelp
+> Task :VersionTracking:processResources
+> Task :VersionTracking:classes
+> Task :VersionTracking:jar
+> Task :VersionTracking:assemble
+> Task :VersionTracking:ip
+> Task :VersionTrackingBSim:buildGlobalMarkdown SKIPPED
+> Task :VersionTrackingBSim:indexHelp
+> Task :VersionTrackingBSim:buildHelpFiles
+> Task :VersionTrackingBSim:buildModuleHelp
+> Task :VersionTrackingBSim:compileJava
+> Task :VersionTrackingBSim:processResources
+> Task :VersionTrackingBSim:classes
+> Task :VersionTrackingBSim:jar
+> Task :VersionTrackingBSim:assemble
+> Task :VersionTrackingBSim:ip
+> Task :WildcardAssembler:buildGlobalMarkdown SKIPPED
+> Task :WildcardAssembler:indexHelp
+> Task :Decompiler:linkDecompileMac_x86_64Executable
+> Task :WildcardAssembler:buildHelpFiles
+> Task :WildcardAssembler:buildModuleHelp
+> Task :WildcardAssembler:compileJava
+> Task :WildcardAssembler:processResources
+> Task :WildcardAssembler:classes
+> Task :WildcardAssembler:jar
+> Task :WildcardAssembler:assemble
+> Task :WildcardAssembler:ip
+> Task :x86:compileJava
+> Task :x86:processResources NO-SOURCE
+> Task :x86:classes
+> Task :x86:jar
+> Task :x86:assemble
+> Task :x86:ip
+> Task :x86:saveSleighArgs
+> Task :x86:sleighCompile UP-TO-DATE
+
+> Task :Xtensa:compileJava
+
+> Task :Xtensa:processResources NO-SOURCE
+> Task :Xtensa:classes
+> Task :Xtensa:jar
+> Task :Xtensa:assemble
+> Task :Xtensa:ip
+> Task :Xtensa:saveSleighArgs
+> Task :Decompiler:decompileMac_x86_64Executable
+> Task :Decompiler:assemble
+> Task :Xtensa:sleighCompile UP-TO-DATE
+> Task :Z80:ip
+> Task :Z80:saveSleighArgs
+> Task :Z80:sleighCompile UP-TO-DATE
+> Task :assembleDistribution
+> Task :DemanglerGnu:CheckToolChain
+> Task :assembleMarkdownToHtml
+> Task :68000:zipSourceSubproject
+> Task :8051:zipSourceSubproject NO-SOURCE
+> Task :DemanglerGnu:compileDemangler_gnu_v2_24Mac_arm_64ExecutableDemangler_gnu_v2_24C
+> Task :AARCH64:zipSourceSubproject
+> Task :AnnotationValidator:zipSourceSubproject
+> Task :ARM:zipSourceSubproject
+> Task :Atmel:zipSourceSubproject
+> Task :Base:zipSourceSubproject
+> Task :BSim:zipSourceSubproject
+> Task :BSimFeatureVisualizer:zipSourceSubproject
+> Task :BytePatterns:zipSourceSubproject
+> Task :ByteViewer:zipSourceSubproject
+> Task :CodeCompare:zipSourceSubproject
+> Task :Dalvik:zipSourceSubproject
+> Task :DATA:zipSourceSubproject
+> Task :DataGraph:zipSourceSubproject
+> Task :DB:zipSourceSubproject
+> Task :Debugger:zipSourceSubproject
+> Task :Debugger-agent-dbgeng:zipSourceSubproject NO-SOURCE
+> Task :Debugger-agent-drgn:zipSourceSubproject NO-SOURCE
+> Task :Debugger-agent-gdb:zipSourceSubproject NO-SOURCE
+> Task :Debugger-agent-lldb:zipSourceSubproject NO-SOURCE
+> Task :Debugger-agent-x64dbg:zipSourceSubproject NO-SOURCE
+> Task :Debugger-api:zipSourceSubproject
+> Task :Debugger-importers:zipSourceSubproject
+> Task :Debugger-isf:zipSourceSubproject
+> Task :Debugger-jpda:zipSourceSubproject
+> Task :Debugger-rmi-trace:zipSourceSubproject
+> Task :DebugUtils:zipSourceSubproject
+> Task :Decompiler:zipSourceSubproject
+> Task :DecompilerDependent:zipSourceSubproject
+> Task :DMG:zipSourceSubproject NO-SOURCE
+> Task :Docking:zipSourceSubproject
+> Task :eBPF:zipSourceSubproject
+> Task :Emulation:zipSourceSubproject
+> Task :FileFormats:zipSourceSubproject
+> Task :FileSystem:zipSourceSubproject
+> Task :Framework-TraceModeling:zipSourceSubproject
+> Task :FunctionGraph:zipSourceSubproject
+> Task :FunctionGraphDecompilerExtension:zipSourceSubproject
+> Task :FunctionID:zipSourceSubproject
+> Task :Generic:zipSourceSubproject
+> Task :GhidraGo:zipSourceSubproject
+> Task :GhidraServer:zipSourceSubproject
+> Task :GnuDemangler:zipSourceSubproject
+> Task :Graph:zipSourceSubproject
+> Task :GraphFunctionCalls:zipSourceSubproject
+> Task :GraphServices:zipSourceSubproject
+> Task :Gui:zipSourceSubproject
+> Task :HCS12:zipSourceSubproject
+> Task :Help:zipSourceSubproject
+> Task :JVM:zipSourceSubproject
+> Task :Jython:zipSourceSubproject
+> Task :Loongarch:zipSourceSubproject
+> Task :MicrosoftCodeAnalyzer:zipSourceSubproject
+> Task :MicrosoftDemangler:zipSourceSubproject
+> Task :MicrosoftDmang:zipSourceSubproject
+> Task :MIPS:zipSourceSubproject
+> Task :NDS32:zipSourceSubproject
+> Task :PA-RISC:zipSourceSubproject NO-SOURCE
+> Task :PDB:zipSourceSubproject
+> Task :PIC:zipSourceSubproject
+> Task :PowerPC:zipSourceSubproject
+> Task :ProgramDiff:zipSourceSubproject
+> Task :ProgramGraph:zipSourceSubproject
+> Task :Project:zipSourceSubproject
+> Task :ProposedUtils:zipSourceSubproject
+> Task :Pty:zipSourceSubproject
+> Task :Public_Release:zipSourceSubproject NO-SOURCE
+> Task :PyGhidra:zipSourceSubproject
+> Task :Recognizers:zipSourceSubproject
+> Task :RISCV:zipSourceSubproject
+> Task :Sarif:zipSourceSubproject
+> Task :SoftwareModeling:zipSourceSubproject
+> Task :SourceCodeLookup:zipSourceSubproject
+> Task :Sparc:zipSourceSubproject
+> Task :SuperH4:zipSourceSubproject
+> Task :SwiftDemangler:zipSourceSubproject
+> Task :SystemEmulation:zipSourceSubproject
+> Task :TaintAnalysis:zipSourceSubproject
+> Task :TI_MSP430:zipSourceSubproject
+> Task :tricore:zipSourceSubproject
+> Task :Utility:zipSourceSubproject
+> Task :V850:zipSourceSubproject NO-SOURCE
+> Task :VersionTracking:zipSourceSubproject
+> Task :VersionTrackingBSim:zipSourceSubproject
+> Task :WildcardAssembler:zipSourceSubproject
+> Task :x86:zipSourceSubproject
+> Task :Xtensa:zipSourceSubproject
+> Task :assembleSource
+> Task :BSimElasticPlugin:compileJava NO-SOURCE
+> Task :BSimElasticPlugin:processResources NO-SOURCE
+> Task :BSimElasticPlugin:classes UP-TO-DATE
+> Task :BSimElasticPlugin:copyBSimTask
+> Task :BSimElasticPlugin:copyGenericTask
+> Task :BSimElasticPlugin:copyUtilityTask
+> Task :BSimElasticPlugin:compileElasticPluginJava
+> Task :BSimElasticPlugin:processElasticPluginResources NO-SOURCE
+> Task :BSimElasticPlugin:elasticPluginClasses
+> Task :BSimElasticPlugin:elasticPluginJar
+> Task :BSimElasticPlugin:copyElasticJar
+> Task :BSimElasticPlugin:copyPropertiesFile
+> Task :BSimElasticPlugin:elasticPluginZip
+> Task :BSimElasticPlugin:jar
+> Task :DemanglerGnu:linkDemangler_gnu_v2_24Mac_arm_64Executable
+> Task :DemanglerGnu:demangler_gnu_v2_24Mac_arm_64Executable
+> Task :BSimElasticPlugin:zipSourceSubproject NO-SOURCE
+> Task :BSimElasticPlugin:zipExtensions
+> Task :bundle_examples:compileJava NO-SOURCE
+> Task :bundle_examples:processResources NO-SOURCE
+> Task :bundle_examples:classes UP-TO-DATE
+> Task :bundle_examples:compileScripts_jar1Java
+> Task :bundle_examples:processScripts_jar1Resources NO-SOURCE
+> Task :bundle_examples:scripts_jar1Classes
+> Task :bundle_examples:buildscripts_jar1
+> Task :bundle_examples:compileScripts_jar2Java
+> Task :bundle_examples:processScripts_jar2Resources NO-SOURCE
+> Task :bundle_examples:scripts_jar2Classes
+> Task :bundle_examples:buildscripts_jar2
+> Task :bundle_examples:zipExtensions
+
+> Task :Decompiler:buildDecompilerDocumentationPdfs
+** Checking if required executables are installed. **
+
+buildDecompilerDocumentationPdfs: An error occurred with this task. Here is the output:
+** Checking if required executables are installed. **
+
+Skipping task buildDecompilerDocumentationPdfs
+
+
+> Task :GnuDisassembler:zipExtensions
+> Task :Lisa:buildGlobalMarkdown SKIPPED
+> Task :Lisa:indexHelp
+> Task :Lisa:buildHelpFiles
+> Task :Lisa:buildModuleHelp
+> Task :Lisa:compileJava
+> Task :Lisa:processResources
+> Task :Lisa:classes
+> Task :Lisa:jar
+> Task :Lisa:zipSourceSubproject
+> Task :Lisa:zipExtensions
+> Task :MachineLearning:buildGlobalMarkdown SKIPPED
+> Task :MachineLearning:indexHelp
+> Task :MachineLearning:buildHelpFiles
+> Task :MachineLearning:buildModuleHelp
+> Task :MachineLearning:compileJava
+> Task :MachineLearning:processResources
+> Task :MachineLearning:classes
+> Task :MachineLearning:jar
+> Task :MachineLearning:zipSourceSubproject
+> Task :MachineLearning:zipExtensions
+> Task :sample:buildGlobalMarkdown SKIPPED
+> Task :sample:indexHelp
+> Task :sample:buildHelpFiles
+> Task :sample:buildModuleHelp
+
+> Task :sample:compileJava
+
+> Task :sample:processResources
+> Task :sample:classes
+> Task :sample:jar
+> Task :sample:zipSourceSubproject
+> Task :sample:zipExtensions
+> Task :SampleTablePlugin:buildGlobalMarkdown SKIPPED
+> Task :SampleTablePlugin:indexHelp
+> Task :SampleTablePlugin:buildHelpFiles
+> Task :SampleTablePlugin:buildModuleHelp
+
+> Task :SampleTablePlugin:compileJava
+
+> Task :SampleTablePlugin:processResources
+> Task :SampleTablePlugin:classes
+> Task :DemanglerGnu:compileDemangler_gnu_v2_24Mac_x86_64ExecutableDemangler_gnu_v2_24C
+> Task :SampleTablePlugin:jar
+> Task :SampleTablePlugin:zipSourceSubproject
+> Task :SampleTablePlugin:zipExtensions
+> Task :SleighDevTools:compileJava
+> Task :SleighDevTools:processResources NO-SOURCE
+> Task :SleighDevTools:classes
+> Task :SleighDevTools:jar
+> Task :SleighDevTools:zipSourceSubproject
+> Task :SleighDevTools:zipExtensions
+> Task :SymbolicSummaryZ3:compileJava
+> Task :SymbolicSummaryZ3:processResources NO-SOURCE
+> Task :SymbolicSummaryZ3:classes
+> Task :SymbolicSummaryZ3:jar
+> Task :SymbolicSummaryZ3:zipSourceSubproject
+> Task :SymbolicSummaryZ3:zipExtensions
+> Task :DemanglerGnu:compileDemangler_gnu_v2_41Mac_x86_64ExecutableDemangler_gnu_v2_41C
+> Task :DemanglerGnu:linkDemangler_gnu_v2_24Mac_x86_64Executable
+> Task :DemanglerGnu:demangler_gnu_v2_24Mac_x86_64Executable
+> Task :DemanglerGnu:compileDemangler_gnu_v2_41Mac_arm_64ExecutableDemangler_gnu_v2_41C
+> Task :DemanglerGnu:linkDemangler_gnu_v2_41Mac_x86_64Executable
+> Task :DemanglerGnu:demangler_gnu_v2_41Mac_x86_64Executable
+> Task :DemanglerGnu:linkDemangler_gnu_v2_41Mac_arm_64Executable
+> Task :DemanglerGnu:buildNatives
+> Task :DemanglerGnu:demangler_gnu_v2_41Mac_arm_64Executable
+> Task :DemanglerGnu:assemble
+> Task :assembleDistribution_mac_arm_64
+> Task :assembleAll
+> Task :createInstallationZip
+> Task :buildGhidra
+
+[Incubating] Problems report is available at: file:///Users/connor/Medica/backbay/standalone/reverend-main/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 6m 54s
+706 actionable tasks: 633 executed, 73 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.3.1/userguide/configuration_cache_enabling.html

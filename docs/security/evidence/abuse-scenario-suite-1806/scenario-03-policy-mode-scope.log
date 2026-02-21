@@ -1,0 +1,14 @@
+$ python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k sync_policy_modes_are_configurable_per_project
+
+--- stdout ---
+
+
+--- stderr ---
+test_sync_policy_modes_are_configurable_per_project (scripts.ml.tests.test_corpus_sync_worker.CorpusSyncWorkerTest.test_sync_policy_modes_are_configurable_per_project) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+OK
+
+exit_code=0

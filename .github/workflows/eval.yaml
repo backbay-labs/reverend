@@ -127,6 +127,18 @@ jobs:
           fi
           gradle -p eval/java-regression --no-daemon test
 
+      - name: Fetch Ghidra build dependencies (blocking)
+        run: gradle -I gradle/support/fetchDependencies.gradle --no-daemon
+
+      - name: Compile Generic security module (blocking)
+        run: ./gradlew --no-daemon :Generic:compileJava
+
+      - name: Run Generic security unit tests (blocking)
+        run: ./gradlew --no-daemon :Generic:test --tests "ghidra.security.*"
+
+      - name: Fail on Generic security JUnit failures (blocking)
+        run: python3 scripts/cyntra/check-junit-failures.py --results-dir Ghidra/Framework/Generic/build/test-results/test
+
       - name: Upload no-direct-agent-write invariant artifacts
         uses: actions/upload-artifact@v4
         if: always()
@@ -280,6 +292,18 @@ jobs:
             exit 1
           fi
           gradle -p eval/java-regression --no-daemon test
+
+      - name: Fetch Ghidra build dependencies (blocking)
+        run: gradle -I gradle/support/fetchDependencies.gradle --no-daemon
+
+      - name: Compile Generic security module (blocking)
+        run: ./gradlew --no-daemon :Generic:compileJava
+
+      - name: Run Generic security unit tests (blocking)
+        run: ./gradlew --no-daemon :Generic:test --tests "ghidra.security.*"
+
+      - name: Fail on Generic security JUnit failures (blocking)
+        run: python3 scripts/cyntra/check-junit-failures.py --results-dir Ghidra/Framework/Generic/build/test-results/test
 
       - name: Run stock baseline slices (writes ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/metrics.json)
         run: |
@@ -499,6 +523,18 @@ jobs:
             exit 1
           fi
           gradle -p eval/java-regression --no-daemon test
+
+      - name: Fetch Ghidra build dependencies (blocking)
+        run: gradle -I gradle/support/fetchDependencies.gradle --no-daemon
+
+      - name: Compile Generic security module (blocking)
+        run: ./gradlew --no-daemon :Generic:compileJava
+
+      - name: Run Generic security unit tests (blocking)
+        run: ./gradlew --no-daemon :Generic:test --tests "ghidra.security.*"
+
+      - name: Fail on Generic security JUnit failures (blocking)
+        run: python3 scripts/cyntra/check-junit-failures.py --results-dir Ghidra/Framework/Generic/build/test-results/test
 
       - name: Run stock baseline slices (writes ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/metrics.json)
         run: |

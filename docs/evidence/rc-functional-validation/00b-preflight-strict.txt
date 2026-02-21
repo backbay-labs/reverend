@@ -1,0 +1,4 @@
+[preflight] python toolchain OK: 3.11.4 (require >=3.11)
+[preflight] java toolchain OK: openjdk version "21.0.10" 2026-01-20 | javac 21.0.10
+[preflight] disk headroom OK: 282GiB free
+[preflight] active workcells: 0 (limit 3)

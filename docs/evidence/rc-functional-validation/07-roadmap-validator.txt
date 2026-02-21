@@ -1,0 +1,6 @@
+[validate-roadmap] OK
+[validate-roadmap] security scenario counts: outcomes=5, abuse_doc=5, signoff_primary=5, signoff_total_documented=13
+[validate-roadmap] roadmap exportable issues: 48 total, 48 done
+[validate-roadmap] csv parity checked for 48 rows
+[validate-roadmap] required evidence files present: 12/12
+[validate-roadmap] security checksum entries verified: 20

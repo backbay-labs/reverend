@@ -1,0 +1,21 @@
+{
+  "datasets_lock_sha256": "9075989aed4aba6d8291fdf28e38c8dbc3a5c6ab77b162d913ba9b37a6eba350",
+  "metrics": {
+    "diff": {
+      "coverage": 0.666667,
+      "match_rate": 0.666667,
+      "pairs": 3
+    },
+    "similarity": {
+      "mrr": 1.0,
+      "queries": 3,
+      "recall@1": 1.0
+    },
+    "type": {
+      "accuracy": 1.0,
+      "cases": 5
+    }
+  },
+  "schema_version": 1,
+  "seed": 0
+}

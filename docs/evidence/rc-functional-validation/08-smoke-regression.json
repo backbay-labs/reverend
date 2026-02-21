@@ -1,0 +1,51 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "area": "similarity",
+      "baseline": 1.0,
+      "current": 1.0,
+      "delta": 0.0,
+      "name": "recall@1",
+      "passed": true,
+      "threshold": 0.95
+    },
+    {
+      "area": "similarity",
+      "baseline": 1.0,
+      "current": 1.0,
+      "delta": 0.0,
+      "name": "mrr",
+      "passed": true,
+      "threshold": 0.95
+    },
+    {
+      "area": "type",
+      "baseline": 1.0,
+      "current": 1.0,
+      "delta": 0.0,
+      "name": "accuracy",
+      "passed": true,
+      "threshold": 0.95
+    },
+    {
+      "area": "diff",
+      "baseline": 0.666667,
+      "current": 0.666667,
+      "delta": 0.0,
+      "name": "match_rate",
+      "passed": true,
+      "threshold": 0.616667
+    },
+    {
+      "area": "diff",
+      "baseline": 0.666667,
+      "current": 0.666667,
+      "delta": 0.0,
+      "name": "coverage",
+      "passed": true,
+      "threshold": 0.616667
+    }
+  ],
+  "schema_version": 1
+}

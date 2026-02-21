@@ -1,0 +1,2 @@
+[check-junit] suites=15 tests=222 failures=0 errors=0
+[check-junit] junit results clean

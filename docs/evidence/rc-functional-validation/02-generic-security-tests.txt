@@ -1,0 +1,181 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :
+Java: 21
+Gradle: 9.3.1
+Python3 command: [python3.14] (3.14, /opt/homebrew/opt/python@3.14/bin/python3.14)
+Python3 pip version: 25.3
+OS: Mac OS X
+Arch: aarch64
+Using platform: mac_arm_64
+
+> Task :Utility:compileJava UP-TO-DATE
+> Task :Generic:compileJava UP-TO-DATE
+> Task :Generic:processResources UP-TO-DATE
+> Task :Generic:classes UP-TO-DATE
+> Task :Generic:jar UP-TO-DATE
+> Task :6502:saveSleighArgs
+> Task :DB:compileJava UP-TO-DATE
+> Task :DB:processResources NO-SOURCE
+> Task :DB:classes UP-TO-DATE
+> Task :DB:jar UP-TO-DATE
+> Task :MarkdownSupport:compileJava UP-TO-DATE
+> Task :MarkdownSupport:processResources NO-SOURCE
+> Task :MarkdownSupport:classes UP-TO-DATE
+> Task :Docking:buildGlobalMarkdown SKIPPED
+> Task :Docking:indexHelp UP-TO-DATE
+> Task :Gui:compileJava UP-TO-DATE
+> Task :Gui:processResources UP-TO-DATE
+> Task :Gui:classes UP-TO-DATE
+> Task :Gui:jar UP-TO-DATE
+> Task :Help:compileJava UP-TO-DATE
+> Task :Help:processResources UP-TO-DATE
+> Task :Help:classes UP-TO-DATE
+> Task :Help:jar UP-TO-DATE
+> Task :Utility:processResources NO-SOURCE
+> Task :Utility:classes UP-TO-DATE
+> Task :Utility:jar UP-TO-DATE
+> Task :Docking:buildHelpFiles UP-TO-DATE
+> Task :Docking:buildModuleHelp UP-TO-DATE
+> Task :Docking:compileJava UP-TO-DATE
+> Task :Docking:processResources UP-TO-DATE
+> Task :Docking:classes UP-TO-DATE
+> Task :Docking:jar UP-TO-DATE
+> Task :FileSystem:compileJava UP-TO-DATE
+> Task :FileSystem:processResources NO-SOURCE
+> Task :FileSystem:classes UP-TO-DATE
+> Task :FileSystem:jar UP-TO-DATE
+> Task :Graph:buildGlobalMarkdown SKIPPED
+> Task :Graph:indexHelp UP-TO-DATE
+> Task :Graph:buildHelpFiles UP-TO-DATE
+> Task :Graph:buildModuleHelp UP-TO-DATE
+> Task :Graph:compileJava UP-TO-DATE
+> Task :Graph:processResources UP-TO-DATE
+> Task :Graph:classes UP-TO-DATE
+> Task :Graph:jar UP-TO-DATE
+> Task :Project:compileJava UP-TO-DATE
+> Task :Project:processResources UP-TO-DATE
+> Task :Project:classes UP-TO-DATE
+> Task :Project:jar UP-TO-DATE
+> Task :SoftwareModeling:generateGrammarSource UP-TO-DATE
+> Task :SoftwareModeling:compileJava UP-TO-DATE
+> Task :SoftwareModeling:processResources UP-TO-DATE
+> Task :SoftwareModeling:classes UP-TO-DATE
+> Task :SoftwareModeling:jar UP-TO-DATE
+> Task :6502:sleighCompile UP-TO-DATE
+> Task :68000:saveSleighArgs
+> Task :68000:sleighCompile UP-TO-DATE
+> Task :8048:saveSleighArgs
+> Task :8048:sleighCompile UP-TO-DATE
+> Task :8051:saveSleighArgs
+> Task :8051:sleighCompile UP-TO-DATE
+> Task :8085:saveSleighArgs
+> Task :8085:sleighCompile UP-TO-DATE
+> Task :AARCH64:saveSleighArgs
+> Task :AARCH64:sleighCompile UP-TO-DATE
+> Task :ARM:saveSleighArgs
+> Task :ARM:sleighCompile UP-TO-DATE
+> Task :Atmel:saveSleighArgs
+> Task :Atmel:sleighCompile UP-TO-DATE
+> Task :BPF:saveSleighArgs
+> Task :BPF:sleighCompile UP-TO-DATE
+> Task :CP1600:saveSleighArgs
+> Task :CP1600:sleighCompile UP-TO-DATE
+> Task :CR16:saveSleighArgs
+> Task :CR16:sleighCompile UP-TO-DATE
+> Task :Dalvik:saveSleighArgs
+> Task :Dalvik:sleighCompile UP-TO-DATE
+> Task :DATA:saveSleighArgs
+> Task :DATA:sleighCompile UP-TO-DATE
+> Task :eBPF:saveSleighArgs
+> Task :eBPF:sleighCompile UP-TO-DATE
+> Task :HCS08:saveSleighArgs
+> Task :HCS08:sleighCompile UP-TO-DATE
+> Task :HCS12:saveSleighArgs
+> Task :HCS12:sleighCompile UP-TO-DATE
+> Task :JVM:saveSleighArgs
+> Task :JVM:sleighCompile UP-TO-DATE
+> Task :Loongarch:saveSleighArgs
+> Task :Loongarch:sleighCompile UP-TO-DATE
+> Task :M16C:saveSleighArgs
+> Task :M16C:sleighCompile UP-TO-DATE
+> Task :M8C:saveSleighArgs
+> Task :M8C:sleighCompile UP-TO-DATE
+> Task :MC6800:saveSleighArgs
+> Task :MC6800:sleighCompile UP-TO-DATE
+> Task :MCS96:saveSleighArgs
+> Task :MCS96:sleighCompile UP-TO-DATE
+> Task :MIPS:saveSleighArgs
+> Task :MIPS:sleighCompile UP-TO-DATE
+> Task :NDS32:saveSleighArgs
+> Task :NDS32:sleighCompile UP-TO-DATE
+> Task :PA-RISC:saveSleighArgs
+> Task :PA-RISC:sleighCompile UP-TO-DATE
+> Task :PIC:saveSleighArgs
+> Task :PIC:sleighCompile UP-TO-DATE
+> Task :PowerPC:saveSleighArgs
+> Task :PowerPC:sleighCompile UP-TO-DATE
+> Task :RISCV:saveSleighArgs
+> Task :RISCV:sleighCompile UP-TO-DATE
+> Task :Sparc:saveSleighArgs
+> Task :Sparc:sleighCompile UP-TO-DATE
+> Task :SuperH:saveSleighArgs
+> Task :SuperH:sleighCompile UP-TO-DATE
+> Task :SuperH4:saveSleighArgs
+> Task :SuperH4:sleighCompile UP-TO-DATE
+> Task :TI_MSP430:saveSleighArgs
+> Task :TI_MSP430:sleighCompile UP-TO-DATE
+> Task :Toy:saveSleighArgs
+> Task :Toy:sleighCompile UP-TO-DATE
+> Task :tricore:saveSleighArgs
+> Task :tricore:sleighCompile UP-TO-DATE
+> Task :V850:saveSleighArgs
+> Task :V850:sleighCompile UP-TO-DATE
+> Task :x86:saveSleighArgs
+> Task :x86:sleighCompile UP-TO-DATE
+> Task :Xtensa:saveSleighArgs
+> Task :Xtensa:sleighCompile UP-TO-DATE
+> Task :Z80:saveSleighArgs
+> Task :Z80:sleighCompile UP-TO-DATE
+> Task :allSleighCompile UP-TO-DATE
+> Task :Generic:compileTestJava UP-TO-DATE
+> Task :Generic:processTestResources UP-TO-DATE
+> Task :Generic:testClasses UP-TO-DATE
+
+> Task :Generic:test
+:Generic:test started: Fri Feb 20 23:40:58 MST 2026
+Test Machine Name: Connors-MacBook-Pro.local
+Root Test Dir: build
+Test Output Dir: /Users/connor/Medica/backbay/standalone/reverend-main/build/output
+Test Temp Dir: /Users/connor/Medica/backbay/standalone/reverend-main/Ghidra/Framework/Generic/build
+Test Report Dir: /Users/connor/Medica/backbay/standalone/reverend-main/Ghidra/Framework/Generic/build/JUnit/reports
+Java Debug Port: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+Listening for transport dt_socket at address: 18544
+:Generic:test ended: Fri Feb 20 23:41:10 MST 2026
+:Generic:test elapsed time: 0:00:11
+
+[Incubating] Problems report is available at: file:///Users/connor/Medica/backbay/standalone/reverend-main/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 20s
+114 actionable tasks: 39 executed, 75 up-to-date

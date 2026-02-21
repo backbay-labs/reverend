@@ -81,6 +81,7 @@ Release
 
 # Ignore logs and core dumps
 *.log
+!docs/security/evidence/**/*.log
 core.*
 !core.png
 !core.py

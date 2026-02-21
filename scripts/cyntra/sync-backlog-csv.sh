@@ -125,20 +125,29 @@ if csv_path.exists():
 rows: list[dict[str, str]] = []
 added_rows = 0
 updated_statuses = 0
+updated_rows = 0
+exported_ids: set[str] = set()
 for issue in exportable_issues:
-    issue_id = str(issue.get("id") or "")
-    issue_status = str(issue.get("status") or "").lower()
+    canonical = to_row(issue)
+    issue_id = canonical["id"]
+    issue_status = canonical["status"]
     existing = existing_rows.get(issue_id)
+    exported_ids.add(issue_id)
     if existing:
-        row = {name: str(existing.get(name) or "") for name in fieldnames}
-        if row.get("status", "").lower() != issue_status:
+        existing_normalized = {name: str(existing.get(name) or "") for name in fieldnames}
+        if existing_normalized.get("status", "").lower() != issue_status:
             updated_statuses += 1
-        row["id"] = issue_id
-        row["status"] = issue_status
+        if any(
+            existing_normalized.get(name, "") != canonical.get(name, "")
+            for name in fieldnames
+            if name != "status"
+        ):
+            updated_rows += 1
     else:
-        row = to_row(issue)
         added_rows += 1
-    rows.append(row)
+    rows.append(canonical)
+
+removed_rows = sum(1 for issue_id in existing_rows if issue_id not in exported_ids)
 
 csv_path.parent.mkdir(parents=True, exist_ok=True)
 with csv_path.open("w", newline="", encoding="utf-8") as handle:
@@ -159,6 +168,7 @@ except ValueError:
 
 print(
     f"[sync-backlog-csv] wrote {len(rows)} roadmap rows to {csv_display} "
-    f"from {source_used} (added={added_rows}, status_updates={updated_statuses}, {status_summary})"
+    f"from {source_used} (added={added_rows}, removed={removed_rows}, "
+    f"status_updates={updated_statuses}, row_updates={updated_rows}, {status_summary})"
 )
 PY

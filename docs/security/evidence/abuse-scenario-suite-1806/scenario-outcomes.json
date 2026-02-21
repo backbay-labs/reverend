@@ -1,0 +1,79 @@
+{
+  "compliance_reference": "docs/research/legal-compliance-playbook.md",
+  "executed_at_utc": "2026-02-21T06:29:42+00:00",
+  "issue_id": "1806",
+  "kind": "abuse_scenario_suite_outcomes",
+  "scenarios": [
+    {
+      "additional_evidence": [
+        "docs/security/evidence/abuse-scenario-suite-1806/no-direct-agent-write/no-direct-agent-write-invariant.json",
+        "docs/security/evidence/abuse-scenario-suite-1806/no-direct-agent-write/no-direct-agent-write-invariant.md"
+      ],
+      "command": "python3 scripts/tests/no_direct_agent_write_invariant.py --output-dir docs/security/evidence/abuse-scenario-suite-1806/no-direct-agent-write",
+      "exit_code": 0,
+      "expected_controls": "Capability checks deny unauthorized sync writes and emit paired corpus_access_audit + corpus_violation_incident records.",
+      "log": "docs/security/evidence/abuse-scenario-suite-1806/scenario-01-no-direct-agent-write.log",
+      "name": "Direct or indirect agent write attempt to canonical corpus state",
+      "observed_controls": "Invariant suite returned PASS for all checks; unauthorized write paths were denied before backend/state mutation.",
+      "remediation_if_failed": "Restore fail-closed authorization in scripts/ml/corpus_sync_worker.py (WRITE.CORPUS_SYNC precheck plus deny/audit emission on violation).",
+      "scenario_id": "S1",
+      "status": "PASS"
+    },
+    {
+      "additional_evidence": [],
+      "command": "python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k allowlist_mode_blocks_non_approved_destination",
+      "exit_code": 0,
+      "expected_controls": "allowlist mode blocks non-approved destinations and emits deterministic EGRESS_BLOCKED incident remediation.",
+      "log": "docs/security/evidence/abuse-scenario-suite-1806/scenario-02-allowlist-egress.log",
+      "name": "Egress policy bypass by targeting non-allowlisted cloud endpoint",
+      "observed_controls": "Allowlist-mode blocking test passed and recorded deterministic block behavior.",
+      "remediation_if_failed": "Re-enable endpoint allowlist matching and EGRESS_BLOCKED incident emission in scripts/ml/corpus_sync_worker.py.",
+      "scenario_id": "S2",
+      "status": "PASS"
+    },
+    {
+      "additional_evidence": [],
+      "command": "python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k sync_policy_modes_are_configurable_per_project",
+      "exit_code": 0,
+      "expected_controls": "Per-project policy modes override defaults; offline project is denied while cloud project may proceed.",
+      "log": "docs/security/evidence/abuse-scenario-suite-1806/scenario-03-policy-mode-scope.log",
+      "name": "Project-level policy override bypass (offline project tries remote sync)",
+      "observed_controls": "Per-project mode scoping test passed; offline-deny semantics remained enforced.",
+      "remediation_if_failed": "Repair project policy resolution in EndpointPolicyConfig/EndpointPolicyRule to preserve offline deny semantics.",
+      "scenario_id": "S3",
+      "status": "PASS"
+    },
+    {
+      "additional_evidence": [],
+      "command": "python3 -m unittest -v scripts/ml/tests/test_corpus_sync_worker.py -k read_rejects_incomplete_provenance_chain",
+      "exit_code": 0,
+      "expected_controls": "Read path rejects malformed chain continuity and emits PROVENANCE_CHAIN_INVALID deny audit.",
+      "log": "docs/security/evidence/abuse-scenario-suite-1806/scenario-04-provenance-chain.log",
+      "name": "Provenance-chain tampering to bypass read-side trust checks",
+      "observed_controls": "Provenance continuity validation test passed; malformed artifacts were rejected.",
+      "remediation_if_failed": "Reinstate provenance continuity validation in scripts/ml/corpus_sync_worker.py::_validate_provenance_chain(...) and deny malformed artifacts.",
+      "scenario_id": "S4",
+      "status": "PASS"
+    },
+    {
+      "additional_evidence": [],
+      "command": "python3 -m unittest -v scripts/ml/tests/test_receipt_store.py -k verify_integrity_detects_tampering",
+      "exit_code": 0,
+      "expected_controls": "Hash-chain integrity checks detect mutation and block further appends.",
+      "log": "docs/security/evidence/abuse-scenario-suite-1806/scenario-05-receipt-tamper.log",
+      "name": "Receipt-history tampering (mutate historic record)",
+      "observed_controls": "Receipt integrity tampering test passed and append was blocked on tampered state.",
+      "remediation_if_failed": "Restore canonical hash verification and append-time integrity guard in scripts/ml/receipt_store.py.",
+      "scenario_id": "S5",
+      "status": "PASS"
+    }
+  ],
+  "schema_version": 1,
+  "spec_under_test": "docs/research/agent-runtime-security-spec.md",
+  "summary": {
+    "failed": 0,
+    "open_remediations": 0,
+    "passed": 5,
+    "total_scenarios": 5
+  }
+}

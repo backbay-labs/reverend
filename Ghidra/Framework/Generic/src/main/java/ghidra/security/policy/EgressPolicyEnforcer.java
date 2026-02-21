@@ -15,6 +15,7 @@
  */
 package ghidra.security.policy;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -110,6 +111,9 @@ public class EgressPolicyEnforcer {
 				throw PolicyViolationException.endpointNotAllowed(host, port, policy.getMode());
 			}
 		}
+
+		// Step 4: Enforce per-destination request rate limits
+		checkRateLimit(destinationKey(host, port));
 	}
 
 	/**
@@ -141,9 +145,6 @@ public class EgressPolicyEnforcer {
 				throw PolicyViolationException.binaryContentDetected(destination, policy.getMode());
 			}
 		}
-
-		// Check rate limit
-		checkRateLimit(destination);
 	}
 
 	/**
@@ -185,6 +186,10 @@ public class EgressPolicyEnforcer {
 	 */
 	public void resetRateLimits() {
 		rateLimitBuckets.clear();
+	}
+
+	private String destinationKey(String host, int port) {
+		return host.toLowerCase(Locale.ROOT) + ":" + port;
 	}
 
 	private void checkRateLimit(String destination) throws PolicyViolationException {

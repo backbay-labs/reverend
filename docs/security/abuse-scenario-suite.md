@@ -33,6 +33,8 @@ listed exactly for reproducibility. Logs and checksum-verified artifacts are in
 - Passed: `5`
 - Failed: `0`
 - Open remediation items from this run: `0`
+- Additional documented scenarios (legacy tabletop appendix): `8`
+- Total scenarios documented in this file: `13` (`5` executable + `8` tabletop)
 
 ## Legacy Tabletop Appendix (E8-S2, 2026-02-20)
 

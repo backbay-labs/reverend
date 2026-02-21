@@ -1,0 +1,14 @@
+$ python3 -m unittest -v scripts/ml/tests/test_receipt_store.py -k verify_integrity_detects_tampering
+
+--- stdout ---
+
+
+--- stderr ---
+test_verify_integrity_detects_tampering (scripts.ml.tests.test_receipt_store.ReceiptStoreTest.test_verify_integrity_detects_tampering) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
+
+exit_code=0

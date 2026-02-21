@@ -92,12 +92,14 @@ public enum Capability {
 	}
 
 	private Set<Capability> computeImplied() {
-		Set<Capability> result = EnumSet.of(this);
+		// EnumSet cannot be safely initialized from inside enum constructors.
+		Set<Capability> result = new HashSet<>();
+		result.add(this);
 		if (parent != null) {
 			// Parent capability implies this one
 			// We'll resolve the full chain at query time to avoid initialization order issues
 		}
-		return result;
+		return Collections.unmodifiableSet(result);
 	}
 
 	/**

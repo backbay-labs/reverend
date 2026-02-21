@@ -14,8 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-ISSUE_ID = "1702"
-DEFAULT_OUTPUT_DIR = Path("docs/security/evidence/abuse-scenario-suite-1702")
+DEFAULT_ISSUE_ID = "1702"
 SPEC_UNDER_TEST = "docs/research/agent-runtime-security-spec.md"
 COMPLIANCE_REFERENCE = "docs/research/legal-compliance-playbook.md"
 
@@ -255,6 +254,7 @@ def _run_scenarios(output_dir: Path) -> tuple[list[dict[str, object]], dict[str,
 
 def _write_outcomes_json(
     output_dir: Path,
+    issue_id: str,
     executed_at_utc: str,
     outcomes: list[dict[str, object]],
     summary: dict[str, int],
@@ -262,7 +262,7 @@ def _write_outcomes_json(
     payload = {
         "schema_version": 1,
         "kind": "abuse_scenario_suite_outcomes",
-        "issue_id": ISSUE_ID,
+        "issue_id": issue_id,
         "spec_under_test": SPEC_UNDER_TEST,
         "compliance_reference": COMPLIANCE_REFERENCE,
         "executed_at_utc": executed_at_utc,
@@ -276,12 +276,13 @@ def _write_outcomes_json(
 
 def _write_outcomes_markdown(
     output_dir: Path,
+    issue_id: str,
     executed_at_utc: str,
     outcomes: list[dict[str, object]],
     summary: dict[str, int],
 ) -> Path:
     lines = [
-        "# Abuse Scenario Outcomes (Issue 1702)",
+        f"# Abuse Scenario Outcomes (Issue {issue_id})",
         "",
         f"- Executed: `{executed_at_utc}`",
         f"- Spec under test: `{SPEC_UNDER_TEST}`",
@@ -325,13 +326,14 @@ def _write_outcomes_markdown(
 
 def _write_readme(
     output_dir: Path,
+    issue_id: str,
     metadata: dict[str, str],
     executed_at_utc: str,
     outcomes: list[dict[str, object]],
     summary: dict[str, int],
 ) -> Path:
     lines = [
-        "# Abuse Scenario Suite Evidence (Issue 1702)",
+        f"# Abuse Scenario Suite Evidence (Issue {issue_id})",
         "",
         f"Executed: {executed_at_utc}",
         f"Branch: `{metadata['branch']}`",
@@ -342,7 +344,8 @@ def _write_readme(
         "Run from repository root:",
         "",
         "```bash",
-        "python3 scripts/security/run_abuse_scenario_suite.py",
+        "python3 scripts/security/run_abuse_scenario_suite.py "
+        f"--issue-id {issue_id} --output-dir {output_dir.as_posix()}",
         "```",
         "",
         "## Scenario Evidence Files",
@@ -398,20 +401,26 @@ def _write_checksums(output_dir: Path) -> Path:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run abuse scenarios and emit executable review evidence for issue 1702."
+        description="Run abuse scenarios and emit executable review evidence."
+    )
+    parser.add_argument(
+        "--issue-id",
+        default=DEFAULT_ISSUE_ID,
+        help=f"Issue id for evidence metadata (default: {DEFAULT_ISSUE_ID})",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=DEFAULT_OUTPUT_DIR,
-        help=f"Output directory for logs/reports (default: {DEFAULT_OUTPUT_DIR})",
+        default=None,
+        help="Output directory for logs/reports (defaults to docs/security/evidence/abuse-scenario-suite-<issue-id>)",
     )
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
-    output_dir = args.output_dir
+    issue_id = str(args.issue_id).strip() or DEFAULT_ISSUE_ID
+    output_dir = args.output_dir or Path(f"docs/security/evidence/abuse-scenario-suite-{issue_id}")
 
     if output_dir.exists():
         shutil.rmtree(output_dir)
@@ -421,9 +430,9 @@ def main() -> int:
     metadata = _load_manifest_metadata()
     executed_at_utc = _utc_now()
     outcomes, summary = _run_scenarios(output_dir)
-    _write_outcomes_json(output_dir, executed_at_utc, outcomes, summary)
-    _write_outcomes_markdown(output_dir, executed_at_utc, outcomes, summary)
-    _write_readme(output_dir, metadata, executed_at_utc, outcomes, summary)
+    _write_outcomes_json(output_dir, issue_id, executed_at_utc, outcomes, summary)
+    _write_outcomes_markdown(output_dir, issue_id, executed_at_utc, outcomes, summary)
+    _write_readme(output_dir, issue_id, metadata, executed_at_utc, outcomes, summary)
     _write_checksums(output_dir)
 
     return 0 if summary["failed"] == 0 else 1

@@ -93,6 +93,28 @@ Disable this only for debugging:
 CYNTRA_MERGE_GUARDS=0 scripts/cyntra/cyntra.sh run --once --issue <id>
 ```
 
+Gate context resolution in `scripts/cyntra/gates.sh` uses deterministic fallback order:
+1. `manifest.json` issue context
+2. `CYNTRA_GATE_ISSUE_ID` + `.beads/issues.jsonl`
+3. current branch issue id (`wc/<id>/...` or `wc-<id>-...`)
+4. repo-root fallback (only when strict mode is explicitly disabled)
+
+`CYNTRA_GATE_CONTEXT_STRICT` now defaults to `1` (fail-closed).
+Set `CYNTRA_GATE_CONTEXT_STRICT=0` only for intentional non-workcell debug runs.
+
+For strict Java module gates, make sure dependency metadata has been fetched:
+
+```bash
+gradle -I gradle/support/fetchDependencies.gradle
+```
+
+Additional gate modes:
+
+```bash
+bash scripts/cyntra/gates.sh --mode=java
+bash scripts/cyntra/gates.sh --mode=evidence
+```
+
 ## 5. Cleanup and disk management
 
 ```bash
@@ -111,6 +133,7 @@ Use `CYNTRA_ARCHIVE_RETENTION_DAYS` to tune archive pruning.
 - `docs/backlog-jira-linear.csv` is the deterministic export of canonical roadmap entries only:
   - include entries tagged `roadmap12w` with `type:epic` or `type:story`
   - exclude synthetic operational beads tagged `merge-conflict` or `escalation` (for example `[MERGE CONFLICT]`/`[ESCALATION]` records)
+- Sync is full-row canonical: title/priority/risk/tags/acceptance/description are rewritten from `.beads` (not status-only patching).
 - Canonical statuses for exported epic/story backlog entries are `open`, `done`, and `blocked`.
 - Escalation/merge-conflict beads track operational incidents and are not exported to Jira/Linear CSV.
 - Dependency ordering is in `.beads/deps.jsonl`.
@@ -125,75 +148,19 @@ Notes:
 - The sync command reads `.beads/issues.jsonl` from the worktree when present.
 - In sparse workcells where `.beads` is not checked out, it falls back to `git show HEAD:.beads/issues.jsonl`.
 
-Verification (status parity for exported rows):
+Verification (full-row parity + roadmap closure):
 
 ```bash
-python3 - <<'PY'
-import csv
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-def issue_type(tags):
-    for tag in tags:
-        if tag.startswith("type:"):
-            return tag.split(":", 1)[1].lower()
-    return ""
-
-issues = [
-    json.loads(line)
-    for line in subprocess.check_output(
-        ["git", "show", "HEAD:.beads/issues.jsonl"],
-        text=True,
-    ).splitlines()
-    if line.strip()
-]
-
-bead_status = {}
-for issue in issues:
-    tags = [str(tag) for tag in issue.get("tags") or []]
-    title = str(issue.get("title") or "")
-    if "roadmap12w" not in tags:
-        continue
-    if issue_type(tags) not in {"epic", "story"}:
-        continue
-    if "merge-conflict" in tags or "escalation" in tags:
-        continue
-    if title.startswith("[MERGE CONFLICT]") or title.startswith("[ESCALATION]"):
-        continue
-    bead_status[str(issue["id"])] = str(issue.get("status") or "").lower()
-
-rows = list(csv.DictReader(Path("docs/backlog-jira-linear.csv").open(newline="", encoding="utf-8")))
-csv_status = {row["id"]: row["status"].lower() for row in rows}
-
-missing = sorted(set(bead_status) - set(csv_status), key=lambda value: int(value))
-extra = sorted(set(csv_status) - set(bead_status), key=lambda value: int(value))
-mismatch = sorted(
-    [issue_id for issue_id, status in bead_status.items() if csv_status.get(issue_id) != status],
-    key=lambda value: int(value),
-)
-
-if missing or extra or mismatch:
-    print("status sync mismatch detected", file=sys.stderr)
-    print(f"missing={missing}", file=sys.stderr)
-    print(f"extra={extra}", file=sys.stderr)
-    print(
-        f"mismatch={[(issue_id, csv_status.get(issue_id), bead_status[issue_id]) for issue_id in mismatch]}",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
-
-print(f"status sync OK: {len(rows)} csv rows match {len(bead_status)} canonical roadmap beads")
-PY
+scripts/cyntra/sync-backlog-csv.sh
+scripts/cyntra/validate-roadmap-completion.sh
 ```
 
 Execution evidence (`2026-02-21`):
 - `scripts/cyntra/sync-backlog-csv.sh`
-  - `[sync-backlog-csv] wrote 48 roadmap rows to docs/backlog-jira-linear.csv from HEAD:.beads/issues.jsonl (...)`
-  - first reconciliation run added the missing remediation rows (`added=10`); repeat runs are idempotent (`added=0`)
-- verification command above
-  - `status sync OK: 48 csv rows match 48 canonical roadmap beads`
+  - `[sync-backlog-csv] wrote 48 roadmap rows to docs/backlog-jira-linear.csv from .beads/issues.jsonl (...)`
+- `scripts/cyntra/validate-roadmap-completion.sh`
+  - `[validate-roadmap] OK`
+  - `roadmap exportable issues: 48 total, 48 done`
 
 ## 7. Deterministic merge-failure recovery
 

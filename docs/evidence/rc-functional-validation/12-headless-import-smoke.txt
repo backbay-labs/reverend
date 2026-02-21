@@ -1,0 +1,59 @@
+INFO  Using log config file: jar:file:/Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Framework/Generic/lib/Generic.jar!/generic.log4j.xml (LoggingInitialization)  
+INFO  Using log file: /Users/connor/Library/ghidra/ghidra_12.1_DEV/application.log (LoggingInitialization)  
+INFO  Loading user preferences: /Users/connor/Library/ghidra/ghidra_12.1_DEV/preferences (Preferences)  
+INFO  Searching for classes... (ClassSearcher)  
+INFO  Class search complete (813 ms) (ClassSearcher)  
+INFO  Initializing SSL Context (DefaultSSLContextInitializer)  
+INFO  Initializing Random Number Generator... (SecureRandomFactory)  
+INFO  Random Number Generator initialization complete: NativePRNGNonBlocking (SecureRandomFactory)  
+INFO  Trust manager disabled, cacerts have not been set (DefaultTrustManagerFactory)  
+INFO  Headless startup complete (1588 ms) (AnalyzeHeadless)  
+INFO  Class searcher loaded 59 extension points (20 false positives) (ClassSearcher)  
+INFO  HEADLESS Script Paths:
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/BSim/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/BytePatterns/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Processors/JVM/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/PDB/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/VersionTracking/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Processors/DATA/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Debug/Debugger/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Processors/Atmel/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Processors/PIC/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/WildcardAssembler/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Processors/8051/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/SwiftDemangler/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/GnuDemangler/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/DecompilerDependent/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/FunctionID/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/FileFormats/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Debug/Debugger-rmi-trace/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/Base/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/Decompiler/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/Jython/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/PyGhidra/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/MicrosoftCodeAnalyzer/ghidra_scripts
+    /Users/connor/Medica/backbay/standalone/reverend-main/build/dist/_smoke/ghidra_12.1_DEV/Ghidra/Features/SystemEmulation/ghidra_scripts (HeadlessAnalyzer)  
+INFO  HEADLESS: execution starts (HeadlessAnalyzer)  
+INFO  Creating temporary project: /tmp/ghidra-headless-smoke/smokeproj (HeadlessAnalyzer)  
+INFO  Creating project: /tmp/ghidra-headless-smoke/smokeproj (DefaultProject)  
+INFO  REPORT: Processing input files:  (HeadlessAnalyzer)  
+INFO       project: /tmp/ghidra-headless-smoke/smokeproj (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///bin/ls (HeadlessAnalyzer)  
+INFO  Using Loader: Mac OS X Mach-O (ProgramLoader)  
+INFO  Using Language/Compiler: x86:LE:64:default:gcc (ProgramLoader)  
+INFO  Using Library Search Path: [., /System/Library/dyld/dyld_shared_cache_arm64e, /System/Library/dyld/dyld_shared_cache_x86_64, /System/Library/dyld/dyld_shared_cache_x86_64h, /System/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_arm64e, /System/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_x86_64, /System/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_x86_64h, /Users/connor/Library/Java/Extensions, /Library/Java/Extensions, /Network/Library/Java/Extensions, /System/Library/Java/Extensions, /usr/lib/java] (ProgramLoader)  
+INFO  Additional info:
+Loading file:///bin/ls?MD5=87279d31c081da179d8bda343a694833...
+------------------------------------------------
+
+Linking the External Programs of 'ls' to imported libraries...
+  [/usr/lib/libutil.dylib] -> not found in project
+  [/usr/lib/libncurses.5.4.dylib] -> not found in project
+  [/usr/lib/libSystem.B.dylib] -> not found in project
+------------------------------------------------
+
+ (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  /ls: file created (connor) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /ls (smokeproj:/ls) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  

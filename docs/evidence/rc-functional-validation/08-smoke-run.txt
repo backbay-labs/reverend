@@ -1,0 +1,1 @@
+[smoke] wrote docs/evidence/rc-functional-validation/08-smoke-metrics.json

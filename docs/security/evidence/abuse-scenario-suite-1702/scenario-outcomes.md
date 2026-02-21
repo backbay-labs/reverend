@@ -1,6 +1,6 @@
 # Abuse Scenario Outcomes (Issue 1702)
 
-- Executed: `2026-02-21T01:11:54+00:00`
+- Executed: `2026-02-21T06:29:42+00:00`
 - Spec under test: `docs/research/agent-runtime-security-spec.md`
 - Compliance reference: `docs/research/legal-compliance-playbook.md`
 

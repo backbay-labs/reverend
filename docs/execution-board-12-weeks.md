@@ -158,3 +158,12 @@ This board operationalizes:
 - Reopened escalation story `15` closure evidence: commit `a2b0f6a3a9` + merge `d12d4d1ae4` (`scripts/cyntra/sync-backlog-csv.sh`, `docs/backlog-jira-linear.csv`, `docs/cyntra-kernel-runbook.md`).
 - Reopened escalation story `16` closure evidence: commit `714b440f7c` + merge `e8941eac4d` (`scripts/cyntra/cyntra.sh`, `scripts/tests/test_cyntra_merge_path.py`, `docs/cyntra-kernel-runbook.md`).
 - Final closure quality-gate evidence: `docs/evidence/r1-remediation-closure-1800/quality-gates.md`.
+
+## 16. Final State Reconciliation (1702 / 1704) (2026-02-21)
+
+- Reconciled canonical story status in `.beads/issues.jsonl`:
+  - `1702` (`E8-S2`) moved `open -> done`
+  - `1704` (`E8-S4`) moved `open -> done`
+- Export sync result: `scripts/cyntra/sync-backlog-csv.sh` rewrote `docs/backlog-jira-linear.csv` to full-row canonical parity (`status_updates=2`, `row_updates=22`).
+- Completion validator result: `scripts/cyntra/validate-roadmap-completion.sh` reports `48/48` roadmap rows done with CSV full-row parity and required evidence present.
+- Reconciliation evidence bundle: `docs/evidence/state-reconciliation-1702-1704.md`.

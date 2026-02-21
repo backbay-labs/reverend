@@ -1,0 +1,14 @@
+[preflight] python toolchain OK: 3.11.4 (require >=3.11)
+[preflight] java toolchain OK: openjdk version "21.0.10" 2026-01-20 | javac 21.0.10
+[preflight] disk headroom OK: 282GiB free
+[preflight] active workcells: 0 (limit 3)
+[preflight] WARN: context files are not committed on branch 'main':
+  - docs/evidence/rc-functional-validation/README.md
+  - docs/evidence/state-reconciliation-1702-1704.md
+  - eval/run_soak.sh
+  - scripts/cyntra/validate-roadmap-completion.py
+  - scripts/cyntra/validate-roadmap-completion.sh
+[preflight] WARN: continuing with non-reproducible context (strict mode disabled).
+[preflight] beads graph OK: issues=71 deps=76 ready=0 context_files=54
+[preflight] kernel status check OK
+[preflight] preflight checks passed

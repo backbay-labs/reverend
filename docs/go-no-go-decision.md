@@ -1,6 +1,6 @@
 # Go/No-Go Decision — Alien-Tech MVP (v0.1.0-rc1)
 
-**Date:** 2026-02-20
+**Date:** 2026-02-21
 **Decision Type:** MVP Release Candidate Approval
 **Epic:** E8-S4 (Issue 1704)
 **Supporting Evidence:** `docs/exit-gate-report.md`
@@ -14,6 +14,7 @@
 | **Decision** | **GO** |
 | **Release** | v0.1.0-rc1 |
 | **Scope** | Release candidate for internal evaluation and operator feedback |
+| **GA status** | **NO-GO** (until conditions `C1-C11` are closed) |
 | **Conditions** | Security implementation items (C1–C8) must be resolved before production deployment |
 
 ---

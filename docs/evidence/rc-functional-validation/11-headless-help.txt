@@ -1,0 +1,34 @@
+Headless Analyzer Usage: analyzeHeadless
+           <project_location> <project_name>[/<folder_path>]
+             | ghidra://<server>[:<port>]/<repository_name>[/<folder_path>]
+           [[-import [<directory>|<file>]+] | [-process [<project_file>]]]
+           [-preScript <ScriptName>]
+           [-postScript <ScriptName>]
+           [-scriptPath "<path1>[;<path2>...]"]
+           [-propertiesPath "<path1>[;<path2>...]"]
+           [-scriptlog <path to script log file>]
+           [-log <path to log file>]
+           [-overwrite]
+           [-mirror]
+           [-recursive]
+           [-readOnly]
+           [-deleteProject]
+           [-noanalysis]
+           [-processor <languageID>]
+           [-cspec <compilerSpecID>]
+           [-analysisTimeoutPerFile <timeout in seconds>]
+           [-keystore <KeystorePath>]
+           [-connect [<userID>]]
+           [-p]
+           [-commit ["<comment>"]]]
+           [-okToDelete]
+           [-max-cpu <max cpu cores to use>]
+           [-librarySearchPaths <path1>[;<path2>...]]
+           [-loader <desired loader name>]
+           [-loader-<loader argument name> <loader argument value>]
+
+     - All uses of $GHIDRA_HOME or $USER_HOME in script path must be preceded by '\'
+
+Please refer to 'analyzeHeadlessREADME.html' for detailed usage examples and notes.
+
+

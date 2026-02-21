@@ -1,18 +1,33 @@
 # Abuse Scenario Suite Evidence (Issue 1806)
 
-Executed: 2026-02-21 (UTC)
-Branch: `wc/1806/20260221T003808Z`
-Workcell: `wc-1806-20260221T003808Z`
+Executed: 2026-02-21T06:29:42+00:00
+Branch: `unknown`
+Workcell: `unknown`
+
+## Execution
+
+Run from repository root:
+
+```bash
+python3 scripts/security/run_abuse_scenario_suite.py --issue-id 1806 --output-dir docs/security/evidence/abuse-scenario-suite-1806
+```
 
 ## Scenario Evidence Files
 
-| Scenario | Command Evidence | Additional Artifact |
+| Scenario | Command evidence | Additional artifact(s) |
 |---|---|---|
-| S1 - No direct agent write invariant | `scenario-01-no-direct-agent-write.log` | `no-direct-agent-write/no-direct-agent-write-invariant.json`, `no-direct-agent-write/no-direct-agent-write-invariant.md` |
-| S2 - Allowlist egress block | `scenario-02-allowlist-egress.log` | `scripts/ml/tests/test_corpus_sync_worker.py` |
-| S3 - Per-project policy mode enforcement | `scenario-03-policy-mode-scope.log` | `scripts/ml/tests/test_corpus_sync_worker.py` |
-| S4 - Provenance chain rejection | `scenario-04-provenance-chain.log` | `scripts/ml/tests/test_corpus_sync_worker.py` |
-| S5 - Receipt tamper detection | `scenario-05-receipt-tamper.log` | `scripts/ml/tests/test_receipt_store.py` |
+| S1 - Direct or indirect agent write attempt to canonical corpus state | `scenario-01-no-direct-agent-write.log` | `no-direct-agent-write/no-direct-agent-write-invariant.json`, `no-direct-agent-write/no-direct-agent-write-invariant.md` |
+| S2 - Egress policy bypass by targeting non-allowlisted cloud endpoint | `scenario-02-allowlist-egress.log` | — |
+| S3 - Project-level policy override bypass (offline project tries remote sync) | `scenario-03-policy-mode-scope.log` | — |
+| S4 - Provenance-chain tampering to bypass read-side trust checks | `scenario-04-provenance-chain.log` | — |
+| S5 - Receipt-history tampering (mutate historic record) | `scenario-05-receipt-tamper.log` | — |
+
+## Run Summary
+
+- Executed scenarios: `5`
+- Passed: `5`
+- Failed: `0`
+- Open remediation items from this run: `0`
 
 ## Integrity
 

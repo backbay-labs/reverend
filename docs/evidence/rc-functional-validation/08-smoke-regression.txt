@@ -1,0 +1,15 @@
+[regression] Smoke metrics regression check
+
+[diff]
+  coverage: 0.6667 (baseline: 0.6667, threshold: 0.6167, delta: 0) [PASS]
+  match_rate: 0.6667 (baseline: 0.6667, threshold: 0.6167, delta: 0) [PASS]
+
+[similarity]
+  mrr: 1.0000 (baseline: 1.0000, threshold: 0.9500, delta: 0) [PASS]
+  recall@1: 1.0000 (baseline: 1.0000, threshold: 0.9500, delta: 0) [PASS]
+
+[type]
+  accuracy: 1.0000 (baseline: 1.0000, threshold: 0.9500, delta: 0) [PASS]
+
+[regression] PASSED (5/5 metrics OK)
+[regression] wrote docs/evidence/rc-functional-validation/08-smoke-regression.json
