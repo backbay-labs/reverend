@@ -235,8 +235,9 @@ if [[ ! -f "$config_path" ]]; then
 fi
 
 if [[ "$merge_guards" == "1" && "${args[0]:-}" == "run" ]]; then
-  normalize_merge_conflict_beads
+  # Canonicalize an explicit issue id before cleanup can retire stale shadow beads.
   rewrite_issue_arg_to_canonical
+  normalize_merge_conflict_beads
 fi
 
 exec uv tool run --from "$kernel_path" cyntra --config "$config_path" "${args[@]}"
