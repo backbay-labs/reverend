@@ -1,0 +1,32 @@
+<svg width="880" height="40" viewBox="0 0 880 40" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Reverend divider sigil">
+  <defs>
+    <linearGradient id="lineLeft" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22D3EE" stop-opacity="0"/>
+      <stop offset="1" stop-color="#22D3EE" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="lineRight" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#F43F5E" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#F43F5E" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="soul" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22D3EE" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#8B5CF6" stop-opacity="0.85"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <line x1="24" y1="20" x2="396" y2="20" stroke="url(#lineLeft)" stroke-width="1"/>
+  <line x1="484" y1="20" x2="856" y2="20" stroke="url(#lineRight)" stroke-width="1"/>
+
+  <g filter="url(#glow)">
+    <path d="M440 8L452 20L440 32L428 20L440 8Z" stroke="url(#soul)" stroke-width="1.2" fill="#02040A"/>
+    <path d="M440 12L448 20L440 28L432 20L440 12Z" stroke="#10B981" stroke-opacity="0.55" stroke-width="1" fill="none"/>
+    <circle cx="440" cy="20" r="1.6" fill="#22D3EE" fill-opacity="0.9"/>
+  </g>
+</svg>
