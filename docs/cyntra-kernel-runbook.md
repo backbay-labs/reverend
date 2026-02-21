@@ -29,6 +29,7 @@ scripts/cyntra/preflight.sh
 ```
 
 Preflight validates:
+- pinned toolchain compatibility (`python3 >= 3.11`, `java` + `javac` on JDK 21)
 - disk headroom (`CYNTRA_MIN_FREE_GB`, default `35`)
 - active workcell count limit (`CYNTRA_MAX_ACTIVE_WORKCELLS`, defaults to configured `max_concurrent_workcells`)
 - `.beads` integrity
@@ -40,6 +41,22 @@ If you need to bypass the `main`-commit requirement temporarily:
 ```bash
 CYNTRA_STRICT_CONTEXT_MAIN=0 scripts/cyntra/preflight.sh
 ```
+
+Deterministic local toolchain verification (same version policy as CI):
+
+```bash
+python3 --version | grep -E '^Python 3\.11\.'
+java -version 2>&1 | head -n 1 | grep -E '"21(\.|")'
+javac -version 2>&1 | grep -E '^javac 21(\.|$)'
+bash scripts/cyntra/preflight.sh | tee /tmp/cyntra-preflight.log
+grep -F '[preflight] python toolchain OK:' /tmp/cyntra-preflight.log
+grep -F '[preflight] java toolchain OK:' /tmp/cyntra-preflight.log
+grep -F '[preflight] preflight checks passed' /tmp/cyntra-preflight.log
+```
+
+Expected outcomes:
+- every command exits with status `0`
+- `preflight` prints both toolchain OK lines and ends with `preflight checks passed`
 
 ## 4. Run the kernel
 

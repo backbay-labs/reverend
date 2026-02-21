@@ -35,6 +35,19 @@ parse_java_major() {
   printf '%s\n' "$java_major"
 }
 
+parse_javac_major() {
+  local javac_version_line javac_version javac_major
+  javac_version_line="$(javac -version 2>&1 | head -n 1)"
+  javac_version="$(awk '{print $2}' <<<"$javac_version_line")"
+  [[ -n "$javac_version" ]] || return 1
+  javac_major="${javac_version%%.*}"
+  if [[ "$javac_major" == "1" ]]; then
+    javac_major="$(cut -d. -f2 <<<"$javac_version")"
+  fi
+  [[ "$javac_major" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$javac_major"
+}
+
 command -v uv >/dev/null 2>&1 || fail "uv is required but not found in PATH"
 command -v python3 >/dev/null 2>&1 || fail "python3 is required but not found in PATH (install Python 3.${required_python_minor}+)"
 read -r python_major python_minor python_patch < <(
@@ -57,7 +70,17 @@ fi
 if (( java_major != required_java_major )); then
   fail "JDK ${required_java_major} is required for reproducible runs; found Java ${java_major}. Install/select Temurin ${required_java_major} and verify with: java -version && javac -version"
 fi
-info "java toolchain OK: $(java -version 2>&1 | head -n 1)"
+javac_major="$(parse_javac_major || true)"
+if [[ -z "$javac_major" ]]; then
+  fail "unable to parse Java compiler version from 'javac -version'. Verify installation with: java -version && javac -version"
+fi
+if (( javac_major != required_java_major )); then
+  fail "JDK ${required_java_major} is required for reproducible runs; found javac ${javac_major}. Install/select Temurin ${required_java_major} and verify with: java -version && javac -version"
+fi
+if (( java_major != javac_major )); then
+  fail "java/javac mismatch detected (java ${java_major}, javac ${javac_major}). Align JAVA_HOME (${JAVA_HOME:-<unset>}) and PATH so both resolve to Temurin ${required_java_major}. Verify with: which java && which javac && java -version && javac -version"
+fi
+info "java toolchain OK: $(java -version 2>&1 | head -n 1) | $(javac -version 2>&1 | head -n 1)"
 
 [[ -d "$kernel_path" ]] || fail "kernel path not found: $kernel_path"
 [[ -f .beads/issues.jsonl ]] || fail "missing .beads/issues.jsonl"
