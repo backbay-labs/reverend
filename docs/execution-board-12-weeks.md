@@ -150,3 +150,11 @@ This board operationalizes:
   - each gate maps to measurable evidence artifact + `pass`/`fail`/`waived` status
   - open risks/waivers include owner, rationale, and expiration/revisit condition
   - go/no-go decision record includes approvers and a dated final determination
+
+## 15. R1 Remediation Epic Closure (2026-02-21)
+
+- Epic: `R1` (`issue 1800`) is closed; `.beads/issues.jsonl` now records `1800` and all child stories `1801-1809` as `done`.
+- Reopened escalation story `14` closure evidence: commit `39f9d585ff` (`scripts/cyntra/preflight.sh`, `.github/workflows/eval.yaml`, `docs/research/python-integration-ops-matrix.md`, `docs/cyntra-kernel-runbook.md`).
+- Reopened escalation story `15` closure evidence: commit `a2b0f6a3a9` + merge `d12d4d1ae4` (`scripts/cyntra/sync-backlog-csv.sh`, `docs/backlog-jira-linear.csv`, `docs/cyntra-kernel-runbook.md`).
+- Reopened escalation story `16` closure evidence: commit `714b440f7c` + merge `e8941eac4d` (`scripts/cyntra/cyntra.sh`, `scripts/tests/test_cyntra_merge_path.py`, `docs/cyntra-kernel-runbook.md`).
+- Final closure quality-gate evidence: `docs/evidence/r1-remediation-closure-1800/quality-gates.md`.

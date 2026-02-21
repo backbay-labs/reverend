@@ -270,3 +270,30 @@ bash scripts/cyntra/gates.sh --mode=all
 ```
 
 Reference regression: `scripts/tests/test_cyntra_merge_path.py`.
+
+## 8. R1 Remediation Closure Snapshot (2026-02-21)
+
+- Backlog truth closure state: `.beads/issues.jsonl` records `1800` and all `epic:R1` stories (`1801-1809`) as `done`.
+- Escalation closure evidence:
+  - story `14`: commit `39f9d585ff`
+  - story `15`: commit `a2b0f6a3a9` and merge `d12d4d1ae4`
+  - story `16`: commit `714b440f7c` and merge `e8941eac4d`
+- Workcell closure gate evidence is published at `docs/evidence/r1-remediation-closure-1800/quality-gates.md`.
+- Deterministic verification command:
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+issues = [json.loads(line) for line in Path(".beads/issues.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+remaining = []
+for issue in issues:
+    tags = [str(tag) for tag in issue.get("tags") or []]
+    status = str(issue.get("status") or "").lower()
+    if "epic:R1" in tags and status in {"open", "blocked", "escalated"}:
+        remaining.append((issue.get("id"), status))
+if remaining:
+    raise SystemExit(f"R1 unresolved statuses: {remaining}")
+print("R1 closure status OK: no open/blocked/escalated issues")
+PY
+```
