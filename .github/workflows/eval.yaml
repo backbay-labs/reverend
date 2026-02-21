@@ -77,14 +77,14 @@ jobs:
           path: scripts/tests/artifacts/no-direct-agent-write/
           retention-days: 30
 
-      - name: Run stock baseline slices (semantic search + type recovery)
+      - name: Run stock baseline slices (writes ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/metrics.json)
         run: |
           bash eval/run_smoke.sh \
             --slice semantic-search \
             --slice type-recovery \
             --output "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json"
 
-      - name: Publish stock baseline comparator artifacts
+      - name: Publish stock baseline comparator artifacts (baseline.json + baseline-report.md)
         run: |
           python3 eval/scripts/publish_baseline.py \
             --metrics "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json" \
@@ -107,10 +107,10 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Run smoke tests
+      - name: Run smoke tests (writes eval/output/smoke/metrics.json)
         run: bash eval/run_smoke.sh
 
-      - name: Check smoke metrics against baseline (blocking)
+      - name: Check smoke metrics against baseline (writes eval/output/smoke/regression.json, blocking)
         run: |
           python3 eval/scripts/check_regression.py \
             --current eval/output/smoke/metrics.json \
@@ -167,14 +167,14 @@ jobs:
           fi
           gradle -p eval/java-regression --no-daemon test
 
-      - name: Run stock baseline slices (semantic search + type recovery)
+      - name: Run stock baseline slices (writes ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/metrics.json)
         run: |
           bash eval/run_smoke.sh \
             --slice semantic-search \
             --slice type-recovery \
             --output "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json"
 
-      - name: Publish stock baseline comparator artifacts
+      - name: Publish stock baseline comparator artifacts (baseline.json + baseline-report.md)
         run: |
           python3 eval/scripts/publish_baseline.py \
             --metrics "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json" \
@@ -197,7 +197,7 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Run smoke tests (generate current metrics)
+      - name: Run smoke tests (writes eval/output/smoke/metrics.json)
         run: bash eval/run_smoke.sh
 
       - name: Resolve previous nightly baseline
@@ -255,7 +255,7 @@ jobs:
           run-id: ${{ steps.previous_nightly.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compare against previous nightly baseline (blocking)
+      - name: Compare against previous nightly baseline (writes eval/output/smoke/nightly-comparison.json, blocking)
         if: steps.previous_nightly.outputs.run_id != ''
         run: |
           previous_metrics="$(find eval/output/nightly-baseline -type f -name metrics.json | head -n 1)"
@@ -330,14 +330,14 @@ jobs:
           fi
           gradle -p eval/java-regression --no-daemon test
 
-      - name: Run stock baseline slices (semantic search + type recovery)
+      - name: Run stock baseline slices (writes ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/metrics.json)
         run: |
           bash eval/run_smoke.sh \
             --slice semantic-search \
             --slice type-recovery \
             --output "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json"
 
-      - name: Publish stock baseline comparator artifacts
+      - name: Publish stock baseline comparator artifacts (baseline.json + baseline-report.md)
         run: |
           python3 eval/scripts/publish_baseline.py \
             --metrics "${STOCK_BASELINE_OUTPUT_DIR}/metrics.json" \
@@ -360,10 +360,10 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Run smoke tests
+      - name: Run smoke tests (writes eval/output/smoke/metrics.json)
         run: bash eval/run_smoke.sh
 
-      - name: Check smoke metrics against baseline (blocking)
+      - name: Check smoke metrics against baseline (writes eval/output/smoke/release-regression.json, blocking)
         run: |
           python3 eval/scripts/check_regression.py \
             --current eval/output/smoke/metrics.json \

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 mode="all"
+artifact_root="${CYNTRA_GATE_ARTIFACT_DIR:-.cyntra/artifacts/gates}"
 for arg in "$@"; do
   case "$arg" in
     --mode=*)
@@ -66,7 +67,7 @@ run_python_regression() {
 
 run_java_regression() {
   local java_gate_src="scripts/tests/java/MvpGateThresholdRegression.java"
-  local java_gate_out=".cyntra/tmp/java-gates"
+  local java_gate_out="${artifact_root}/java"
   local thresholds_path="eval/config/mvp_gate_thresholds.json"
 
   if [[ ! -f "$java_gate_src" ]]; then
@@ -90,7 +91,37 @@ run_java_regression() {
   rm -f "$java_gate_out"/*.class
   javac -d "$java_gate_out" "$java_gate_src"
   java -cp "$java_gate_out" MvpGateThresholdRegression "$thresholds_path"
-  echo "[gates] java regression OK"
+  echo "[gates] java regression OK (artifacts: $java_gate_out/*.class)"
+}
+
+run_eval_regression() {
+  local smoke_runner="eval/run_smoke.sh"
+  local regression_checker="eval/scripts/check_regression.py"
+  local baseline_path="eval/snapshots/baseline.json"
+  local eval_gate_out="${artifact_root}/eval"
+  local metrics_out="${eval_gate_out}/smoke-metrics.json"
+  local regression_out="${eval_gate_out}/regression.json"
+
+  if [[ ! -f "$smoke_runner" ]]; then
+    echo "[gates] ERROR: missing smoke runner: $smoke_runner" >&2
+    exit 1
+  fi
+  if [[ ! -f "$regression_checker" ]]; then
+    echo "[gates] ERROR: missing regression checker: $regression_checker" >&2
+    exit 1
+  fi
+  if [[ ! -f "$baseline_path" ]]; then
+    echo "[gates] ERROR: missing smoke baseline: $baseline_path" >&2
+    exit 1
+  fi
+
+  mkdir -p "$eval_gate_out"
+  bash "$smoke_runner" --output "$metrics_out"
+  python3 "$regression_checker" \
+    --current "$metrics_out" \
+    --baseline "$baseline_path" \
+    --output "$regression_out"
+  echo "[gates] eval regression OK (artifacts: $metrics_out, $regression_out)"
 }
 
 case "$mode" in
@@ -99,12 +130,15 @@ case "$mode" in
     check_diff_sanity
     run_python_regression
     run_java_regression
+    run_eval_regression
     ;;
   context)
     check_manifest_context
+    run_python_regression
     ;;
   diff)
     check_diff_sanity
+    run_java_regression
     ;;
   *)
     echo "[gates] ERROR: unknown mode '$mode' (expected all|context|diff)" >&2
