@@ -90,9 +90,51 @@ Use `CYNTRA_ARCHIVE_RETENTION_DAYS` to tune archive pruning.
 
 ## 6. Backlog notes
 
-- Epics `1000`-`1700` are blocked parents; stories are executable children.
+- `.beads/issues.jsonl` is the source of truth for backlog statuses.
+- Canonical statuses for epic/story backlog items are `open`, `done`, and `blocked`.
+- Snapshot as of `2026-02-21`: epics `1000`-`1700` are `done`; remediation epic `1800` is `blocked`; remediation stories `1802`-`1809` are `open` (`1801` is `done`).
 - Dependency ordering is in `.beads/deps.jsonl`.
-- Initial ready issue is `1001`.
+
+Sync `docs/backlog-jira-linear.csv` status values from bead truth:
+
+```bash
+python3 - <<'PY'
+import csv
+import json
+import subprocess
+from pathlib import Path
+
+issues_path = Path(".beads/issues.jsonl")
+if issues_path.exists():
+    lines = issues_path.read_text(encoding="utf-8").splitlines()
+else:
+    lines = subprocess.check_output(
+        ["git", "show", "HEAD:.beads/issues.jsonl"],
+        text=True,
+    ).splitlines()
+
+status_by_id = {}
+for line in lines:
+    if not line.strip():
+        continue
+    issue = json.loads(line)
+    status_by_id[str(issue["id"])] = str(issue.get("status", "")).lower()
+
+csv_path = Path("docs/backlog-jira-linear.csv")
+rows = list(csv.DictReader(csv_path.open(newline="", encoding="utf-8")))
+for row in rows:
+    status = status_by_id.get(row["id"])
+    if status:
+        row["status"] = status
+
+with csv_path.open("w", newline="", encoding="utf-8") as handle:
+    writer = csv.DictWriter(handle, fieldnames=rows[0].keys())
+    writer.writeheader()
+    writer.writerows(rows)
+
+print(f"synced {len(rows)} backlog rows from bead status")
+PY
+```
 
 ## 7. Deterministic merge-failure recovery
 
