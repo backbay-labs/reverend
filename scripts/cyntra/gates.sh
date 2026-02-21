@@ -237,7 +237,16 @@ require_gradle_build_prereqs() {
   fi
 }
 
+has_java_scope_changes() {
+  git diff --name-only -- . | rg -q '^(Ghidra/|GPL/|GhidraBuild/|gradle/|build\.gradle$|settings\.gradle$|gradle\.properties$)'
+}
+
 run_security_compile_regression() {
+  if ! has_java_scope_changes; then
+    echo "[gates] security compile gate skipped (no Java/Ghidra scope changes)"
+    return 0
+  fi
+
   require_gradle_build_prereqs
 
   local gradle_cmd=("./gradlew")

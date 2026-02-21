@@ -1,0 +1,34 @@
+id: code
+description: Reverend code workcell (sparse checkout with gate prerequisites)
+sparse_checkout:
+  - Ghidra/
+  - GhidraBuild/
+  - GPL/
+  - docs/
+  - eval/
+  - gradle/
+  - scripts/
+  - .github/
+  - AGENTS.md
+  - CLAUDE.md
+  - CONTRIBUTING.md
+  - DevGuide.md
+  - README.md
+  - build.gradle
+  - gradle.properties
+  - gradlew
+  - gradlew.bat
+  - settings.gradle
+exclude_patterns: []
+secrets:
+  source: env
+  inject:
+    - ANTHROPIC_API_KEY
+    - OPENAI_API_KEY
+setup: []
+context:
+  claude_md: ""
+  inject_files: []
+tags:
+  - code
+  - reverend
