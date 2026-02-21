@@ -31,8 +31,12 @@ except Exception as exc:
 issue = data.get("issue") or {}
 context_files = issue.get("context_files") or []
 missing = []
+skipped = []
 for rel in context_files:
     if not isinstance(rel, str) or not rel.strip():
+        continue
+    if rel.startswith(".beads/"):
+        skipped.append(rel)
         continue
     if not Path(rel).exists():
         missing.append(rel)
@@ -44,6 +48,8 @@ if missing:
     sys.exit(1)
 
 print(f"[gates] context OK ({len(context_files)} files)")
+if skipped:
+    print(f"[gates] context skipped ({len(skipped)} kernel-owned files)")
 PY
 }
 

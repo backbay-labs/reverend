@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "gates": {
+    "recall_at_10_delta_vs_stock": {
+      "operator": ">=",
+      "threshold": 0.1,
+      "severity": "critical",
+      "action": "Improve retrieval quality and reranking before release."
+    },
+    "search_latency_p95_ms": {
+      "operator": "<=",
+      "threshold": 300.0,
+      "severity": "warning",
+      "action": "Profile hot paths and reduce p95 latency."
+    },
+    "receipt_completeness": {
+      "operator": "==",
+      "threshold": 1.0,
+      "severity": "critical",
+      "action": "Block release until every proposal includes a complete receipt."
+    },
+    "rollback_success_rate": {
+      "operator": "==",
+      "threshold": 1.0,
+      "severity": "critical",
+      "action": "Fix rollback defects and rerun regression suite."
+    }
+  }
+}
