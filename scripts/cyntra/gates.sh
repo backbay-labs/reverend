@@ -56,10 +56,49 @@ check_diff_sanity() {
   echo "[gates] diff sanity OK"
 }
 
+run_python_regression() {
+  echo "[gates] running python regression: scripts/ml/tests"
+  python3 -m unittest discover -s scripts/ml/tests -p 'test_*.py'
+  echo "[gates] running python regression: scripts/tests"
+  python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+  echo "[gates] python regression OK"
+}
+
+run_java_regression() {
+  local java_gate_src="scripts/tests/java/MvpGateThresholdRegression.java"
+  local java_gate_out=".cyntra/tmp/java-gates"
+  local thresholds_path="eval/config/mvp_gate_thresholds.json"
+
+  if [[ ! -f "$java_gate_src" ]]; then
+    echo "[gates] ERROR: missing Java gate source: $java_gate_src" >&2
+    exit 1
+  fi
+  if [[ ! -f "$thresholds_path" ]]; then
+    echo "[gates] ERROR: missing threshold config: $thresholds_path" >&2
+    exit 1
+  fi
+  if ! command -v javac >/dev/null 2>&1; then
+    echo "[gates] ERROR: javac not found; Java regression gate cannot run" >&2
+    exit 1
+  fi
+  if ! command -v java >/dev/null 2>&1; then
+    echo "[gates] ERROR: java runtime not found; Java regression gate cannot run" >&2
+    exit 1
+  fi
+
+  mkdir -p "$java_gate_out"
+  rm -f "$java_gate_out"/*.class
+  javac -d "$java_gate_out" "$java_gate_src"
+  java -cp "$java_gate_out" MvpGateThresholdRegression "$thresholds_path"
+  echo "[gates] java regression OK"
+}
+
 case "$mode" in
   all)
     check_manifest_context
     check_diff_sanity
+    run_python_regression
+    run_java_regression
     ;;
   context)
     check_manifest_context

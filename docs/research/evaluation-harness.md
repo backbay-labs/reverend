@@ -596,6 +596,29 @@ Gate-aligned metrics consolidated for the MVP decision:
 
 Decision outcome: **GO for v0.1.0-rc1 internal release scope**, with open production conditions tracked as `C1-C11` in `docs/go-no-go-decision.md`.
 
+### 6.6 E8-S1 Reopen Regression + Soak Closure (2026-02-21)
+
+Reopen execution evidence for issue `1701` is published in:
+- `docs/soak-test-report-1701.md`
+
+Release-blocking bottlenecks and outcomes:
+- Regression gate placeholder risk resolved by upgrading `scripts/cyntra/gates.sh --mode=all` to execute:
+  - Python suites (`scripts/ml/tests`, `scripts/tests`; `66 + 15` tests in this run)
+  - Java gate (`scripts/tests/java/MvpGateThresholdRegression.java`) validating threshold contract wiring.
+- Missing dashboard implementation resolved by adding:
+  - `eval/scripts/mvp_gate_dashboard.py`
+  - `eval/config/mvp_gate_thresholds.json`
+- JDK21 CI enforcement for Gradle test execution resolved by:
+  - adding `eval/java-regression` Gradle module with Java toolchain `21`
+  - wiring blocking `gradle -p eval/java-regression test` under JDK21 in `.github/workflows/eval.yaml` smoke/nightly/release lanes.
+
+Soak summary from `2026-02-20`/`2026-02-21` UTC six-run sequence (`soak-20260220-run1..6`):
+- Gate pass rate: `6/6`
+- Recall delta vs stock: `1.000` across all runs
+- p95 latency min/mean/max: `10.327 / 10.514 / 10.743 ms`
+- Dashboard alerts: `0` (`eval/artifacts/mvp-gates/alerts.json`)
+- Waivers: none
+
 ---
 
 ## 7. Automated Evaluation Pipeline
