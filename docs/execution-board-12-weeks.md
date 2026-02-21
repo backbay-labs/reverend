@@ -124,3 +124,10 @@ This board operationalizes:
   - CI now enforces JDK21 for Gradle test execution on affected module `eval/java-regression` in smoke/nightly/release lanes (`.github/workflows/eval.yaml`).
 - Soak outcome: `6/6` runs passed; recall delta vs stock stayed `1.000`; p95 latency stayed within `10.327-10.743 ms`; dashboard alert count `0`.
 - Waivers: none.
+
+## 12. R1-S6 Reopen Security Signoff Closure (2026-02-21)
+
+- Story: `R1-S6` (`issue 1806`) reopened to require an executable abuse-scenario suite artifact against current controls.
+- Published suite results: `docs/security/abuse-scenario-suite.md` (v1.2, executable run matrix).
+- Published run evidence bundle: `docs/security/evidence/abuse-scenario-suite-1806/README.md`.
+- Scenario execution summary: `5/5` scenarios passed; no failed controls; no waivers.

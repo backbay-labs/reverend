@@ -4,9 +4,9 @@
 >
 > **Spec under review**: `docs/research/agent-runtime-security-spec.md` (v1, 2026-02-19)
 > **Compliance reference**: `docs/research/legal-compliance-playbook.md` (v1.0, 2026-02-19)
-> **Abuse scenario results**: `docs/security/abuse-scenario-suite.md` (v1.1, 2026-02-20)
+> **Abuse scenario results**: `docs/security/abuse-scenario-suite.md` (v1.2, 2026-02-21)
 > **Review date**: 2026-02-20
-> **Review scope**: E8-S2 — Adversarial abuse scenarios and security signoff (Issue 1702)
+> **Review scope**: E8-S2 baseline + R1-S6 reopened executable abuse-scenario rerun (Issues 1702, 1806)
 
 ---
 
