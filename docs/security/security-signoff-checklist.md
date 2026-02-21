@@ -4,9 +4,9 @@
 >
 > **Spec under review**: `docs/research/agent-runtime-security-spec.md` (v1, 2026-02-19)
 > **Compliance reference**: `docs/research/legal-compliance-playbook.md` (v1.0, 2026-02-19)
-> **Abuse scenario results**: `docs/security/abuse-scenario-suite.md` (v1.2, 2026-02-21)
-> **Review date**: 2026-02-20
-> **Review scope**: E8-S2 baseline + R1-S6 reopened executable abuse-scenario rerun (Issues 1702, 1806)
+> **Abuse scenario results**: `docs/security/abuse-scenario-suite.md` (v1.3, 2026-02-21)
+> **Review date**: 2026-02-21
+> **Review scope**: E8-S2 reopened executable abuse-scenario rerun (Issue 1702) with prior rerun continuity check (Issue 1806)
 
 ---
 
@@ -81,7 +81,10 @@
 
 ## 7. Abuse Scenario Execution
 
-- [x] All 5 primary attack scenarios from spec Section 6 executed as tabletop exercises
+- [x] All 5 primary attack scenarios from spec Section 6 executed as runtime regression checks
+- [x] Executable harness is versioned at `scripts/security/run_abuse_scenario_suite.py`
+- [x] Scenario logs, machine-readable outcomes, and checksums are stored in
+      `docs/security/evidence/abuse-scenario-suite-1702/`
 - [x] 8 additional scenarios covering remaining STRIDE threats executed
 - [x] 13 total scenarios with documented outcomes (see abuse-scenario-suite.md)
 - [x] Zero critical findings requiring immediate remediation
@@ -138,11 +141,19 @@ implementation phase gate (E8-S3 or equivalent).
 
 ---
 
+## 11. Issue 1702 Signoff Record (2026-02-21)
+
+| Approver | Date | Decision | Unresolved-risk notes |
+|------|------|------|--------|
+| Security review (automated evidence review) | 2026-02-21 | **Approved (conditional)** | Medium residual threats `T1`, `T3`, `T5`, `T9`, and `T10` remain accepted as inherent LLM/system constraints with required compensating controls; all implementation-phase open items in Section 10 stay mandatory. |
+
+---
+
 ## Signoff
 
 | Role | Name | Date | Status |
 |------|------|------|--------|
-| Security review (automated) | E8-S2 / Issue 1702 | 2026-02-20 | **Approved (conditional)** |
+| Security review (automated) | E8-S2 / Issue 1702 (reopen rerun) | 2026-02-21 | **Approved (conditional)** |
 | Architecture review | — | — | Pending |
 | Legal review | — | — | Pending |
 | CISO/Security lead | — | — | Pending |
@@ -160,7 +171,7 @@ penetration testing before production deployment.
 
 ---
 
-> **Document version**: 1.1
+> **Document version**: 1.2
 > **Classification**: Internal — Security Review
 > **Next review**: At implementation phase gate
-> **Supersedes**: v1.0 (2026-02-20)
+> **Supersedes**: v1.1 (2026-02-20)
