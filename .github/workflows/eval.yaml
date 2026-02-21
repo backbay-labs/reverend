@@ -85,8 +85,25 @@ jobs:
             echo "Expected JDK ${REQUIRED_JAVA_VERSION}, found Java ${java_version}" >&2
             exit 1
           fi
-          echo "Java version OK: ${java_version_line}"
-          javac -version
+          javac_version_line="$(javac -version 2>&1 | head -n 1)"
+          javac_version="$(awk '{print $2}' <<<"${javac_version_line}")"
+          if [[ -z "${javac_version}" ]]; then
+            echo "Unable to parse javac version from: ${javac_version_line}" >&2
+            exit 1
+          fi
+          javac_major="${javac_version%%.*}"
+          if [[ "${javac_major}" == "1" ]]; then
+            javac_major="$(cut -d. -f2 <<<"${javac_version}")"
+          fi
+          if [[ "${javac_major}" != "${REQUIRED_JAVA_VERSION}" ]]; then
+            echo "Expected JDK ${REQUIRED_JAVA_VERSION}, found javac ${javac_version}" >&2
+            exit 1
+          fi
+          if [[ "${java_major}" != "${javac_major}" ]]; then
+            echo "java/javac mismatch: java=${java_version} javac=${javac_version}" >&2
+            exit 1
+          fi
+          echo "Java toolchain OK: ${java_version_line} / ${javac_version_line}"
 
       - name: Run no-direct-agent-write security regression suite (blocking)
         run: |
@@ -96,9 +113,16 @@ jobs:
 
       - name: Run Java regression module tests (Gradle + JDK 21, blocking)
         run: |
-          java -version
-          if ! java -version 2>&1 | head -n 1 | grep -q "\"${REQUIRED_JAVA_VERSION}"; then
+          java_version_line="$(java -version 2>&1 | head -n 1)"
+          javac_version_line="$(javac -version 2>&1 | head -n 1)"
+          echo "${java_version_line}"
+          echo "${javac_version_line}"
+          if ! grep -q "\"${REQUIRED_JAVA_VERSION}" <<<"${java_version_line}"; then
             echo "Expected JDK ${REQUIRED_JAVA_VERSION} for Gradle test execution" >&2
+            exit 1
+          fi
+          if ! grep -Eq "^javac ${REQUIRED_JAVA_VERSION}(\\.|$)" <<<"${javac_version_line}"; then
+            echo "Expected javac ${REQUIRED_JAVA_VERSION} for Gradle test execution" >&2
             exit 1
           fi
           gradle -p eval/java-regression --no-daemon test
@@ -221,14 +245,38 @@ jobs:
             echo "Expected JDK ${REQUIRED_JAVA_VERSION}, found Java ${java_version}" >&2
             exit 1
           fi
-          echo "Java version OK: ${java_version_line}"
-          javac -version
+          javac_version_line="$(javac -version 2>&1 | head -n 1)"
+          javac_version="$(awk '{print $2}' <<<"${javac_version_line}")"
+          if [[ -z "${javac_version}" ]]; then
+            echo "Unable to parse javac version from: ${javac_version_line}" >&2
+            exit 1
+          fi
+          javac_major="${javac_version%%.*}"
+          if [[ "${javac_major}" == "1" ]]; then
+            javac_major="$(cut -d. -f2 <<<"${javac_version}")"
+          fi
+          if [[ "${javac_major}" != "${REQUIRED_JAVA_VERSION}" ]]; then
+            echo "Expected JDK ${REQUIRED_JAVA_VERSION}, found javac ${javac_version}" >&2
+            exit 1
+          fi
+          if [[ "${java_major}" != "${javac_major}" ]]; then
+            echo "java/javac mismatch: java=${java_version} javac=${javac_version}" >&2
+            exit 1
+          fi
+          echo "Java toolchain OK: ${java_version_line} / ${javac_version_line}"
 
       - name: Run Java regression module tests (Gradle + JDK 21, blocking)
         run: |
-          java -version
-          if ! java -version 2>&1 | head -n 1 | grep -q "\"${REQUIRED_JAVA_VERSION}"; then
+          java_version_line="$(java -version 2>&1 | head -n 1)"
+          javac_version_line="$(javac -version 2>&1 | head -n 1)"
+          echo "${java_version_line}"
+          echo "${javac_version_line}"
+          if ! grep -q "\"${REQUIRED_JAVA_VERSION}" <<<"${java_version_line}"; then
             echo "Expected JDK ${REQUIRED_JAVA_VERSION} for Gradle test execution" >&2
+            exit 1
+          fi
+          if ! grep -Eq "^javac ${REQUIRED_JAVA_VERSION}(\\.|$)" <<<"${javac_version_line}"; then
+            echo "Expected javac ${REQUIRED_JAVA_VERSION} for Gradle test execution" >&2
             exit 1
           fi
           gradle -p eval/java-regression --no-daemon test
@@ -416,14 +464,38 @@ jobs:
             echo "Expected JDK ${REQUIRED_JAVA_VERSION}, found Java ${java_version}" >&2
             exit 1
           fi
-          echo "Java version OK: ${java_version_line}"
-          javac -version
+          javac_version_line="$(javac -version 2>&1 | head -n 1)"
+          javac_version="$(awk '{print $2}' <<<"${javac_version_line}")"
+          if [[ -z "${javac_version}" ]]; then
+            echo "Unable to parse javac version from: ${javac_version_line}" >&2
+            exit 1
+          fi
+          javac_major="${javac_version%%.*}"
+          if [[ "${javac_major}" == "1" ]]; then
+            javac_major="$(cut -d. -f2 <<<"${javac_version}")"
+          fi
+          if [[ "${javac_major}" != "${REQUIRED_JAVA_VERSION}" ]]; then
+            echo "Expected JDK ${REQUIRED_JAVA_VERSION}, found javac ${javac_version}" >&2
+            exit 1
+          fi
+          if [[ "${java_major}" != "${javac_major}" ]]; then
+            echo "java/javac mismatch: java=${java_version} javac=${javac_version}" >&2
+            exit 1
+          fi
+          echo "Java toolchain OK: ${java_version_line} / ${javac_version_line}"
 
       - name: Run Java regression module tests (Gradle + JDK 21, blocking)
         run: |
-          java -version
-          if ! java -version 2>&1 | head -n 1 | grep -q "\"${REQUIRED_JAVA_VERSION}"; then
+          java_version_line="$(java -version 2>&1 | head -n 1)"
+          javac_version_line="$(javac -version 2>&1 | head -n 1)"
+          echo "${java_version_line}"
+          echo "${javac_version_line}"
+          if ! grep -q "\"${REQUIRED_JAVA_VERSION}" <<<"${java_version_line}"; then
             echo "Expected JDK ${REQUIRED_JAVA_VERSION} for Gradle test execution" >&2
+            exit 1
+          fi
+          if ! grep -Eq "^javac ${REQUIRED_JAVA_VERSION}(\\.|$)" <<<"${javac_version_line}"; then
+            echo "Expected javac ${REQUIRED_JAVA_VERSION} for Gradle test execution" >&2
             exit 1
           fi
           gradle -p eval/java-regression --no-daemon test

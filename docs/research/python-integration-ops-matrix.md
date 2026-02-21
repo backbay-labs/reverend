@@ -547,11 +547,20 @@ For this repository's evaluation pipeline, use the same pinned runtime pair as C
 Use your package manager/version manager of choice to install those versions, then verify locally before running heavy workflows:
 
 ```bash
-python3 --version
-java -version
-javac -version
-bash scripts/cyntra/preflight.sh
+python3 --version | grep -E '^Python 3\.11\.'
+java -version 2>&1 | head -n 1 | grep -E '"21(\.|")'
+javac -version 2>&1 | grep -E '^javac 21(\.|$)'
+bash scripts/cyntra/preflight.sh | tee /tmp/cyntra-preflight.log
+grep -F '[preflight] python toolchain OK:' /tmp/cyntra-preflight.log
+grep -F '[preflight] java toolchain OK:' /tmp/cyntra-preflight.log
+grep -F '[preflight] preflight checks passed' /tmp/cyntra-preflight.log
 ```
+
+Expected outcomes:
+- each command exits `0`
+- Python prints `3.11.x`
+- Java and `javac` both report major `21`
+- `preflight` reports both toolchain checks as OK and ends with `preflight checks passed`
 
 Recommended command set before opening a PR:
 
