@@ -66,6 +66,16 @@ scripts/cyntra/cyntra.sh workcells
 scripts/cyntra/cyntra.sh history
 ```
 
+When running `scripts/cyntra/cyntra.sh run ...`, merge guards are enabled by default:
+- recursive `[MERGE CONFLICT]` shadow beads are retired from `.beads/issues.jsonl`
+- `--issue` values that point at a merge-conflict bead are remapped to the canonical issue id
+
+Disable this only for debugging:
+
+```bash
+CYNTRA_MERGE_GUARDS=0 scripts/cyntra/cyntra.sh run --once --issue <id>
+```
+
 ## 5. Cleanup and disk management
 
 ```bash
@@ -83,3 +93,27 @@ Use `CYNTRA_ARCHIVE_RETENTION_DAYS` to tune archive pruning.
 - Epics `1000`-`1700` are blocked parents; stories are executable children.
 - Dependency ordering is in `.beads/deps.jsonl`.
 - Initial ready issue is `1001`.
+
+## 7. Deterministic merge-failure recovery
+
+When merge-to-`main` fails and Cyntra emits `[MERGE CONFLICT]` beads:
+
+1. Retire recursive shadow beads and dedupe conflict targets:
+
+```bash
+scripts/cyntra/cyntra.sh repair-merge-conflicts
+```
+
+2. Re-run using the canonical issue id. If you only have a merge-conflict bead id, pass it directly and the wrapper remaps it:
+
+```bash
+scripts/cyntra/cyntra.sh run --once --issue <merge-conflict-or-canonical-id>
+```
+
+3. If merge still fails, perform the merge manually from the recorded workcell branch and re-run gates:
+
+```bash
+git switch main
+git merge --no-ff wc/<issue-id>/<timestamp>
+bash scripts/cyntra/gates.sh --mode=all
+```
