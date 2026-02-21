@@ -1,145 +1,88 @@
-<img src="Ghidra/Features/Base/src/main/resources/images/GHIDRA_3.png" width="400">
+# Reverend
 
-# Ghidra Software Reverse Engineering Framework
-Ghidra is a software reverse engineering (SRE) framework created and maintained by the 
-[National Security Agency][nsa] Research Directorate. This framework includes a suite of 
-full-featured, high-end software analysis tools that enable users to analyze compiled code on a 
-variety of platforms including Windows, macOS, and Linux. Capabilities include disassembly, 
-assembly, decompilation, graphing, and scripting, along with hundreds of other features. Ghidra 
-supports a wide variety of processor instruction sets and executable formats and can be run in both 
-user-interactive and automated modes. Users may also develop their own Ghidra extension components 
-and/or scripts using Java or Python.
+Reverend is a production-oriented Ghidra fork focused on evidence-backed, agent-assisted reverse engineering.
 
-In support of NSA's Cybersecurity mission, Ghidra was built to solve scaling and teaming problems 
-on complex SRE efforts, and to provide a customizable and extensible SRE research platform. NSA has 
-applied Ghidra SRE capabilities to a variety of problems that involve analyzing malicious code and 
-generating deep insights for SRE analysts who seek a better understanding of potential 
-vulnerabilities in networks and systems.
+This repo combines:
+- Ghidra core (upstream-compatible build/distribution flow)
+- Reverend workflow primitives (proposal/receipt/security/eval layers)
+- Cyntra kernel automation (beads backlog + workcell orchestration)
 
-If you are a U.S. citizen interested in projects like this, to develop Ghidra and other 
-cybersecurity tools for NSA to help protect our nation and its allies, consider applying for a 
-[career with us][career].
+## What Reverend Adds
 
-## Security Warning
-**WARNING:** There are known security vulnerabilities within certain versions of Ghidra.  Before 
-proceeding, please read through Ghidra's [Security Advisories][security] for a better understanding 
-of how you might be impacted.
+- Evidence-backed proposal workflow for rename/type/comment operations
+- Security controls for agent operations (`CapabilityGuard`, policy modes, audit trails)
+- Deterministic evaluation harnesses (smoke, soak, regression thresholds)
+- Kernel-native execution model via Cyntra workcells and bead dependencies
 
-## Install
-To install an official pre-built multi-platform Ghidra release:  
-* Install [JDK 21 64-bit][jdk]
-* Download a Ghidra [release file][releases]
-  - **NOTE:** The official multi-platform release file is named 
-    `ghidra_<version>_<release>_<date>.zip` which can be found under the "Assets" drop-down.
-    Downloading either of the files named "Source Code" is not correct for this step.
-* Extract the Ghidra release file
-  - **NOTE:** Do not extract on top of an existing installation
-* Launch Ghidra: `./ghidraRun` (`ghidraRun.bat` for Windows)
-  - or launch [PyGhidra][pyghidra]: `./support/pyGhidraRun` (`support\pyGhidraRun.bat` for Windows)
+## Current Program State
 
-For additional information and troubleshooting tips about installing and running a Ghidra release, 
-please refer to the [Getting Started][gettingstarted] document which can be found at the root of a 
-Ghidra installation directory. 
+- RC roadmap scope: complete (`48/48` roadmap rows done)
+- MVP exit-gate artifacts: `docs/exit-gate-report.md`, `docs/go-no-go-decision.md`
+- GA posture: still conditional until production criteria in `C1-C11` are closed
 
-## Build
-To create the latest development build for your platform from this source repository:
+## Repository Map
 
-##### Install build tools:
-* [JDK 21 64-bit][jdk]
-* [Gradle 8.5+][gradle] (or provided Gradle wrapper if Internet connection is available)
-* [Python3][python3] (version 3.9 to 3.13) with bundled pip
-* GCC or Clang, and make (Linux/macOS-only)
-* [Microsoft Visual Studio][vs] 2017+ or [Microsoft C++ Build Tools][vcbuildtools] with the
-  following components installed (Windows-only):
-  - MSVC
-  - Windows SDK
-  - C++ ATL
+- `Ghidra/` - Ghidra framework, features, processors, and plugins
+- `scripts/cyntra/` - preflight, gates, backlog sync, dispatch wrappers
+- `eval/` - smoke/soak/regression harnesses and thresholds
+- `docs/` - execution board, security signoff, evidence, operator runbooks
+- `.beads/` - canonical roadmap/backlog graph (`issues.jsonl`, `deps.jsonl`)
 
-##### Download and extract the source:
-[Download from GitHub][master]
-```
-unzip ghidra-master
-cd ghidra-master
-```
-**NOTE:** Instead of downloading the compressed source, you may instead want to clone the GitHub 
-repository: `git clone https://github.com/NationalSecurityAgency/ghidra.git`
+## Prerequisites
 
-##### Download additional build dependencies into source repository:
-**NOTE:** If an Internet connection is available and you did not install Gradle, the following 
-`gradle` commands may be replaced with `./gradlew(.bat)`.
-```
+- Python `>= 3.11`
+- JDK `21` (`java` and `javac` both on 21)
+- Gradle (or `./gradlew` wrapper)
+
+## Quick Start
+
+```bash
+# 1) fetch build dependencies once
 gradle -I gradle/support/fetchDependencies.gradle
+
+# 2) strict environment + context validation
+scripts/cyntra/preflight.sh
+
+# 3) run full quality/security/eval gate stack
+CYNTRA_GATE_ISSUE_ID=1704 bash scripts/cyntra/gates.sh --mode=all
+
+# 4) verify roadmap closure + evidence integrity
+scripts/cyntra/validate-roadmap-completion.sh
+
+# 5) build a local distribution
+./gradlew --no-daemon buildGhidra
 ```
 
-##### Create development build: 
-```
-gradle buildGhidra
-```
-The compressed development build will be located at `build/dist/`.
+Build artifacts are written to `build/dist/`.
 
-For more detailed information on building Ghidra, please read the [Developer's Guide][devguide].
+## Cyntra Operations
 
-For issues building, please check the [Known Issues][known-issues] section for possible solutions.
-
-## Develop
-
-### User Scripts and Extensions
-Ghidra installations support users writing custom scripts and extensions via the *GhidraDev* plugin 
-for Eclipse.  The plugin and its corresponding instructions can be found within a Ghidra release at
-`Extensions/Eclipse/GhidraDev/` or at [this link][ghidradev].  Alternatively, Visual Studio Code may
-be used to edit scripts by clicking the Visual Studio Code icon in the Script Manager.
-Fully-featured Visual Studio Code projects can be created from a Ghidra CodeBrowser window at 
-_Tools -> Create VSCode Module project_.
-
-**NOTE:** Both the *GhidraDev* plugin for Eclipse and Visual Studio Code integrations only support 
-developing against fully built Ghidra installations which can be downloaded from the
-[Releases][releases] page.
-
-### Advanced Development
-To develop the Ghidra tool itself, it is highly recommended to use Eclipse, which the Ghidra 
-development process has been highly customized for.
-
-##### Install build and development tools:
-* Follow the above [build instructions](#build) so the build completes without errors
-* Install [Eclipse IDE for Java Developers][eclipse]
-
-##### Prepare the development environment:
-``` 
-gradle prepdev eclipse buildNatives
+```bash
+scripts/cyntra/bootstrap.sh
+scripts/cyntra/preflight.sh
+scripts/cyntra/run-once.sh
+scripts/cyntra/run-watch.sh
+scripts/cyntra/cyntra.sh status
 ```
 
-##### Import Ghidra projects into Eclipse:
-* *File* -> *Import...*
-* *General* | *Existing Projects into Workspace*
-* Select root directory to be your downloaded or cloned ghidra source repository
-* Check *Search for nested projects*
-* Click *Finish*
+Kernel operating details: `docs/cyntra-kernel-runbook.md`.
 
-When Eclipse finishes building the projects, Ghidra can be launched and debugged with the provided
-**Ghidra** Eclipse *run configuration*.
+## Local Runtime Smoke
 
-For more detailed information on developing Ghidra, please read the [Developer's Guide][devguide].
+After building, headless sanity can be validated from the distribution zip:
 
-## Contribute
-If you would like to contribute bug fixes, improvements, and new features back to Ghidra, please 
-take a look at our [Contributor's Guide][contrib] to see how you can participate in this open 
-source project.
+```bash
+mkdir -p build/dist/_smoke
+unzip -q -o build/dist/ghidra_*_mac_arm_64.zip -d build/dist/_smoke
+build/dist/_smoke/ghidra_12.1_DEV/support/analyzeHeadless -help
+```
 
+A full RC functional validation bundle is tracked at:
+- `docs/evidence/rc-functional-validation/`
 
-[nsa]: https://www.nsa.gov
-[contrib]: CONTRIBUTING.md
-[devguide]: DevGuide.md
-[gettingstarted]: GhidraDocs/GettingStarted.md
-[known-issues]: DevGuide.md#known-issues
-[career]: https://www.intelligencecareers.gov/nsa
-[releases]: https://github.com/NationalSecurityAgency/ghidra/releases
-[jdk]: https://adoptium.net/temurin/releases
-[gradle]: https://gradle.org/releases/
-[python3]: https://www.python.org/downloads/
-[vs]: https://visualstudio.microsoft.com/vs/community/
-[vcbuildtools]: https://visualstudio.microsoft.com/visual-cpp-build-tools/
-[eclipse]: https://www.eclipse.org/downloads/packages/
-[master]: https://github.com/NationalSecurityAgency/ghidra/archive/refs/heads/master.zip
-[security]: https://github.com/NationalSecurityAgency/ghidra/security/advisories
-[ghidradev]: GhidraBuild/EclipsePlugins/GhidraDev/GhidraDevPlugin/README.md
-[pyghidra]: Ghidra/Features/PyGhidra/README.md
+## Upstream
+
+- `origin`: `git@github.com:backbay-labs/reverend.git`
+- `upstream`: `git@github.com:NationalSecurityAgency/ghidra.git`
+
+Reverend keeps upstream Ghidra compatibility where practical while layering autonomous analysis and governance workflows for team-scale reverse engineering.
