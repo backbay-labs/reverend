@@ -140,3 +140,13 @@ This board operationalizes:
   - full gate register with artifact paths and `pass`/`fail`/`waived` status
   - waiver registry with owner, justification, and review date
   - formal go/no-go record with date, approvers, and final rationale
+
+## 14. E8-S4 Reopen Final Decision Packet (2026-02-21)
+
+- Story: `E8-S4` (`issue 1704`) reopened to publish a final MVP exit-gate packet with explicit pass/fail mapping, waiver/risk ownership, and decision provenance.
+- Published packet: `docs/exit-gate-packet-1704.md`.
+- Published workcell gate evidence: `docs/evidence/exit-gate-packet-1704/quality-gates.md`.
+- Reopen acceptance closure:
+  - each gate maps to measurable evidence artifact + `pass`/`fail`/`waived` status
+  - open risks/waivers include owner, rationale, and expiration/revisit condition
+  - go/no-go decision record includes approvers and a dated final determination

@@ -661,6 +661,18 @@ The packet consolidates reopened evidence streams into one decision artifact:
 
 Recorded outcome: **GO for internal RC1 scope**, with production promotion explicitly blocked on unresolved `C1-C11` conditions.
 
+### 6.8 E8-S4 Reopen Final Decision Packet (2026-02-21)
+
+Final reopen publication for issue `1704` is captured in:
+- `docs/exit-gate-packet-1704.md`
+
+The packet records:
+- an explicit `pass`/`fail`/`waived` register for all MVP exit gates with measurable evidence links
+- open waiver and residual-risk entries with owner, rationale, and expiration/revisit conditions
+- a dated go/no-go determination with approver-level decision provenance
+
+Recorded determination: **GO for internal RC1 scope**; **NO-GO for production** until `C1-C11` are closed.
+
 ---
 
 ## 7. Automated Evaluation Pipeline
