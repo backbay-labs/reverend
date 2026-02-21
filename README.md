@@ -46,20 +46,20 @@ Stock Ghidra gives world-class interactive analysis. Reverend adds a **governed 
 
 ```mermaid
 flowchart LR
-    A[Binary + Analyst Intent] --> B[Ghidra Core Analysis]
-    B --> C[Proposal Layer\n(ghidra.security.proposal)]
-    C --> D[Review/Apply Decisions]
+    A["Binary Intake"] --> B["Ghidra Core Analysis"]
+    B --> C["Proposal Service (ghidra.security.proposal)"]
+    C --> D["Review and Apply"]
 
-    D --> E[Audit + Violations\n(ghidra.security.audit)]
-    D --> F[Receipt Chain\n(scripts/ml/receipt_store.py)]
+    D --> E["Audit and Violations (ghidra.security.audit)"]
+    D --> F["Receipt Chain (scripts/ml/receipt_store.py)"]
 
-    B --> G[Semantic/Triage Pipelines\n(scripts/ml/local_embedding_pipeline.py)]
+    B --> G["Semantic and Triage Pipelines (scripts/ml/local_embedding_pipeline.py)"]
     G --> C
 
-    H[Capability + Egress Policy\n(ghidra.security.capability/policy)] --> C
+    H["Capability and Egress Policy (ghidra.security.capability/policy)"] --> C
     H --> G
 
-    I[Quality Gates\n(scripts/cyntra + eval/)] --> H
+    I["Quality Gates (scripts/cyntra and eval)"] --> H
     I --> G
     I --> F
 ```
