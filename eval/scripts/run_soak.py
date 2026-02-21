@@ -27,6 +27,20 @@ import datasets
 
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+_TRIAGE_STOCK_DEFAULTS = {
+    "entrypoint": 0.45,
+    "hotspot": 0.30,
+    "unknown": 0.55,
+}
+_TRIAGE_CURRENT_DEFAULTS = {
+    "entrypoint": 0.30,
+    "hotspot": 0.25,
+    "unknown": 0.65,
+}
 
 
 def _tokens(text: str) -> set[str]:
@@ -157,7 +171,74 @@ def _compute_diff_metrics(dataset_dir: Path) -> dict:
     }
 
 
-def _run_one_iteration(data_root: Path, seed: int) -> tuple[dict, float]:
+def _compute_triage_non_toy_metrics(
+    benchmark_path: Path,
+    *,
+    stock_entrypoint_threshold: float,
+    stock_hotspot_threshold: float,
+    stock_unknown_threshold: float,
+    current_entrypoint_threshold: float,
+    current_hotspot_threshold: float,
+    current_unknown_threshold: float,
+) -> dict:
+    from scripts.ml.local_embedding_pipeline import (
+        evaluate_triage_benchmark,
+        load_triage_benchmark,
+    )
+
+    benchmark = load_triage_benchmark(benchmark_path)
+    cases = benchmark["cases"]
+
+    stock_report = evaluate_triage_benchmark(
+        cases,
+        entrypoint_threshold=stock_entrypoint_threshold,
+        hotspot_threshold=stock_hotspot_threshold,
+        unknown_threshold=stock_unknown_threshold,
+    )
+    current_report = evaluate_triage_benchmark(
+        cases,
+        entrypoint_threshold=current_entrypoint_threshold,
+        hotspot_threshold=current_hotspot_threshold,
+        unknown_threshold=current_unknown_threshold,
+    )
+
+    stock_metrics = stock_report["metrics"]
+    current_metrics = current_report["metrics"]
+
+    stock_macro_f1 = float(stock_metrics.get("macro_f1", 0.0))
+    current_macro_f1 = float(current_metrics.get("macro_f1", 0.0))
+    stock_entrypoint_recall = float(stock_metrics["entrypoint"]["recall"])
+    current_entrypoint_recall = float(current_metrics["entrypoint"]["recall"])
+    stock_hotspot_recall = float(stock_metrics["hotspot"]["recall"])
+    current_hotspot_recall = float(current_metrics["hotspot"]["recall"])
+    stock_unknown_precision = float(stock_metrics["unknown"]["precision"])
+    current_unknown_precision = float(current_metrics["unknown"]["precision"])
+
+    return {
+        "cases": int(stock_report["counts"]["cases"]),
+        "stock_macro_f1": round(stock_macro_f1, 6),
+        "current_macro_f1": round(current_macro_f1, 6),
+        "macro_f1_delta": round(current_macro_f1 - stock_macro_f1, 6),
+        "stock_entrypoint_recall": round(stock_entrypoint_recall, 6),
+        "current_entrypoint_recall": round(current_entrypoint_recall, 6),
+        "entrypoint_recall_delta": round(current_entrypoint_recall - stock_entrypoint_recall, 6),
+        "stock_hotspot_recall": round(stock_hotspot_recall, 6),
+        "current_hotspot_recall": round(current_hotspot_recall, 6),
+        "hotspot_recall_delta": round(current_hotspot_recall - stock_hotspot_recall, 6),
+        "stock_unknown_precision": round(stock_unknown_precision, 6),
+        "current_unknown_precision": round(current_unknown_precision, 6),
+        "unknown_precision_delta": round(current_unknown_precision - stock_unknown_precision, 6),
+    }
+
+
+def _run_one_iteration(
+    data_root: Path,
+    seed: int,
+    *,
+    non_toy_benchmark: Path | None = None,
+    stock_thresholds: dict[str, float] | None = None,
+    current_thresholds: dict[str, float] | None = None,
+) -> tuple[dict, float]:
     """Run a single smoke evaluation iteration. Returns (metrics, elapsed_seconds)."""
     random.seed(seed)
 
@@ -167,6 +248,16 @@ def _run_one_iteration(data_root: Path, seed: int) -> tuple[dict, float]:
         "similarity": _compute_similarity_metrics(data_root / "toy-similarity-v1"),
         "type": _compute_type_metrics(data_root / "toy-type-v1"),
     }
+    if non_toy_benchmark is not None and stock_thresholds is not None and current_thresholds is not None:
+        metrics["triage_non_toy"] = _compute_triage_non_toy_metrics(
+            non_toy_benchmark,
+            stock_entrypoint_threshold=stock_thresholds["entrypoint"],
+            stock_hotspot_threshold=stock_thresholds["hotspot"],
+            stock_unknown_threshold=stock_thresholds["unknown"],
+            current_entrypoint_threshold=current_thresholds["entrypoint"],
+            current_hotspot_threshold=current_thresholds["hotspot"],
+            current_unknown_threshold=current_thresholds["unknown"],
+        )
     elapsed = time.monotonic() - start
 
     return metrics, elapsed
@@ -250,6 +341,53 @@ def main(argv: list[str] | None = None) -> int:
         default=0.01,
         help="Max metric stddev before flagging instability (default: 0.01)",
     )
+    parser.add_argument(
+        "--disable-non-toy-slice",
+        action="store_true",
+        help="Disable non-toy triage benchmark slice execution",
+    )
+    parser.add_argument(
+        "--non-toy-benchmark",
+        type=Path,
+        default=Path("datasets/data/triage-curated-v2026.02.1/benchmark.json"),
+        help="Path to non-toy triage benchmark slice",
+    )
+    parser.add_argument(
+        "--stock-entrypoint-threshold",
+        type=float,
+        default=_TRIAGE_STOCK_DEFAULTS["entrypoint"],
+        help="Stock baseline entrypoint threshold for non-toy triage slice",
+    )
+    parser.add_argument(
+        "--stock-hotspot-threshold",
+        type=float,
+        default=_TRIAGE_STOCK_DEFAULTS["hotspot"],
+        help="Stock baseline hotspot threshold for non-toy triage slice",
+    )
+    parser.add_argument(
+        "--stock-unknown-threshold",
+        type=float,
+        default=_TRIAGE_STOCK_DEFAULTS["unknown"],
+        help="Stock baseline unknown threshold for non-toy triage slice",
+    )
+    parser.add_argument(
+        "--current-entrypoint-threshold",
+        type=float,
+        default=_TRIAGE_CURRENT_DEFAULTS["entrypoint"],
+        help="Current implementation entrypoint threshold for non-toy triage slice",
+    )
+    parser.add_argument(
+        "--current-hotspot-threshold",
+        type=float,
+        default=_TRIAGE_CURRENT_DEFAULTS["hotspot"],
+        help="Current implementation hotspot threshold for non-toy triage slice",
+    )
+    parser.add_argument(
+        "--current-unknown-threshold",
+        type=float,
+        default=_TRIAGE_CURRENT_DEFAULTS["unknown"],
+        help="Current implementation unknown threshold for non-toy triage slice",
+    )
     args = parser.parse_args(argv)
 
     # Materialize datasets
@@ -258,6 +396,28 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"[soak] ERROR: dataset materialization failed: {exc}", file=sys.stderr)
         return 2
+
+    non_toy_benchmark: Path | None = None
+    stock_thresholds: dict[str, float] | None = None
+    current_thresholds: dict[str, float] | None = None
+    if not args.disable_non_toy_slice:
+        non_toy_benchmark = args.non_toy_benchmark
+        if not non_toy_benchmark.exists():
+            print(
+                f"[soak] ERROR: non-toy benchmark missing: {non_toy_benchmark}",
+                file=sys.stderr,
+            )
+            return 2
+        stock_thresholds = {
+            "entrypoint": args.stock_entrypoint_threshold,
+            "hotspot": args.stock_hotspot_threshold,
+            "unknown": args.stock_unknown_threshold,
+        }
+        current_thresholds = {
+            "entrypoint": args.current_entrypoint_threshold,
+            "hotspot": args.current_hotspot_threshold,
+            "unknown": args.current_unknown_threshold,
+        }
 
     iterations = args.iterations
     print(f"[soak] Starting soak test ({iterations} iterations)")
@@ -269,7 +429,13 @@ def main(argv: list[str] | None = None) -> int:
 
     for i in range(iterations):
         seed = i
-        metrics, elapsed = _run_one_iteration(args.data_root, seed)
+        metrics, elapsed = _run_one_iteration(
+            args.data_root,
+            seed,
+            non_toy_benchmark=non_toy_benchmark,
+            stock_thresholds=stock_thresholds,
+            current_thresholds=current_thresholds,
+        )
         timing_values.append(elapsed)
 
         iteration_record = {
@@ -414,6 +580,23 @@ def main(argv: list[str] | None = None) -> int:
         "regression": regression_results,
         "iterations": all_iterations,
     }
+    if non_toy_benchmark is not None and stock_thresholds is not None and current_thresholds is not None:
+        report["non_toy_slice"] = {
+            "enabled": True,
+            "benchmark_path": str(non_toy_benchmark),
+            "stock_thresholds": stock_thresholds,
+            "current_thresholds": current_thresholds,
+            "reproduction": {
+                "command": (
+                    "python3 eval/scripts/run_soak.py "
+                    f"--iterations {iterations} "
+                    f"--output {args.output} "
+                    f"--non-toy-benchmark {non_toy_benchmark}"
+                )
+            },
+        }
+    else:
+        report["non_toy_slice"] = {"enabled": False}
 
     if stability_issues:
         report["stability_issues"] = stability_issues

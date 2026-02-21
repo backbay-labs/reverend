@@ -2,6 +2,7 @@
 
 > **Version**: 1.0.0
 > **Run Date**: 2026-02-19
+> **Addendum**: R1-S4 non-toy slice run on 2026-02-21
 > **Commit**: [`68384f98e3`](../../.git) (2026-02-19)
 > **Status**: Published
 
@@ -17,8 +18,10 @@ This document captures the baseline metrics for stock Ghidra capabilities, servi
 | **Semantic Search** | MRR | 1.00* | 0.75 | - |
 | **Type Recovery** | Accuracy | 1.00* | 0.25 | - |
 | **Diffing** | Match Rate | 0.67* | 0.90 | 0.23 |
+| **ML Integration (non-toy)** | Macro F1 (triage) | 0.848677 -> 0.969697 | 0.95 | +0.121020 |
 
-\* Toy dataset results; real benchmarks pending (REFuSe-Bench, SURE 2025, PatchCorpus)
+\* Toy dataset results for smoke lanes (REFuSe-Bench, SURE 2025, PatchCorpus still pending).
+Non-toy benchmark evidence is now included in Section 4 (curated triage slice `triage-curated-v2026.02.1`).
 
 ---
 
@@ -104,7 +107,54 @@ This document captures the baseline metrics for stock Ghidra capabilities, servi
 
 ---
 
-## 4. Provenance & Reproducibility
+## 4. Non-Toy Benchmark Delta (R1-S4)
+
+### Scope
+- **Dataset slice**: `triage-curated-v2026.02.1` (`12` labeled functions)
+- **Materialized path**: `datasets/data/triage-curated-v2026.02.1/benchmark.json`
+- **Stock baseline profile**: `entrypoint=0.45`, `hotspot=0.30`, `unknown=0.55`
+- **Current implementation profile**: `entrypoint=0.30`, `hotspot=0.25`, `unknown=0.65`
+- **Run artifact**: `eval/output/soak/non-toy-report.json`
+
+### Reproducible Commands
+```bash
+# 1) Materialize the pinned non-toy dataset slice
+python3 eval/scripts/datasets.py \
+  --lockfile datasets/datasets.lock.json \
+  materialize \
+  --dataset triage-curated-v2026.02.1
+
+# 2) Execute stock-vs-current comparison in soak runner
+PYTHONHASHSEED=0 TZ=UTC LC_ALL=C LANG=C EVAL_SEED=0 \
+python3 eval/scripts/run_soak.py \
+  --iterations 3 \
+  --output eval/output/soak/non-toy-report.json \
+  --non-toy-benchmark datasets/data/triage-curated-v2026.02.1/benchmark.json
+```
+
+### Measured Delta (Stock vs Current)
+
+| Metric | Stock Baseline | Current | Delta | Target |
+|---|---:|---:|---:|---:|
+| Macro F1 | 0.848677 | 0.969697 | +0.121020 | >= 0.95 |
+| Entrypoint Recall | 0.666667 | 1.000000 | +0.333333 | >= 0.95 |
+| Hotspot Recall | 0.800000 | 1.000000 | +0.200000 | >= 0.95 |
+| Unknown Precision | 0.750000 | 1.000000 | +0.250000 | >= 0.95 |
+
+### Confidence Bounds and Limitations
+- **Confidence bounds (95% Wilson intervals, small-sample):**
+  - Stock entrypoint recall (`2/3`): `0.208-0.939`; current entrypoint recall (`3/3`): `0.438-1.000`
+  - Stock hotspot recall (`4/5`): `0.376-0.964`; current hotspot recall (`5/5`): `0.566-1.000`
+  - Stock unknown precision (`3/4`): `0.301-0.954`; current unknown precision (`3/3`): `0.438-1.000`
+- **Known limitations:**
+  - This is one curated non-toy slice (`12` rows), not a substitute for full REFuSe-Bench/SURE/PatchCorpus coverage.
+  - Results reflect deterministic thresholded scoring on labeled fixtures, not headless Ghidra analysis over raw binaries.
+  - Small support counts widen uncertainty; delta direction is clear but interval overlap remains non-trivial.
+  - First-iteration runtime includes import/warmup effects; stability should be interpreted from repeated runs.
+
+---
+
+## 5. Provenance & Reproducibility
 
 ### Dataset Lock
 ```
@@ -137,7 +187,7 @@ bash eval/run_smoke.sh
 
 ---
 
-## 5. Regression Policy
+## 6. Regression Policy
 
 | Severity | Condition | Action |
 |---|---|---|
@@ -154,7 +204,7 @@ python3 eval/scripts/check_regression.py \
 
 ---
 
-## 6. Cross-Lane Access
+## 7. Cross-Lane Access
 
 This baseline is accessible via:
 - **File**: `docs/baselines/stock-baseline-report.md`
@@ -182,5 +232,9 @@ All lanes (Backend, Plugin/UI, ML, Security, Eval/DevOps) should reference these
 ### toy-diff-v1
 - 2 synthetic binaries with 3 renamed functions
 - Purpose: Smoke test for diffing infrastructure
+
+### triage-curated-v2026.02.1
+- 12 curated, labeled function records for triage scoring calibration
+- Purpose: non-toy ML-integration slice for stock-vs-current delta checks
 
 See `datasets/datasets.lock.json` for checksums and `docs/research/evaluation-harness.md` for full benchmark specifications.

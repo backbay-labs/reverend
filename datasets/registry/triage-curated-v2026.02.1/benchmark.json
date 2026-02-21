@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "kind": "triage_scoring_benchmark",
+  "benchmark_id": "triage-curated",
+  "benchmark_version": "2026.02.1",
+  "target_thresholds": {
+    "macro_f1": 0.95,
+    "entrypoint_recall": 0.95,
+    "hotspot_recall": 0.95,
+    "unknown_precision": 0.95
+  },
+  "functions": [
+    {
+      "id": "fn.main.dispatch",
+      "name": "main_dispatch",
+      "text": "bootstrap main dispatch parses config and opens socket network session",
+      "evidence_refs": [
+        {
+          "kind": "CALLSITE",
+          "description": "entry dispatch callsite chain",
+          "uri": "local-index://evidence/fn.main.dispatch/callsite",
+          "confidence": 0.92
+        },
+        {
+          "kind": "XREF",
+          "description": "entry thunk xref into dispatch loop",
+          "uri": "local-index://evidence/fn.main.dispatch/xref",
+          "confidence": 0.88
+        }
+      ],
+      "labels": {
+        "entrypoint": true,
+        "hotspot": true,
+        "unknown": false
+      }
+    },
+    {
+      "id": "fn.init.handler",
+      "name": "init_handler",
+      "text": "init handler loads registry option profile and opens tls port",
+      "evidence_refs": [
+        {
+          "kind": "CALLSITE",
+          "description": "startup callsite into init sequence",
+          "uri": "local-index://evidence/fn.init.handler/callsite",
+          "confidence": 0.9
+        }
+      ],
+      "labels": {
+        "entrypoint": true,
+        "hotspot": true,
+        "unknown": false
+      }
+    },
+    {
+      "id": "fn.dispatch.loop",
+      "name": "dispatcher_loop",
+      "text": "dispatch packet queue router",
+      "labels": {
+        "entrypoint": true,
+        "hotspot": false,
+        "unknown": false
+      }
+    },
+    {
+      "id": "fn.crypto.decrypt",
+      "name": "decrypt_payload",
+      "text": "aes key schedule decrypt routine for encrypted packet payload",
+      "evidence_refs": [
+        {
+          "kind": "CONSTANT",
+          "description": "aes sbox constants",
+          "uri": "local-index://evidence/fn.crypto.decrypt/constant",
+          "confidence": 0.95
+        }
+      ],
+      "labels": {
+        "entrypoint": false,
+        "hotspot": true,
+        "unknown": false
+      }
+    },
+    {
+      "id": "fn.crypto.sha",
+      "name": "sha_worker",
+      "text": "sha digest key updater",
+      "labels": {
+        "entrypoint": false,
+        "hotspot": true,
+        "unknown": false
+      }
+    },
+    {
+      "id": "fn.net.socket",
+      "name": "open_socket",
+      "text": "connect socket dns packet tls port",
+      "evidence_refs": [
+        {
+          "kind": "XREF",
+          "description": "network xref fan-in",
+          "uri": "local-index://evidence/fn.net.socket/xref",
+          "confidence": 0.9
+        }
+      ],
+      "labels": {
+        "entrypoint": false,
+        "hotspot": true,
+        "unknown": false
+      }
+    },
+    {
+      "id": "fn.helper.unknown1",
+      "name": "FUN_00401090",
+      "text": "opaque unknown state machine unresolved buffer",
+      "labels": {
+        "entrypoint": false,
+        "hotspot": false,
+        "unknown": true
+      }
+    },
+    {
+      "id": "fn.helper.unknown2",
+      "name": "sub_4010ab",
+      "text": "unresolved helper branch decode loop",
+      "labels": {
+        "entrypoint": false,
+        "hotspot": false,
+        "unknown": true
+      }
+    },
+    {
+      "id": "fn.helper.stub",
+      "name": "thunk_memcpy",
+      "text": "shim trampoline helper wrapper",
+      "labels": {
+        "entrypoint": false,
+        "hotspot": false,
+        "unknown": false
+      }
+    },
+    {
+      "id": "fn.misc.logger",
+      "name": "log_status",
+      "text": "log status and config option parser",
+      "labels": {
+        "entrypoint": false,
+        "hotspot": false,
+        "unknown": false
+      }
+    },
+    {
+      "id": "fn.obf.partial",
+      "name": "helper_misc",
+      "text": "opaque unresolved table walker",
+      "labels": {
+        "entrypoint": false,
+        "hotspot": false,
+        "unknown": true
+      }
+    },
+    {
+      "id": "fn.clean.utility",
+      "name": "normalize_buffer",
+      "text": "normalize checksum buffer values",
+      "labels": {
+        "entrypoint": false,
+        "hotspot": false,
+        "unknown": false
+      }
+    }
+  ]
+}
