@@ -143,6 +143,18 @@ jobs:
       - name: Fail on Generic security JUnit failures (blocking)
         run: python3 scripts/cyntra/check-junit-failures.py --results-dir Ghidra/Framework/Generic/build/test-results/test
 
+      - name: Compile Reverend module (blocking)
+        run: ./gradlew --no-daemon :Reverend:compileJava
+
+      - name: Run Reverend unit tests (blocking)
+        run: ./gradlew --no-daemon :Reverend:test --tests "ghidra.reverend.*"
+
+      - name: Fail on Reverend JUnit failures (blocking)
+        run: python3 scripts/cyntra/check-junit-failures.py --results-dir Ghidra/Features/Reverend/build/test-results/test
+
+      - name: Compile frontier modules (SoftwareModeling + Base, blocking)
+        run: ./gradlew --no-daemon :SoftwareModeling:compileJava :Base:compileJava
+
       - name: Upload no-direct-agent-write invariant artifacts
         uses: actions/upload-artifact@v4
         if: always()
@@ -345,6 +357,18 @@ jobs:
 
       - name: Fail on Generic security JUnit failures (blocking)
         run: python3 scripts/cyntra/check-junit-failures.py --results-dir Ghidra/Framework/Generic/build/test-results/test
+
+      - name: Compile Reverend module (blocking)
+        run: ./gradlew --no-daemon :Reverend:compileJava
+
+      - name: Run Reverend unit tests (blocking)
+        run: ./gradlew --no-daemon :Reverend:test --tests "ghidra.reverend.*"
+
+      - name: Fail on Reverend JUnit failures (blocking)
+        run: python3 scripts/cyntra/check-junit-failures.py --results-dir Ghidra/Features/Reverend/build/test-results/test
+
+      - name: Compile frontier modules (SoftwareModeling + Base, blocking)
+        run: ./gradlew --no-daemon :SoftwareModeling:compileJava :Base:compileJava
 
       - name: Run stock baseline slices (writes ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/metrics.json)
         run: |
@@ -613,6 +637,18 @@ jobs:
 
       - name: Fail on Generic security JUnit failures (blocking)
         run: python3 scripts/cyntra/check-junit-failures.py --results-dir Ghidra/Framework/Generic/build/test-results/test
+
+      - name: Compile Reverend module (blocking)
+        run: ./gradlew --no-daemon :Reverend:compileJava
+
+      - name: Run Reverend unit tests (blocking)
+        run: ./gradlew --no-daemon :Reverend:test --tests "ghidra.reverend.*"
+
+      - name: Fail on Reverend JUnit failures (blocking)
+        run: python3 scripts/cyntra/check-junit-failures.py --results-dir Ghidra/Features/Reverend/build/test-results/test
+
+      - name: Compile frontier modules (SoftwareModeling + Base, blocking)
+        run: ./gradlew --no-daemon :SoftwareModeling:compileJava :Base:compileJava
 
       - name: Run stock baseline slices (writes ${{ env.STOCK_BASELINE_OUTPUT_DIR }}/metrics.json)
         run: |
