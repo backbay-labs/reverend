@@ -158,6 +158,30 @@ public class LiveQueryServiceImplTest extends AbstractGhidraHeadlessIntegrationT
 	}
 
 	@Test
+	public void testSemanticSearchBudgetExhaustionReported() throws QueryException {
+		System.setProperty("ghidra.reverend.semantic.decompile.budgetPerQuery", "0");
+		System.setProperty("ghidra.reverend.semantic.decompile.budgetPerSession", "0");
+		LiveQueryServiceImpl budgetedService = new LiveQueryServiceImpl(
+			new QueryCacheManager(), new DecompilerContextProvider(telemetry), telemetry);
+		budgetedService.bindToProgram(program);
+		try {
+			List<QueryResult> results = budgetedService.semanticSearch(
+				program, "test", null, 10, TaskMonitor.DUMMY);
+			assertNotNull(results);
+			LiveQueryServiceImpl.BudgetStatus status =
+				budgetedService.consumeLastSemanticSearchBudgetStatus();
+			assertTrue(status.isBudgetExhausted());
+			assertTrue(status.getMessage().contains("Decompile budget exhausted"));
+			assertTrue(telemetry.getSummaryReport().contains("Budget exhaustions:"));
+		}
+		finally {
+			budgetedService.close();
+			System.clearProperty("ghidra.reverend.semantic.decompile.budgetPerQuery");
+			System.clearProperty("ghidra.reverend.semantic.decompile.budgetPerSession");
+		}
+	}
+
+	@Test
 	public void testSemanticSearchEmptyQuery() {
 		try {
 			queryService.semanticSearch(program, "", null, 10, TaskMonitor.DUMMY);

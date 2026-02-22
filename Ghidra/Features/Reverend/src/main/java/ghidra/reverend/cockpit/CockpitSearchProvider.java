@@ -20,6 +20,7 @@ import java.awt.Dimension;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.swing.*;
 import javax.swing.table.AbstractTableModel;
@@ -42,6 +43,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.util.ProgramLocation;
 import ghidra.reverend.api.v1.QueryService;
 import ghidra.reverend.api.v1.QueryService.QueryResult;
+import ghidra.reverend.query.LiveQueryServiceImpl;
 import ghidra.util.HelpLocation;
 import ghidra.util.Msg;
 import ghidra.util.task.Task;
@@ -67,6 +69,7 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 	public static final String OWNER = "ReverendPlugin";
 
 	private static final String[] COLUMN_NAMES = { "Address", "Score", "Function", "Summary" };
+	private static final int HYDRATION_BATCH_SIZE = 16;
 
 	private final QueryService queryService;
 	private final CockpitState state;
@@ -76,6 +79,8 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 	private JTextField searchField;
 	private GTable resultsTable;
 	private SearchResultTableModel tableModel;
+	private JLabel statusLabel;
+	private final AtomicInteger activeSearchGeneration = new AtomicInteger();
 
 	private List<SearchResultEntry> results = new ArrayList<>();
 
@@ -153,6 +158,8 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 		// Status panel
 		JPanel statusPanel = new JPanel(new BorderLayout());
 		statusPanel.setBorder(BorderFactory.createEmptyBorder(2, 5, 2, 5));
+		statusLabel = new JLabel("Ready");
+		statusPanel.add(statusLabel, BorderLayout.WEST);
 
 		mainPanel.add(searchPanel, BorderLayout.NORTH);
 		mainPanel.add(scrollPane, BorderLayout.CENTER);
@@ -248,6 +255,8 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 		}
 
 		state.setLastQuery(query);
+		int searchGeneration = activeSearchGeneration.incrementAndGet();
+		updateStatus("Searching: " + query);
 
 		Task searchTask = new Task("Semantic Search", true, true, true) {
 			@Override
@@ -256,12 +265,12 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 					monitor.setMessage("Searching: " + query);
 					List<QueryResult> queryResults = queryService.semanticSearch(
 						currentProgram, query, null, state.getMaxResults(), monitor);
-
-					SwingUtilities.invokeLater(() -> {
-						populateResults(queryResults);
-					});
+					LiveQueryServiceImpl.BudgetStatus budgetStatus = consumeBudgetStatusIfAvailable();
+					populateResultsAsync(queryResults, searchGeneration, monitor);
+					applyBudgetStatus(searchGeneration, budgetStatus);
 				}
 				catch (QueryService.QueryException e) {
+					updateStatus("Search failed: " + e.getMessage());
 					Msg.showError(this, mainPanel, "Search Failed", e.getMessage());
 				}
 			}
@@ -270,32 +279,52 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 		TaskLauncher.launch(searchTask);
 	}
 
-	private void populateResults(List<QueryResult> queryResults) {
-		results.clear();
-
+	private void populateResultsAsync(List<QueryResult> queryResults, int searchGeneration,
+			TaskMonitor monitor) {
 		FunctionManager funcManager =
 			currentProgram != null ? currentProgram.getFunctionManager() : null;
+		List<QueryResult> filtered = filterByMinConfidence(queryResults);
+		List<SearchResultEntry> placeholders = new ArrayList<>(filtered.size());
+		for (QueryResult result : filtered) {
+			placeholders.add(new SearchResultEntry(result, null));
+		}
 
-		for (QueryResult result : queryResults) {
-			String funcName = null;
-			if (funcManager != null && result.getAddress() != null) {
-				Function func = funcManager.getFunctionContaining(result.getAddress());
-				funcName = func != null ? func.getName() : null;
+		SwingUtilities.invokeLater(() -> {
+			if (!isSearchGenerationCurrent(searchGeneration)) {
+				return;
 			}
-			results.add(new SearchResultEntry(result, funcName));
-		}
+			results.clear();
+			results.addAll(placeholders);
+			tableModel.fireTableDataChanged();
+			updateStatus(buildResultCountMessage(results.size(), true));
+		});
 
-		// Apply minimum confidence filter
-		if (state.getMinConfidence() > 0) {
-			results.removeIf(r -> r.getScore() < state.getMinConfidence());
+		List<HydrationUpdate> pendingUpdates = new ArrayList<>(HYDRATION_BATCH_SIZE);
+		for (int i = 0; i < filtered.size(); i++) {
+			if (monitor != null && monitor.isCancelled()) {
+				break;
+			}
+			QueryResult result = filtered.get(i);
+			String funcName = resolveFunctionName(funcManager, result);
+			if (funcName != null && !"<unknown>".equals(funcName)) {
+				pendingUpdates.add(new HydrationUpdate(i, new SearchResultEntry(result, funcName)));
+			}
+			if (pendingUpdates.size() >= HYDRATION_BATCH_SIZE) {
+				flushHydrationBatch(searchGeneration, pendingUpdates);
+				pendingUpdates = new ArrayList<>(HYDRATION_BATCH_SIZE);
+			}
 		}
-
-		tableModel.fireTableDataChanged();
+		if (!pendingUpdates.isEmpty()) {
+			flushHydrationBatch(searchGeneration, pendingUpdates);
+		}
+		updateStatus(buildResultCountMessage(filtered.size(), false));
 	}
 
 	private void clearResults() {
+		activeSearchGeneration.incrementAndGet();
 		results.clear();
 		tableModel.fireTableDataChanged();
+		updateStatus("Ready");
 	}
 
 	private void onSelectionChanged() {
@@ -413,6 +442,12 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 	public void readConfigState(SaveState saveState) {
 		state.restore(saveState);
 		searchField.setText(state.getLastQuery());
+		if (state.isBudgetExhausted() && !state.getBudgetStatusMessage().isEmpty()) {
+			updateStatus("Results truncated: " + state.getBudgetStatusMessage());
+		}
+		else {
+			updateStatus("Ready");
+		}
 	}
 
 	/**
@@ -422,6 +457,84 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 	 */
 	public CockpitState getState() {
 		return state;
+	}
+
+	private List<QueryResult> filterByMinConfidence(List<QueryResult> queryResults) {
+		if (state.getMinConfidence() <= 0.0) {
+			return new ArrayList<>(queryResults);
+		}
+		List<QueryResult> filtered = new ArrayList<>();
+		for (QueryResult result : queryResults) {
+			if (result.getScore() >= state.getMinConfidence()) {
+				filtered.add(result);
+			}
+		}
+		return filtered;
+	}
+
+	private String resolveFunctionName(FunctionManager funcManager, QueryResult result) {
+		if (funcManager == null || result.getAddress() == null) {
+			return null;
+		}
+		Function func = funcManager.getFunctionContaining(result.getAddress());
+		return func != null ? func.getName() : null;
+	}
+
+	private void flushHydrationBatch(int searchGeneration, List<HydrationUpdate> updates) {
+		List<HydrationUpdate> copiedUpdates = new ArrayList<>(updates);
+		SwingUtilities.invokeLater(() -> {
+			if (!isSearchGenerationCurrent(searchGeneration)) {
+				return;
+			}
+			for (HydrationUpdate update : copiedUpdates) {
+				if (update.row < 0 || update.row >= results.size()) {
+					continue;
+				}
+				results.set(update.row, update.entry);
+				tableModel.fireTableRowsUpdated(update.row, update.row);
+			}
+		});
+	}
+
+	private boolean isSearchGenerationCurrent(int searchGeneration) {
+		return searchGeneration == activeSearchGeneration.get();
+	}
+
+	private void updateStatus(String message) {
+		SwingUtilities.invokeLater(() -> statusLabel.setText(message));
+	}
+
+	private String buildResultCountMessage(int count, boolean partial) {
+		return partial ? String.format("Results: %d (hydrating...)", count) :
+			String.format("Results: %d", count);
+	}
+
+	private LiveQueryServiceImpl.BudgetStatus consumeBudgetStatusIfAvailable() {
+		if (queryService instanceof LiveQueryServiceImpl liveQueryService) {
+			return liveQueryService.consumeLastSemanticSearchBudgetStatus();
+		}
+		return LiveQueryServiceImpl.BudgetStatus.none();
+	}
+
+	private void applyBudgetStatus(int searchGeneration, LiveQueryServiceImpl.BudgetStatus budgetStatus) {
+		if (!isSearchGenerationCurrent(searchGeneration)) {
+			return;
+		}
+		state.setBudgetExhausted(budgetStatus.isBudgetExhausted());
+		state.setBudgetStatusMessage(budgetStatus.getMessage());
+		if (budgetStatus.isBudgetExhausted()) {
+			updateStatus("Results truncated: " + budgetStatus.getMessage());
+		}
+	}
+
+	private static class HydrationUpdate {
+		private final int row;
+		private final SearchResultEntry entry;
+
+		private HydrationUpdate(int row, SearchResultEntry entry) {
+			this.row = row;
+			this.entry = entry;
+		}
 	}
 
 	/**

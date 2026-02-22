@@ -47,6 +47,8 @@ public class CockpitStateTest {
 		assertTrue(state.getSelectedEvidenceIds().isEmpty());
 		assertTrue(state.isEvidenceDrawerVisible());
 		assertEquals("hierarchical", state.getGraphLayoutMode());
+		assertFalse(state.isBudgetExhausted());
+		assertEquals("", state.getBudgetStatusMessage());
 	}
 
 	@Test
@@ -159,6 +161,8 @@ public class CockpitStateTest {
 		state.setSelectedEvidenceIds(List.of("id-a", "id-b"));
 		state.setEvidenceDrawerVisible(false);
 		state.setGraphLayoutMode("circular");
+		state.setBudgetExhausted(true);
+		state.setBudgetStatusMessage("decompile budget exhausted");
 
 		// Save to SaveState
 		SaveState saveState = new SaveState();
@@ -178,6 +182,8 @@ public class CockpitStateTest {
 		assertTrue(restored.getSelectedEvidenceIds().contains("id-a"));
 		assertFalse(restored.isEvidenceDrawerVisible());
 		assertEquals("circular", restored.getGraphLayoutMode());
+		assertTrue(restored.isBudgetExhausted());
+		assertEquals("decompile budget exhausted", restored.getBudgetStatusMessage());
 	}
 
 	@Test

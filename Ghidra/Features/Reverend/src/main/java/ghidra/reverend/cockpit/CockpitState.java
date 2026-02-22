@@ -38,6 +38,8 @@ public class CockpitState {
 	private static final String KEY_SELECTED_EVIDENCE_IDS = "selectedEvidenceIds";
 	private static final String KEY_EVIDENCE_DRAWER_VISIBLE = "evidenceDrawerVisible";
 	private static final String KEY_GRAPH_LAYOUT_MODE = "graphLayoutMode";
+	private static final String KEY_BUDGET_EXHAUSTED = "budgetExhausted";
+	private static final String KEY_BUDGET_STATUS_MESSAGE = "budgetStatusMessage";
 
 	private String lastQuery = "";
 	private int maxResults = 50;
@@ -48,6 +50,8 @@ public class CockpitState {
 	private List<String> selectedEvidenceIds = new ArrayList<>();
 	private boolean evidenceDrawerVisible = true;
 	private String graphLayoutMode = "hierarchical";
+	private boolean budgetExhausted = false;
+	private String budgetStatusMessage = "";
 
 	/**
 	 * Creates a new state with default values.
@@ -81,6 +85,8 @@ public class CockpitState {
 			selectedEvidenceIds.toArray(new String[0]));
 		saveState.putBoolean(KEY_EVIDENCE_DRAWER_VISIBLE, evidenceDrawerVisible);
 		saveState.putString(KEY_GRAPH_LAYOUT_MODE, graphLayoutMode);
+		saveState.putBoolean(KEY_BUDGET_EXHAUSTED, budgetExhausted);
+		saveState.putString(KEY_BUDGET_STATUS_MESSAGE, budgetStatusMessage);
 	}
 
 	/**
@@ -99,6 +105,8 @@ public class CockpitState {
 		selectedEvidenceIds = new ArrayList<>(List.of(ids));
 		evidenceDrawerVisible = saveState.getBoolean(KEY_EVIDENCE_DRAWER_VISIBLE, true);
 		graphLayoutMode = saveState.getString(KEY_GRAPH_LAYOUT_MODE, "hierarchical");
+		budgetExhausted = saveState.getBoolean(KEY_BUDGET_EXHAUSTED, false);
+		budgetStatusMessage = saveState.getString(KEY_BUDGET_STATUS_MESSAGE, "");
 	}
 
 	public String getLastQuery() {
@@ -172,5 +180,21 @@ public class CockpitState {
 
 	public void setGraphLayoutMode(String graphLayoutMode) {
 		this.graphLayoutMode = graphLayoutMode != null ? graphLayoutMode : "hierarchical";
+	}
+
+	public boolean isBudgetExhausted() {
+		return budgetExhausted;
+	}
+
+	public void setBudgetExhausted(boolean budgetExhausted) {
+		this.budgetExhausted = budgetExhausted;
+	}
+
+	public String getBudgetStatusMessage() {
+		return budgetStatusMessage;
+	}
+
+	public void setBudgetStatusMessage(String budgetStatusMessage) {
+		this.budgetStatusMessage = budgetStatusMessage != null ? budgetStatusMessage : "";
 	}
 }
