@@ -6,6 +6,7 @@ sparse_checkout:
   - GPL/
   - docs/
   - eval/
+  - datasets/
   - gradle/
   - scripts/
   - .github/
