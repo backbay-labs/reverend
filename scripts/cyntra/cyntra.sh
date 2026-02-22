@@ -6,6 +6,7 @@ kernel_path="${CYNTRA_KERNEL_PATH:-/Users/connor/Medica/backbay/platform/kernel}
 config_path="${CYNTRA_CONFIG_PATH:-$repo_root/.cyntra/config.yaml}"
 issues_path="${CYNTRA_ISSUES_PATH:-$repo_root/.beads/issues.jsonl}"
 merge_guards="${CYNTRA_MERGE_GUARDS:-1}"
+uv_refresh_kernel="${CYNTRA_UV_REFRESH_KERNEL:-1}"
 
 normalize_merge_conflict_beads() {
   [[ -f "$issues_path" ]] || return 0
@@ -240,4 +241,9 @@ if [[ "$merge_guards" == "1" && "${args[0]:-}" == "run" ]]; then
   normalize_merge_conflict_beads
 fi
 
-exec uv tool run --from "$kernel_path" cyntra --config "$config_path" "${args[@]}"
+uv_args=()
+if [[ "$uv_refresh_kernel" == "1" ]]; then
+  uv_args+=(--refresh-package cyntra)
+fi
+
+exec uv tool run "${uv_args[@]}" --from "$kernel_path" cyntra --config "$config_path" "${args[@]}"
