@@ -115,6 +115,24 @@ bash scripts/cyntra/gates.sh --mode=java
 bash scripts/cyntra/gates.sh --mode=evidence
 ```
 
+Failure taxonomy and completion-policy binding:
+- Canonical runtime failure codes:
+  - `runtime.prompt_stall_no_output`
+- Canonical gate failure codes:
+  - `gate.quality_gate_failed`
+  - `gate.context_missing_on_main`
+- Canonical policy failure codes:
+  - `policy.completion_blocked`
+- `scripts/cyntra/run-once.sh` completion fallback now routes using `failure_code` (not free-form class text).
+- `CYNTRA_DETERMINISTIC_FAILURE_CODES` controls which canonical codes are eligible for deterministic fallback (legacy `CYNTRA_DETERMINISTIC_FAILURE_CLASSES` is still accepted as an alias).
+- `scripts/cyntra/cyntra.sh` reads `CYNTRA_FAILURE_CODE` first (legacy `CYNTRA_FAILURE_CLASS` remains an alias).
+- Fallback provenance (`.cyntra/state/fallback-routing.json`) now includes canonical `failure_code`.
+- Deterministic classification also annotates workcell artifacts with canonical `failure_code`:
+  - `proof.json` top-level `failure_code`
+  - `proof.json.metadata.failure_code`
+  - `proof.json.verification.failure_code`
+  - appended `telemetry.jsonl` entry with `event: "failure_code_classified"` and `failure_code`
+
 ## 5. Cleanup and disk management
 
 ```bash

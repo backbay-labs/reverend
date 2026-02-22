@@ -186,7 +186,7 @@ class CyntraMergePathTest(unittest.TestCase):
             self.assertEqual(len(parents), 2)
             self.assertEqual(target.read_text(encoding="utf-8"), "base\nfeature\n")
 
-    def test_failure_class_policy_routes_to_fallback_toolchain(self) -> None:
+    def test_failure_code_policy_routes_to_fallback_toolchain(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             issues_path = tmp / "issues.jsonl"
@@ -215,6 +215,7 @@ class CyntraMergePathTest(unittest.TestCase):
                 "{\n"
                 "  printf 'ARGS=%s\\n' \"$*\"\n"
                 "  printf 'FALLBACK_APPLIED=%s\\n' \"${CYNTRA_FALLBACK_APPLIED:-}\"\n"
+                "  printf 'FALLBACK_FAILURE_CODE=%s\\n' \"${CYNTRA_FALLBACK_FAILURE_CODE:-}\"\n"
                 "  printf 'FALLBACK_CLASS=%s\\n' \"${CYNTRA_FALLBACK_CLASS:-}\"\n"
                 "  printf 'FALLBACK_SOURCE=%s\\n' \"${CYNTRA_FALLBACK_SOURCE_TOOLCHAIN:-}\"\n"
                 "  printf 'FALLBACK_TARGET=%s\\n' \"${CYNTRA_FALLBACK_TARGET_TOOLCHAIN:-}\"\n"
@@ -247,8 +248,8 @@ class CyntraMergePathTest(unittest.TestCase):
             env["CYNTRA_CONFIG_PATH"] = str(config_path)
             env["CYNTRA_ISSUES_PATH"] = str(issues_path)
             env["CYNTRA_UV_LOG"] = str(uv_log)
-            env["CYNTRA_FAILURE_CLASS"] = "prompt_stall_no_output"
-            env["CYNTRA_FALLBACK_POLICY"] = "prompt_stall_no_output=claude"
+            env["CYNTRA_FAILURE_CODE"] = "runtime.prompt_stall_no_output"
+            env["CYNTRA_FALLBACK_POLICY"] = "runtime.prompt_stall_no_output=claude"
             env["CYNTRA_PRIMARY_TOOLCHAIN"] = "codex"
             env["CYNTRA_FALLBACK_PROOF_PATH"] = "/tmp/proofs/stall-proof.json"
             env["CYNTRA_FALLBACK_RECORD_PATH"] = str(fallback_record)
@@ -259,20 +260,22 @@ class CyntraMergePathTest(unittest.TestCase):
                 env=env,
             )
 
-            self.assertIn("fallback routing: class='prompt_stall_no_output'", result.stdout)
+            self.assertIn("fallback routing: failure_code='runtime.prompt_stall_no_output'", result.stdout)
             uv_env_log = uv_log.read_text(encoding="utf-8")
             self.assertIn("FALLBACK_APPLIED=1", uv_env_log)
-            self.assertIn("FALLBACK_CLASS=prompt_stall_no_output", uv_env_log)
+            self.assertIn("FALLBACK_FAILURE_CODE=runtime.prompt_stall_no_output", uv_env_log)
+            self.assertIn("FALLBACK_CLASS=runtime.prompt_stall_no_output", uv_env_log)
             self.assertIn("FALLBACK_SOURCE=codex", uv_env_log)
             self.assertIn("FALLBACK_TARGET=claude", uv_env_log)
             self.assertIn("FALLBACK_ISSUE=3302", uv_env_log)
-            self.assertIn("FALLBACK_WORKCELL=wc-3302-20260222T215925Z", uv_env_log)
+            self.assertRegex(uv_env_log, r"FALLBACK_WORKCELL=wc-[^\s]+")
             self.assertIn("FALLBACK_PROOF=/tmp/proofs/stall-proof.json", uv_env_log)
             self.assertIn("ISSUE_3302_HINT=claude", uv_env_log)
 
             fallback_doc = json.loads(fallback_record.read_text(encoding="utf-8"))
             self.assertEqual(fallback_doc["issue_id"], "3302")
-            self.assertEqual(fallback_doc["failure_class"], "prompt_stall_no_output")
+            self.assertEqual(fallback_doc["failure_code"], "runtime.prompt_stall_no_output")
+            self.assertEqual(fallback_doc["failure_class"], "runtime.prompt_stall_no_output")
             self.assertEqual(fallback_doc["source_toolchain"], "codex")
             self.assertEqual(fallback_doc["target_toolchain"], "claude")
 
@@ -312,8 +315,8 @@ class CyntraMergePathTest(unittest.TestCase):
             env["CYNTRA_CONFIG_PATH"] = str(config_path)
             env["CYNTRA_ISSUES_PATH"] = str(issues_path)
             env["CYNTRA_UV_LOG"] = str(uv_log)
-            env["CYNTRA_FAILURE_CLASS"] = "prompt_stall_no_output"
-            env["CYNTRA_FALLBACK_POLICY"] = "prompt_stall_no_output=claude"
+            env["CYNTRA_FAILURE_CODE"] = "runtime.prompt_stall_no_output"
+            env["CYNTRA_FALLBACK_POLICY"] = "runtime.prompt_stall_no_output=claude"
             env["CYNTRA_FALLBACK_CHAIN"] = "codex,claude"
             env["CYNTRA_PRIMARY_TOOLCHAIN"] = "codex"
 

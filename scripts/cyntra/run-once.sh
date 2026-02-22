@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 lock_root="$repo_root/.cyntra/locks"
 lock_dir="$lock_root/run-loop.lock"
 lock_pid_file="$lock_dir/pid"
-deterministic_failure_classes="${CYNTRA_DETERMINISTIC_FAILURE_CLASSES:-prompt_stall_no_output}"
+deterministic_failure_codes="${CYNTRA_DETERMINISTIC_FAILURE_CODES:-${CYNTRA_DETERMINISTIC_FAILURE_CLASSES:-runtime.prompt_stall_no_output}}"
 enable_failure_fallback="${CYNTRA_ENABLE_FAILURE_FALLBACK:-1}"
 
 acquire_kernel_lock() {
@@ -52,19 +52,32 @@ if [[ "$enable_failure_fallback" != "1" ]]; then
 fi
 
 classify_latest_deterministic_failure() {
-  python3 - "$repo_root" "$deterministic_failure_classes" "$run_started_epoch" <<'PY'
+  python3 - "$repo_root" "$deterministic_failure_codes" "$run_started_epoch" <<'PY'
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 repo_root = Path(sys.argv[1])
-known_classes = {
-    token.strip()
+aliases = {
+    "prompt_stall_no_output": "runtime.prompt_stall_no_output",
+    "runtime.prompt_stall_no_output": "runtime.prompt_stall_no_output",
+    "quality_gate_failed": "gate.quality_gate_failed",
+    "gate_failed": "gate.quality_gate_failed",
+    "gate.quality_gate_failed": "gate.quality_gate_failed",
+    "context_missing_on_main": "gate.context_missing_on_main",
+    "gate.context_missing_on_main": "gate.context_missing_on_main",
+    "completion_blocked": "policy.completion_blocked",
+    "policy_blocked": "policy.completion_blocked",
+    "policy.completion_blocked": "policy.completion_blocked",
+}
+known_codes = {
+    aliases[token.strip().lower()]
     for token in sys.argv[2].replace(";", ",").split(",")
-    if token.strip()
+    if token.strip() and token.strip().lower() in aliases
 }
 run_started_epoch = int(sys.argv[3])
-if not known_classes:
+if not known_codes:
     raise SystemExit(1)
 
 proof_paths = list(repo_root.glob(".workcells/**/proof.json"))
@@ -82,28 +95,64 @@ except Exception:
 status = str(proof.get("status") or "").strip().lower()
 metadata = proof.get("metadata") or {}
 verification = proof.get("verification") or {}
+if not isinstance(metadata, dict):
+    metadata = {}
+if not isinstance(verification, dict):
+    verification = {}
 
-detected_class = ""
+detected_code = ""
+candidates: list[str] = []
+candidates.append(str(proof.get("failure_code") or "").strip())
+candidates.append(str(metadata.get("failure_code") or "").strip())
+candidates.append(str(verification.get("failure_code") or "").strip())
 timeout_reason = str(metadata.get("timeout_reason") or "").strip()
-if status == "timeout" and timeout_reason in known_classes:
-    detected_class = timeout_reason
-else:
-    blocking = verification.get("blocking_failures") or []
-    for code in blocking:
-        normalized = str(code).strip()
-        if normalized in known_classes:
-            detected_class = normalized
-            break
+if status == "timeout":
+    candidates.append(timeout_reason)
+for code in verification.get("blocking_failures") or []:
+    candidates.append(str(code).strip())
 
-if not detected_class:
+for candidate in candidates:
+    normalized = aliases.get(candidate.lower())
+    if normalized and normalized in known_codes:
+        detected_code = normalized
+        break
+
+if not detected_code:
     raise SystemExit(1)
+
+proof_changed = False
+if str(proof.get("failure_code") or "") != detected_code:
+    proof["failure_code"] = detected_code
+    proof_changed = True
+if str(metadata.get("failure_code") or "") != detected_code:
+    metadata["failure_code"] = detected_code
+    proof["metadata"] = metadata
+    proof_changed = True
+if str(verification.get("failure_code") or "") != detected_code:
+    verification["failure_code"] = detected_code
+    proof["verification"] = verification
+    proof_changed = True
+if proof_changed:
+    latest.write_text(json.dumps(proof, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+telemetry_path = latest.parent / "telemetry.jsonl"
+telemetry = {
+    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    "event": "failure_code_classified",
+    "failure_code": detected_code,
+    "issue_id": str(proof.get("issue_id") or ""),
+    "workcell_id": str(proof.get("workcell_id") or latest.parent.name or ""),
+    "proof_path": str(latest),
+}
+with telemetry_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(telemetry, ensure_ascii=False) + "\n")
 
 workcell_id = str(proof.get("workcell_id") or latest.parent.name or "")
 issue_id = str(proof.get("issue_id") or "")
 print(
     json.dumps(
         {
-            "failure_class": detected_class,
+            "failure_code": detected_code,
             "issue_id": issue_id,
             "workcell_id": workcell_id,
             "proof_path": str(latest),
@@ -113,7 +162,7 @@ print(
 PY
 }
 
-if [[ -n "${CYNTRA_FAILURE_CLASS:-}" ]]; then
+if [[ -n "${CYNTRA_FAILURE_CODE:-${CYNTRA_FAILURE_CLASS:-}}" ]]; then
   exit "$primary_status"
 fi
 
@@ -122,11 +171,11 @@ if [[ -z "$classification_json" ]]; then
   exit "$primary_status"
 fi
 
-failure_class="$(python3 - "$classification_json" <<'PY'
+failure_code="$(python3 - "$classification_json" <<'PY'
 import json
 import sys
 payload = json.loads(sys.argv[1])
-print(str(payload.get("failure_class") or ""))
+print(str(payload.get("failure_code") or ""))
 PY
 )"
 issue_id="$(python3 - "$classification_json" <<'PY'
@@ -151,13 +200,14 @@ print(str(payload.get("proof_path") or ""))
 PY
 )"
 
-if [[ -z "$failure_class" ]]; then
+if [[ -z "$failure_code" ]]; then
   exit "$primary_status"
 fi
 
-echo "[cyntra] deterministic failure classified as '$failure_class'; attempting fallback route"
+echo "[cyntra] deterministic failure classified as failure_code='$failure_code'; attempting fallback route"
 
-if CYNTRA_FAILURE_CLASS="$failure_class" \
+if CYNTRA_FAILURE_CODE="$failure_code" \
+  CYNTRA_FAILURE_CLASS="$failure_code" \
   CYNTRA_FALLBACK_ISSUE_ID="$issue_id" \
   CYNTRA_FALLBACK_WORKCELL_ID="$workcell_id" \
   CYNTRA_FALLBACK_PROOF_PATH="$proof_path" \
