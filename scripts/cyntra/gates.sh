@@ -3,6 +3,8 @@ set -euo pipefail
 
 mode="all"
 artifact_root="${CYNTRA_GATE_ARTIFACT_DIR:-.cyntra/artifacts/gates}"
+# Use a repo-local Gradle user home by default so workcells stay hermetic.
+export GRADLE_USER_HOME="${GRADLE_USER_HOME:-.gradle-user-home}"
 for arg in "$@"; do
   case "$arg" in
     --mode=*)
