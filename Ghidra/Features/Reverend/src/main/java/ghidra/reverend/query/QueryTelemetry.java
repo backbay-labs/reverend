@@ -75,6 +75,8 @@ public class QueryTelemetry {
 	private final LongAdder decompileCacheMisses = new LongAdder();
 	private final LongAdder decompileSuccesses = new LongAdder();
 	private final LongAdder decompileFailures = new LongAdder();
+	private final LongAdder decompileQueryBudgetExhaustions = new LongAdder();
+	private final LongAdder decompileSessionBudgetExhaustions = new LongAdder();
 
 	// Program binding metrics
 	private final LongAdder programBinds = new LongAdder();
@@ -262,6 +264,23 @@ public class QueryTelemetry {
 			(program != null ? program.getName() : "unknown"));
 	}
 
+	/**
+	 * Records a decompile budget exhaustion event.
+	 *
+	 * @param operationId the operation ID
+	 * @param budgetType budget scope that exhausted ("query" or "session")
+	 */
+	public void recordDecompileBudgetExhausted(String operationId, String budgetType) {
+		if ("session".equalsIgnoreCase(budgetType)) {
+			decompileSessionBudgetExhaustions.increment();
+		}
+		else {
+			decompileQueryBudgetExhaustions.increment();
+		}
+		Msg.warn(this, String.format("Decompile budget exhausted: op=%s scope=%s",
+			operationId, budgetType));
+	}
+
 	// --- Query methods for monitoring ---
 
 	/**
@@ -388,6 +407,8 @@ public class QueryTelemetry {
 			decompileSuccesses.sum() + decompileFailures.sum(),
 			getDecompilerSuccessRate() * 100));
 		sb.append(String.format("  Cache hit rate: %.1f%%%n", getDecompilerCacheHitRate() * 100));
+		sb.append(String.format("  Budget exhaustions: query=%d, session=%d%n",
+			decompileQueryBudgetExhaustions.sum(), decompileSessionBudgetExhaustions.sum()));
 		if (decompStats.count > 0) {
 			sb.append(String.format("  Latency: p50=%.2fms, p90=%.2fms, mean=%.2fms%n",
 				decompStats.p50Ms, decompStats.p90Ms, decompStats.meanMs));
@@ -431,6 +452,8 @@ public class QueryTelemetry {
 		decompileCacheMisses.reset();
 		decompileSuccesses.reset();
 		decompileFailures.reset();
+		decompileQueryBudgetExhaustions.reset();
+		decompileSessionBudgetExhaustions.reset();
 		programBinds.reset();
 		programUnbinds.reset();
 	}

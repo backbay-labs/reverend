@@ -17,6 +17,7 @@ package ghidra.reverend.query;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
@@ -56,10 +57,17 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 	private static final double EMBEDDING_MIN_SCORE = getDoubleConfig("embedding.minScore", 0.10d);
 	private static final int EMBEDDING_STAGE_MULTIPLIER =
 		Math.max(1, getIntConfig("embedding.candidateMultiplier", 3));
+	private static final int DECOMPILE_BUDGET_PER_QUERY =
+		Math.max(0, getIntConfig("decompile.budgetPerQuery", 64));
+	private static final int DECOMPILE_BUDGET_PER_SESSION =
+		Math.max(0, getIntConfig("decompile.budgetPerSession", 4096));
 
 	private final QueryCacheManager cacheManager;
 	private final DecompilerContextProvider decompilerProvider;
 	private final QueryTelemetry telemetry;
+	private final DecompileBudgetManager decompileBudgetManager;
+	private final ThreadLocal<BudgetStatus> lastSemanticBudgetStatus =
+		ThreadLocal.withInitial(BudgetStatus::none);
 
 	private volatile Program currentProgram;
 	private final Map<Program, ProgramBindingState> programBindings = new ConcurrentHashMap<>();
@@ -76,6 +84,21 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		this.cacheManager = Objects.requireNonNull(cacheManager, "cacheManager");
 		this.decompilerProvider = Objects.requireNonNull(decompilerProvider, "decompilerProvider");
 		this.telemetry = Objects.requireNonNull(telemetry, "telemetry");
+		this.decompileBudgetManager = new DecompileBudgetManager(
+			DECOMPILE_BUDGET_PER_QUERY, DECOMPILE_BUDGET_PER_SESSION);
+	}
+
+	/**
+	 * Returns and clears semantic search budget status for the calling thread.
+	 *
+	 * <p>The status is set after each semantic search operation.
+	 *
+	 * @return semantic search budget status
+	 */
+	public BudgetStatus consumeLastSemanticSearchBudgetStatus() {
+		BudgetStatus status = lastSemanticBudgetStatus.get();
+		lastSemanticBudgetStatus.remove();
+		return status;
 	}
 
 	/**
@@ -233,6 +256,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			AddressSetView scope, int maxResults, TaskMonitor monitor) throws QueryException {
 		long startTime = System.nanoTime();
 		String operationId = telemetry.startOperation("semanticSearch", program);
+		BudgetStatus budgetStatus = BudgetStatus.none();
 
 		try {
 			validateProgramBinding(program);
@@ -252,6 +276,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			List<QueryResult> cached = cacheManager.getCachedSemanticSearch(program, cacheKey);
 			if (cached != null) {
 				telemetry.recordCacheHit(operationId);
+				lastSemanticBudgetStatus.set(BudgetStatus.none());
 				return cached.subList(0, Math.min(cached.size(), maxResults));
 			}
 
@@ -308,18 +333,40 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 
 			// Stage 3: embedding candidate scoring with fallback when backend is unavailable
 			boolean embeddingBackendAvailable = EMBEDDING_STAGE_ENABLED && isEmbeddingBackendAvailable();
+			QueryDecompileBudget queryBudget = decompileBudgetManager.startQuery();
 			List<FunctionScore> scoredCandidates = new ArrayList<>();
 			int embeddingWindow = Math.min(
 				Math.max(maxResults, maxResults * EMBEDDING_STAGE_MULTIPLIER),
 				lexicalCandidates.size());
+			boolean queryBudgetExhausted = false;
+			boolean sessionBudgetExhausted = false;
 			for (Function candidate : lexicalCandidates) {
 				double lexicalScore = lexicalScores.getOrDefault(candidate, 0.0);
 				double finalScore;
 				if (embeddingBackendAvailable) {
-					double embeddingScore = computeEmbeddingScore(program, candidate, queryTerms, monitor);
-					finalScore = (0.65 * embeddingScore) + (0.35 * lexicalScore);
-					if (finalScore < EMBEDDING_MIN_SCORE) {
-						continue;
+					EmbeddingScoreResult embeddingResult = computeEmbeddingScoreWithBudget(
+						program, candidate, queryTerms, monitor, queryBudget);
+					if (embeddingResult.exhaustedScope == BudgetExhaustedScope.QUERY) {
+						if (!queryBudgetExhausted) {
+							telemetry.recordDecompileBudgetExhausted(operationId, "query");
+						}
+						queryBudgetExhausted = true;
+					}
+					else if (embeddingResult.exhaustedScope == BudgetExhaustedScope.SESSION) {
+						if (!sessionBudgetExhausted) {
+							telemetry.recordDecompileBudgetExhausted(operationId, "session");
+						}
+						sessionBudgetExhausted = true;
+					}
+					if (embeddingResult.usedEmbeddingScore) {
+						finalScore = (0.65 * embeddingResult.score) + (0.35 * lexicalScore);
+						if (finalScore < EMBEDDING_MIN_SCORE) {
+							continue;
+						}
+					}
+					else {
+						// Fallback to lexical score when embedding decompilation budget is exhausted.
+						finalScore = lexicalScore;
 					}
 				}
 				else {
@@ -343,9 +390,20 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					"enabled", EMBEDDING_STAGE_ENABLED,
 					"backendAvailable", embeddingBackendAvailable,
 					"fallbackApplied", !embeddingBackendAvailable,
+					"queryBudgetExhausted", queryBudgetExhausted,
+					"sessionBudgetExhausted", sessionBudgetExhausted,
+					"queryBudgetRemaining", queryBudget.remaining(),
+					"sessionBudgetRemaining", decompileBudgetManager.remainingSessionBudget(),
 					"minScore", EMBEDDING_MIN_SCORE,
 					"candidateMultiplier", EMBEDDING_STAGE_MULTIPLIER
 				));
+			if (sessionBudgetExhausted || queryBudgetExhausted) {
+				String reason = sessionBudgetExhausted ? "session" : "query";
+				String message = String.format(
+					"Decompile budget exhausted (%s): queryRemaining=%d, sessionRemaining=%d",
+					reason, queryBudget.remaining(), decompileBudgetManager.remainingSessionBudget());
+				budgetStatus = BudgetStatus.exhausted(message);
+			}
 
 			// Build result set
 			List<QueryResult> results = new ArrayList<>();
@@ -370,12 +428,15 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			cacheManager.cacheSemanticSearch(program, cacheKey, results);
 
 			telemetry.recordOperationSuccess(operationId, System.nanoTime() - startTime);
+			lastSemanticBudgetStatus.set(budgetStatus);
 			return results;
 
 		} catch (QueryException e) {
+			lastSemanticBudgetStatus.set(budgetStatus);
 			telemetry.recordOperationError(operationId, e);
 			throw e;
 		} catch (Exception e) {
+			lastSemanticBudgetStatus.set(budgetStatus);
 			telemetry.recordOperationError(operationId, e);
 			throw new QueryException("Error in semantic search: " + e.getMessage(), e);
 		}
@@ -721,15 +782,22 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		return Math.min(1.0, score / queryTerms.length);
 	}
 
-	private double computeEmbeddingScore(Program program, Function function,
-			String[] queryTerms, TaskMonitor monitor) {
+	private EmbeddingScoreResult computeEmbeddingScoreWithBudget(Program program,
+			Function function, String[] queryTerms, TaskMonitor monitor, QueryDecompileBudget queryBudget) {
 		if (queryTerms.length == 0) {
-			return 0.0;
+			return EmbeddingScoreResult.scored(0.0);
+		}
+		BudgetAcquireOutcome budgetOutcome = decompileBudgetManager.tryAcquire(queryBudget);
+		if (budgetOutcome == BudgetAcquireOutcome.QUERY_EXHAUSTED) {
+			return EmbeddingScoreResult.exhausted(BudgetExhaustedScope.QUERY);
+		}
+		if (budgetOutcome == BudgetAcquireOutcome.SESSION_EXHAUSTED) {
+			return EmbeddingScoreResult.exhausted(BudgetExhaustedScope.SESSION);
 		}
 		try {
 			DecompileResults results = decompilerProvider.decompile(program, function, monitor);
 			if (results == null || !results.decompileCompleted() || results.getDecompiledFunction() == null) {
-				return 0.0;
+				return EmbeddingScoreResult.scored(0.0);
 			}
 			String decompiledCode = results.getDecompiledFunction().getC().toLowerCase();
 			int matches = 0;
@@ -738,10 +806,10 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					matches++;
 				}
 			}
-			return Math.min(1.0, matches / (double) queryTerms.length);
+			return EmbeddingScoreResult.scored(Math.min(1.0, matches / (double) queryTerms.length));
 		}
 		catch (Exception e) {
-			return 0.0;
+			return EmbeddingScoreResult.scored(0.0);
 		}
 	}
 
@@ -850,6 +918,119 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		FunctionScore(Function function, double score) {
 			this.function = function;
 			this.score = score;
+		}
+	}
+
+	/**
+	 * Status describing whether a semantic search exhausted decompilation budget.
+	 */
+	public static final class BudgetStatus {
+		private final boolean budgetExhausted;
+		private final String message;
+
+		private BudgetStatus(boolean budgetExhausted, String message) {
+			this.budgetExhausted = budgetExhausted;
+			this.message = message != null ? message : "";
+		}
+
+		public static BudgetStatus none() {
+			return new BudgetStatus(false, "");
+		}
+
+		public static BudgetStatus exhausted(String message) {
+			return new BudgetStatus(true, message);
+		}
+
+		public boolean isBudgetExhausted() {
+			return budgetExhausted;
+		}
+
+		public String getMessage() {
+			return message;
+		}
+	}
+
+	private enum BudgetAcquireOutcome {
+		ACQUIRED,
+		QUERY_EXHAUSTED,
+		SESSION_EXHAUSTED
+	}
+
+	private enum BudgetExhaustedScope {
+		NONE,
+		QUERY,
+		SESSION
+	}
+
+	private static class EmbeddingScoreResult {
+		private final boolean usedEmbeddingScore;
+		private final double score;
+		private final BudgetExhaustedScope exhaustedScope;
+
+		private EmbeddingScoreResult(boolean usedEmbeddingScore, double score,
+				BudgetExhaustedScope exhaustedScope) {
+			this.usedEmbeddingScore = usedEmbeddingScore;
+			this.score = score;
+			this.exhaustedScope = exhaustedScope;
+		}
+
+		static EmbeddingScoreResult scored(double score) {
+			return new EmbeddingScoreResult(true, score, BudgetExhaustedScope.NONE);
+		}
+
+		static EmbeddingScoreResult exhausted(BudgetExhaustedScope exhaustedScope) {
+			return new EmbeddingScoreResult(false, 0.0, exhaustedScope);
+		}
+	}
+
+	private static class QueryDecompileBudget {
+		private final AtomicInteger remaining;
+
+		QueryDecompileBudget(int budgetPerQuery) {
+			this.remaining = new AtomicInteger(Math.max(0, budgetPerQuery));
+		}
+
+		int remaining() {
+			return Math.max(0, remaining.get());
+		}
+	}
+
+	private static class DecompileBudgetManager {
+		private final int queryBudgetPerSearch;
+		private final AtomicInteger sessionBudgetRemaining;
+
+		DecompileBudgetManager(int queryBudgetPerSearch, int sessionBudgetPerService) {
+			this.queryBudgetPerSearch = Math.max(0, queryBudgetPerSearch);
+			this.sessionBudgetRemaining = new AtomicInteger(Math.max(0, sessionBudgetPerService));
+		}
+
+		QueryDecompileBudget startQuery() {
+			return new QueryDecompileBudget(queryBudgetPerSearch);
+		}
+
+		int remainingSessionBudget() {
+			return Math.max(0, sessionBudgetRemaining.get());
+		}
+
+		BudgetAcquireOutcome tryAcquire(QueryDecompileBudget queryBudget) {
+			if (!decrementIfPositive(queryBudget.remaining)) {
+				return BudgetAcquireOutcome.QUERY_EXHAUSTED;
+			}
+			if (!decrementIfPositive(sessionBudgetRemaining)) {
+				return BudgetAcquireOutcome.SESSION_EXHAUSTED;
+			}
+			return BudgetAcquireOutcome.ACQUIRED;
+		}
+
+		private static boolean decrementIfPositive(AtomicInteger counter) {
+			int before = counter.get();
+			while (before > 0) {
+				if (counter.compareAndSet(before, before - 1)) {
+					return true;
+				}
+				before = counter.get();
+			}
+			return false;
 		}
 	}
 

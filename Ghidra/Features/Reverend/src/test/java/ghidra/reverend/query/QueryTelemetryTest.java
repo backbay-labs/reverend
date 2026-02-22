@@ -170,6 +170,8 @@ public class QueryTelemetryTest {
 		telemetry.recordCacheHit("op1");
 		telemetry.recordCacheMiss("op2");
 		telemetry.recordDecompileLatency(null, null, 10_000_000, true);
+		telemetry.recordDecompileBudgetExhausted(op1, "query");
+		telemetry.recordDecompileBudgetExhausted(op1, "session");
 		telemetry.recordProgramBind(null);
 
 		String summary = telemetry.getSummaryReport();
@@ -178,6 +180,7 @@ public class QueryTelemetryTest {
 		assertTrue(summary.contains("Query Telemetry Summary"));
 		assertTrue(summary.contains("Operation Latencies"));
 		assertTrue(summary.contains("Decompiler"));
+		assertTrue(summary.contains("Budget exhaustions: query=1, session=1"));
 		assertTrue(summary.contains("Query Cache"));
 		assertTrue(summary.contains("Program Bindings"));
 	}
