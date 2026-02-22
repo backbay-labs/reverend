@@ -192,6 +192,100 @@ check_diff_sanity() {
   echo "[gates] diff sanity OK"
 }
 
+enforce_nonzero_diff_or_noop() {
+  python3 - <<'PY'
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def changed_stats() -> tuple[int, int]:
+    files_out = subprocess.check_output(
+        ["git", "diff", "--name-only", "--", "."],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    )
+    files = [line.strip() for line in files_out.splitlines() if line.strip()]
+    lines_out = subprocess.check_output(
+        ["git", "diff", "--numstat", "--", "."],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    )
+    line_count = 0
+    for row in lines_out.splitlines():
+        parts = row.split("\t")
+        if len(parts) < 2:
+            continue
+        try:
+            added = 0 if parts[0] == "-" else int(parts[0])
+            deleted = 0 if parts[1] == "-" else int(parts[1])
+        except ValueError:
+            continue
+        line_count += added + deleted
+    return len(files), line_count
+
+
+def load_manifest() -> dict:
+    path = Path("manifest.json")
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def manifest_noop_reason(manifest: dict) -> str:
+    if not manifest:
+        return ""
+    issue = manifest.get("issue")
+    if isinstance(issue, dict):
+        reason = str(issue.get("noop_justification") or "").strip()
+        if reason:
+            return reason
+        tags = issue.get("tags")
+        if isinstance(tags, list) and "allow-zero-diff" in {str(tag).strip() for tag in tags}:
+            return "issue.tags includes allow-zero-diff"
+    top_reason = str(manifest.get("noop_justification") or "").strip()
+    if top_reason:
+        return top_reason
+    top_tags = manifest.get("tags")
+    if isinstance(top_tags, list) and "allow-zero-diff" in {str(tag).strip() for tag in top_tags}:
+        return "manifest.tags includes allow-zero-diff"
+    return ""
+
+
+files_changed, total_lines = changed_stats()
+if files_changed > 0 or total_lines > 0:
+    print(f"[gates] nonzero diff OK (files={files_changed}, lines={total_lines})")
+    raise SystemExit(0)
+
+if os.environ.get("CYNTRA_ALLOW_ZERO_DIFF", "").strip().lower() in {"1", "true", "yes", "on"}:
+    print("[gates] WARN: zero diff accepted via CYNTRA_ALLOW_ZERO_DIFF")
+    raise SystemExit(0)
+
+reason = manifest_noop_reason(load_manifest())
+if reason:
+    print(f"[gates] WARN: zero diff accepted with explicit no-op justification: {reason}")
+    raise SystemExit(0)
+
+print(
+    "[gates] ERROR: zero-diff workcell rejected; require code/doc changes or explicit no-op justification",
+    file=sys.stderr,
+)
+print(
+    "[gates] hint: add manifest issue.noop_justification or set CYNTRA_ALLOW_ZERO_DIFF=1 for intentional no-op",
+    file=sys.stderr,
+)
+raise SystemExit(1)
+PY
+}
+
 run_python_regression() {
   echo "[gates] running python regression: scripts/ml/tests"
   python3 -m unittest discover -s scripts/ml/tests -p 'test_*.py'
@@ -364,6 +458,7 @@ case "$mode" in
   all)
     check_manifest_context
     check_diff_sanity
+    enforce_nonzero_diff_or_noop
     run_python_regression
     run_java_regression
     run_security_compile_regression

@@ -12,6 +12,15 @@ Canonical backlog source of truth is `.beads/issues.jsonl` plus `.beads/deps.jso
 | E10 Exosuit Productization + Real-World Lift | `2100` | Done |
 | E11 SOTA Engine Expansion + Adversarial RE Lift | `2200` | Done |
 | E12 Native SOTA RE Core + Real-Target Validation | `2300` | Blocked (story queue seeded) |
+| E13 Real-Target Benchmark Program GA | `2400` | Blocked (story queue seeded) |
+| E14 Native Reverend Pluginization | `2500` | Blocked (story queue seeded) |
+| E15 Decompiler-Native Type/Structure Intelligence | `2600` | Blocked (story queue seeded) |
+| E16 Dynamic/Symbolic/Taint Evidence Fabric | `2700` | Blocked (story queue seeded) |
+| E17 Corpus Platform GA + Team Scale | `2800` | Blocked (story queue seeded) |
+| E18 Zero-Trust Agent Runtime | `2900` | Blocked (story queue seeded) |
+| E19 Patching + Exploitability Workbench | `3000` | Blocked (story queue seeded) |
+| E20 Audit Closure + Delivery Integrity | `3100` | Open (story queue seeded) |
+| E21 SOTA Assistant Operationalization | `3200` | Open (story queue seeded) |
 
 ## E9 Story Index
 
@@ -65,6 +74,31 @@ Canonical backlog source of truth is `.beads/issues.jsonl` plus `.beads/deps.jso
 | E12-S7: Pullback governance + merge policy scoring | `2307` | `open` | `2300` |
 | E12-S8: Real-target lift campaign + GA3 packet | `2308` | `open` | `2300` |
 
+## E13-E19 Story Index
+
+Detailed per-story technical requirements, acceptance contracts, and artifact expectations are documented in:
+- `docs/e13-e19-frontier-ga-roadmap.md`
+
+| Epic | Story Bead IDs | Current Status |
+|---|---|---|
+| E13 | `2401-2406` | `open` |
+| E14 | `2501-2506` | `open` |
+| E15 | `2601-2606` | `open` |
+| E16 | `2701-2706` | `open` |
+| E17 | `2801-2806` | `open` |
+| E18 | `2901-2906` | `open` |
+| E19 | `3001-3006` | `open` |
+
+## E20-E21 Story Index
+
+Detailed remediation and operational target definitions are documented in:
+- `docs/audit-remediation-sota-operational-roadmap.md`
+
+| Epic | Story Bead IDs | Current Status |
+|---|---|---|
+| E20 | `3101-3109` | `open` |
+| E21 | `3201-3208` | `open` |
+
 ## Dependency Edges
 
 ```text
@@ -92,11 +126,71 @@ Canonical backlog source of truth is `.beads/issues.jsonl` plus `.beads/deps.jso
 2302,2303,2304,2305 -> 2306
 2302,2304 -> 2307
 2306,2307 -> 2308
+
+2308 -> 2401,2501
+2401 -> 2402,2403,2801
+2402,2403 -> 2404
+2402 -> 2405
+2404,2405 -> 2406
+
+2501 -> 2502,2506
+2502 -> 2503
+2503 -> 2504,2703
+2502,2504,2506,2406 -> 2505
+
+2406,2505 -> 2601
+2601 -> 2602,2603
+2506,2602,2603 -> 2604
+2604 -> 2605,2606
+2605,2406 -> 2606
+
+2406,2505 -> 2701
+2701 -> 2702,2703,2704
+2702 -> 2703
+2703,2704 -> 2705
+2705,2406 -> 2706
+
+2307,2401 -> 2801
+2801 -> 2802,2803,2804,2805
+2406 -> 2803
+2803 -> 2804
+2506 -> 2805
+2802,2803,2804,2805 -> 2806
+
+2506,2805 -> 2901
+2805,2806 -> 2902
+2901,2902 -> 2903,2904
+2801 -> 2904
+2903,2904 -> 2905,2906
+2905 -> 2906
+
+2606,2906 -> 3001
+2606,2706,2806,2906 -> 3002
+3002,2901 -> 3003
+3001,3002 -> 3004
+3002,2806 -> 3005
+3003,3004,3005,2906 -> 3006
+
+3006 -> 3101,3104,3105
+3101,3104,3105 -> 3102
+3101 -> 3103,3106
+3105 -> 3109
+3102 -> 3107,3108
+
+3100 -> 3200
+3103,3105,3106,3109 -> 3201
+3201 -> 3202,3203,3204
+3202,3203,3204 -> 3205
+3202,3205,3102 -> 3206
+3205 -> 3207
+3206,3207,3107,3108 -> 3208
 ```
 
 ## Research References
 
 - `docs/e9-frontier-roadmap.md`
+- `docs/e13-e19-frontier-ga-roadmap.md`
+- `docs/audit-remediation-sota-operational-roadmap.md`
 - `docs/deep-research-report.md`
 - `docs/research/INDEX.md`
 - `docs/research/analysis-data-plane-spec.md`
