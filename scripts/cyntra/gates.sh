@@ -233,32 +233,108 @@ def changed_stats() -> tuple[int, int]:
             return True
         return any(normalized.startswith(prefix) for prefix in ignored_prefixes)
 
-    files_out = subprocess.check_output(
-        ["git", "diff", "--name-only", "--", "."],
-        text=True,
-        stderr=subprocess.DEVNULL,
-    )
-    files = [
-        line.strip()
-        for line in files_out.splitlines()
-        if line.strip() and not should_ignore(line.strip())
-    ]
-    lines_out = subprocess.check_output(
-        ["git", "diff", "--numstat", "--", "."],
-        text=True,
-        stderr=subprocess.DEVNULL,
-    )
-    line_count = 0
-    for row in lines_out.splitlines():
-        parts = row.split("\t")
-        if len(parts) < 2:
-            continue
+    def collect_diff_stats(*diff_args: str) -> tuple[set[str], int]:
+        files_out = subprocess.check_output(
+            ["git", "diff", "--name-only", *diff_args, "--", "."],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        files = {
+            line.strip()
+            for line in files_out.splitlines()
+            if line.strip() and not should_ignore(line.strip())
+        }
+        lines_out = subprocess.check_output(
+            ["git", "diff", "--numstat", *diff_args, "--", "."],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        line_count = 0
+        for row in lines_out.splitlines():
+            parts = row.split("\t")
+            if len(parts) < 2:
+                continue
+            try:
+                added = 0 if parts[0] == "-" else int(parts[0])
+                deleted = 0 if parts[1] == "-" else int(parts[1])
+            except ValueError:
+                continue
+            line_count += added + deleted
+        return files, line_count
+
+    def resolve_workcell_commit_diff_range() -> str:
+        if not Path(".workcell").exists():
+            return ""
+        candidates: list[str] = []
+        env_base = os.environ.get("CYNTRA_NONZERO_DIFF_BASE", "").strip()
+        if env_base:
+            candidates.append(env_base)
         try:
-            added = 0 if parts[0] == "-" else int(parts[0])
-            deleted = 0 if parts[1] == "-" else int(parts[1])
-        except ValueError:
-            continue
-        line_count += added + deleted
+            upstream = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            upstream = ""
+        if upstream:
+            candidates.append(upstream)
+        try:
+            origin_head = subprocess.check_output(
+                ["git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            origin_head = ""
+        if origin_head:
+            candidates.append(origin_head)
+        candidates.extend(["origin/master", "origin/main", "master", "main"])
+
+        try:
+            head_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            head_commit = ""
+        if not head_commit:
+            return ""
+
+        seen: set[str] = set()
+        for ref in candidates:
+            if not ref or ref in seen:
+                continue
+            seen.add(ref)
+            verified = subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if verified.returncode != 0:
+                continue
+            try:
+                merge_base = subprocess.check_output(
+                    ["git", "merge-base", "HEAD", ref],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
+            except Exception:
+                continue
+            if merge_base and merge_base != head_commit:
+                return f"{merge_base}...HEAD"
+
+        prior = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "HEAD~1"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if prior.returncode == 0:
+            return "HEAD~1...HEAD"
+        return ""
+
+    files, line_count = collect_diff_stats()
     status_out = subprocess.check_output(
         ["git", "status", "--porcelain", "--", "."],
         text=True,
@@ -279,6 +355,14 @@ def changed_stats() -> tuple[int, int]:
     # Preserve non-zero diff semantics for untracked-only changes.
     if line_count == 0 and untracked:
         line_count = len(untracked)
+
+    # Workcells can gate after committing changes; account for committed branch delta too.
+    if not all_files and line_count == 0:
+        commit_range = resolve_workcell_commit_diff_range()
+        if commit_range:
+            committed_files, committed_lines = collect_diff_stats(commit_range)
+            all_files.update(committed_files)
+            line_count += committed_lines
     return len(all_files), line_count
 
 
