@@ -30,6 +30,7 @@ import docking.action.DockingAction;
 import docking.action.MenuData;
 import docking.action.ToolBarData;
 import docking.widgets.table.GTable;
+import generic.theme.GIcon;
 import ghidra.app.services.GoToService;
 import ghidra.framework.options.SaveState;
 import ghidra.framework.plugintool.ComponentProviderAdapter;
@@ -93,7 +94,7 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 		createActions();
 
 		setDefaultWindowPosition(WindowPosition.BOTTOM);
-		setIcon(Icons.SEARCH_ICON);
+		setIcon(new GIcon("icon.search"));
 		setHelpLocation(new HelpLocation(OWNER, "CockpitSearch"));
 		setWindowMenuGroup(TITLE);
 	}

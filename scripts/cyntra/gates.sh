@@ -224,7 +224,27 @@ def changed_stats() -> tuple[int, int]:
         except ValueError:
             continue
         line_count += added + deleted
-    return len(files), line_count
+    status_out = subprocess.check_output(
+        ["git", "status", "--porcelain", "--", "."],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    )
+    untracked = []
+    for row in status_out.splitlines():
+        if not row:
+            continue
+        code = row[:2]
+        path = row[3:].strip()
+        if not path:
+            continue
+        if code == "??":
+            untracked.append(path)
+    all_files = set(files)
+    all_files.update(untracked)
+    # Preserve non-zero diff semantics for untracked-only changes.
+    if line_count == 0 and untracked:
+        line_count = len(untracked)
+    return len(all_files), line_count
 
 
 def load_manifest() -> dict:
@@ -286,11 +306,31 @@ raise SystemExit(1)
 PY
 }
 
+run_tracked_python_unittests() {
+  local test_dir="$1"
+  local -a test_files=()
+  local test_file module_name
+  while IFS= read -r test_file; do
+    [[ -n "$test_file" ]] || continue
+    test_files+=("$test_file")
+  done < <(git ls-files "${test_dir}"/test_*.py)
+
+  if [[ ${#test_files[@]} -eq 0 ]]; then
+    echo "[gates] python regression skipped: no tracked tests under ${test_dir}"
+    return 0
+  fi
+
+  echo "[gates] running python regression (tracked): ${test_dir} (${#test_files[@]} files)"
+  for test_file in "${test_files[@]}"; do
+    module_name="${test_file%.py}"
+    module_name="${module_name//\//.}"
+    python3 -m unittest "$module_name"
+  done
+}
+
 run_python_regression() {
-  echo "[gates] running python regression: scripts/ml/tests"
-  python3 -m unittest discover -s scripts/ml/tests -p 'test_*.py'
-  echo "[gates] running python regression: scripts/tests"
-  python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+  run_tracked_python_unittests "scripts/ml/tests"
+  run_tracked_python_unittests "scripts/tests"
   echo "[gates] python regression OK"
 }
 
