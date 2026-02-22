@@ -7,7 +7,8 @@
     "verification": {
       "gate_summary": {
         "diff_files": 0,
-        "diff_lines": 0
+        "diff_lines": 0,
+        "noop_justification": "Proof-provided no-op reason that should not bypass manifest policy."
       }
     }
   },
@@ -16,8 +17,9 @@
   "expect_cyntra_calls": 1,
   "expected_gate_summary": {
     "completion_classification": "noop",
-    "noop_reason": "missing_explicit_noop_justification",
-    "noop_reason_source": "missing_explicit_field",
+    "noop_reason": "missing_manifest_noop_justification",
+    "noop_reason_source": "missing_manifest_noop_justification",
+    "noop_justification_source": "missing_manifest_noop_justification",
     "explicit_noop_justification_present": false,
     "policy_result": "blocked",
     "policy_blocked": true
@@ -26,8 +28,9 @@
     "event": "completion_policy_gate_summary",
     "gate_summary": {
       "completion_classification": "noop",
-      "noop_reason": "missing_explicit_noop_justification",
-      "noop_reason_source": "missing_explicit_field",
+      "noop_reason": "missing_manifest_noop_justification",
+      "noop_reason_source": "missing_manifest_noop_justification",
+      "noop_justification_source": "missing_manifest_noop_justification",
       "explicit_noop_justification_present": false,
       "policy_result": "blocked",
       "policy_blocked": true

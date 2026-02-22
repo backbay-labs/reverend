@@ -355,6 +355,30 @@ def _first_text(*values):
     return ""
 
 
+def load_manifest(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def manifest_noop_justification(manifest: dict) -> tuple[str, str]:
+    if not manifest:
+        return "", ""
+    issue = manifest.get("issue")
+    if isinstance(issue, dict):
+        reason = _first_text(issue.get("noop_justification"))
+        if reason:
+            return reason, "manifest.issue.noop_justification"
+    reason = _first_text(manifest.get("noop_justification"))
+    if reason:
+        return reason, "manifest.noop_justification"
+    return "", ""
+
+
 completion_statuses = {
     "completed",
     "complete",
@@ -393,32 +417,14 @@ diff_lines = _first_int(
 diff_files_value = max(diff_files or 0, 0)
 diff_lines_value = max(diff_lines or 0, 0)
 
-issue_block = proof.get("issue") or {}
-if not isinstance(issue_block, dict):
-    issue_block = {}
-explicit_noop_justification = _first_text(
-    gate_summary.get("noop_justification"),
-    verification.get("noop_justification"),
-    metadata.get("noop_justification"),
-    issue_block.get("noop_justification"),
-    proof.get("noop_justification"),
+manifest = load_manifest(repo_root / "manifest.json")
+explicit_noop_justification, explicit_noop_justification_source = manifest_noop_justification(
+    manifest
 )
 has_explicit_noop_justification = bool(explicit_noop_justification)
-observed_noop_reason = _first_text(
-    gate_summary.get("noop_reason"),
-    gate_summary.get("reason"),
-    verification.get("noop_reason"),
-    metadata.get("noop_reason"),
-)
 
-existing_classification = _first_text(
-    gate_summary.get("completion_classification"),
-    gate_summary.get("classification"),
-).lower()
 if diff_files_value > 0 or diff_lines_value > 0:
     completion_classification = "code_change"
-elif existing_classification in {"code_change", "noop"}:
-    completion_classification = existing_classification
 else:
     completion_classification = "noop"
 
@@ -429,10 +435,10 @@ policy_blocked = False
 if completion_classification == "noop":
     if has_explicit_noop_justification:
         noop_reason = explicit_noop_justification
-        noop_reason_source = "explicit_field"
+        noop_reason_source = explicit_noop_justification_source
     else:
-        noop_reason = observed_noop_reason or "missing_explicit_noop_justification"
-        noop_reason_source = "missing_explicit_field"
+        noop_reason = "missing_manifest_noop_justification"
+        noop_reason_source = "missing_manifest_noop_justification"
         policy_result = "blocked"
         policy_blocked = True
 
@@ -441,6 +447,7 @@ gate_summary["diff_lines"] = diff_lines_value
 gate_summary["completion_classification"] = completion_classification
 gate_summary["noop_reason"] = noop_reason
 gate_summary["noop_reason_source"] = noop_reason_source
+gate_summary["noop_justification_source"] = noop_reason_source
 gate_summary["explicit_noop_justification_present"] = has_explicit_noop_justification
 gate_summary["policy_result"] = policy_result
 gate_summary["policy_blocked"] = policy_blocked
@@ -504,6 +511,7 @@ completion_summary_event = {
         "completion_classification": completion_classification,
         "noop_reason": noop_reason,
         "noop_reason_source": noop_reason_source,
+        "noop_justification_source": noop_reason_source,
         "explicit_noop_justification_present": has_explicit_noop_justification,
         "policy_result": policy_result,
         "policy_blocked": policy_blocked,
@@ -594,7 +602,7 @@ if [[ -z "$failure_code" ]]; then
 fi
 
 if [[ "$failure_code" == "policy.completion_blocked" ]]; then
-  echo "[cyntra] completion policy blocked zero-diff closure (missing explicit no-op justification)"
+  echo "[cyntra] completion policy blocked zero-diff closure (missing manifest no-op justification)"
   exit 1
 fi
 

@@ -24,11 +24,14 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def _prepare_fake_repo(tmp: Path) -> Path:
+def _prepare_fake_repo(tmp: Path, fixture: dict[str, object]) -> Path:
     scripts_dir = tmp / "scripts" / "cyntra"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     (tmp / ".cyntra" / "state").mkdir(parents=True, exist_ok=True)
     (tmp / ".cyntra" / "logs").mkdir(parents=True, exist_ok=True)
+    manifest = fixture.get("manifest")
+    if isinstance(manifest, dict):
+        (tmp / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     runner_dest = scripts_dir / "run-once.sh"
     runner_dest.write_text(RUN_ONCE_SRC.read_text(encoding="utf-8"), encoding="utf-8")
@@ -73,7 +76,7 @@ class CyntraCompletionIntegrityPolicyTest(unittest.TestCase):
 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     tmp = Path(tmpdir)
-                    runner = _prepare_fake_repo(tmp)
+                    runner = _prepare_fake_repo(tmp, fixture)
 
                     env = os.environ.copy()
                     env["CYNTRA_TEST_COMPLETION_FIXTURE"] = str(fixture_path)
