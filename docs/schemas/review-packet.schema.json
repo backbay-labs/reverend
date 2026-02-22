@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Spec Review Packet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "spec_packet_hash",
+    "reviewer",
+    "overall_verdict",
+    "summary",
+    "delta_reviews",
+    "metadata"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "spec_packet_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reviewer": {
+      "$ref": "#/$defs/analyst_identity"
+    },
+    "overall_verdict": {
+      "$ref": "#/$defs/review_verdict"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "delta_reviews": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/delta_review"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "delta_source": {
+      "type": "string",
+      "enum": [
+        "human",
+        "ml_model",
+        "import",
+        "script"
+      ]
+    },
+    "review_action": {
+      "type": "string",
+      "enum": [
+        "accept",
+        "reject",
+        "request_changes"
+      ]
+    },
+    "review_verdict": {
+      "type": "string",
+      "enum": [
+        "approved",
+        "rejected",
+        "open"
+      ]
+    },
+    "analyst_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "actor_type",
+        "display_name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actor_type": {
+          "$ref": "#/$defs/delta_source"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "delta_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delta_id",
+        "action",
+        "rationale"
+      ],
+      "properties": {
+        "delta_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "$ref": "#/$defs/review_action"
+        },
+        "rationale": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
+

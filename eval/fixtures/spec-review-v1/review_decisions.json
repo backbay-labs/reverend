@@ -1,0 +1,19 @@
+{
+  "delta-schema-packet": {
+    "action": "accept",
+    "rationale": "Struct fields and addresses are consistent with analysis output."
+  },
+  "delta-schema-packetheader": {
+    "action": "accept",
+    "rationale": "Header type is referenced by downstream functions; accept as canonical."
+  },
+  "delta-api-send-packet": {
+    "action": "accept",
+    "rationale": "Export surface is unambiguous; signature matches recovered function."
+  },
+  "delta-state-machine-handlers": {
+    "action": "request_changes",
+    "rationale": "Heuristic inference; needs explicit edge evidence and state definitions."
+  }
+}
+

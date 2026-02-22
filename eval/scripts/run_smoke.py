@@ -11,6 +11,7 @@ from hashlib import sha256
 from pathlib import Path
 
 import datasets
+import importlib.util
 
 
 def _require_env(name: str, expected_value: str) -> None:
@@ -158,6 +159,20 @@ def _lockfile_sha256(lockfile: Path) -> str:
     return sha256(lockfile.read_bytes()).hexdigest()
 
 
+def _load_spec_review_runner():
+    module_path = Path(__file__).resolve().parent / "spec_review_benchmark.py"
+    spec = importlib.util.spec_from_file_location("e9_spec_review_benchmark", module_path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"failed to load spec-review benchmark module from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    runner = getattr(module, "run_spec_review_benchmark", None)
+    if runner is None:
+        raise ValueError("spec-review benchmark module missing run_spec_review_benchmark")
+    return runner
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Deterministic smoke evaluation runner")
     parser.add_argument(
@@ -208,6 +223,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[smoke] ERROR: dataset materialization failed: {exc}", file=sys.stderr)
         return 2
 
+    spec_review_dir = Path("eval/fixtures/spec-review-v1")
+    spec_review_expected = spec_review_dir / "expected.json"
+    try:
+        run_spec_review_benchmark = _load_spec_review_runner()
+        spec_review = run_spec_review_benchmark(
+            analysis_path=spec_review_dir / "analysis.json",
+            decisions_path=spec_review_dir / "review_decisions.json",
+            expected_path=spec_review_expected if spec_review_expected.exists() else None,
+        )
+    except ValueError as exc:
+        print(f"[smoke] ERROR: spec-review benchmark failed: {exc}", file=sys.stderr)
+        return 2
+
+    if spec_review.get("passed") != 1.0:
+        detail = spec_review.get("detail") if isinstance(spec_review.get("detail"), dict) else {}
+        print("[smoke] ERROR: spec-review benchmark did not match expected snapshot", file=sys.stderr)
+        print(f"[smoke] spec_packet_hash={detail.get('spec_packet_hash')}", file=sys.stderr)
+        print(f"[smoke] review_packet_hash={detail.get('review_packet_hash')}", file=sys.stderr)
+        print(f"[smoke] verdict={detail.get('review_verdict')}", file=sys.stderr)
+        return 2
+
     metrics = {
         "schema_version": 1,
         "seed": seed,
@@ -216,11 +252,16 @@ def main(argv: list[str] | None = None) -> int:
             "diff": _compute_diff_metrics(args.data_root / "toy-diff-v1"),
             "similarity": _compute_similarity_metrics(args.data_root / "toy-similarity-v1"),
             "type": _compute_type_metrics(args.data_root / "toy-type-v1"),
+            "spec_review": {k: v for k, v in spec_review.items() if isinstance(v, (int, float))},
         },
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (args.output.parent / "spec_review_detail.json").write_text(
+        json.dumps(spec_review.get("detail", {}), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     print(f"[smoke] wrote {args.output}")
     return 0
 

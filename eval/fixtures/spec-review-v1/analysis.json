@@ -1,0 +1,92 @@
+{
+  "program_name": "toy_netd",
+  "program_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "entry_points": [
+    "0x401000"
+  ],
+  "data_types": [
+    {
+      "name": "PacketHeader",
+      "category": "struct",
+      "size": 16,
+      "fields": [
+        {
+          "name": "magic"
+        },
+        {
+          "name": "version"
+        }
+      ],
+      "source_addresses": [
+        "0x402000"
+      ]
+    },
+    {
+      "name": "Packet",
+      "category": "struct",
+      "size": 48,
+      "fields": [
+        {
+          "name": "header"
+        },
+        {
+          "name": "length"
+        },
+        {
+          "name": "payload"
+        }
+      ],
+      "source_addresses": [
+        "0x402100"
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "name": "main",
+      "address": "0x401000",
+      "signature": "int main(int argc, char** argv)",
+      "callers": []
+    },
+    {
+      "name": "handle_init",
+      "address": "0x401100",
+      "signature": "int handle_init(struct PacketHeader* hdr)",
+      "callers": [
+        "0x401000"
+      ]
+    },
+    {
+      "name": "handle_process",
+      "address": "0x401200",
+      "signature": "int handle_process(struct Packet* pkt)",
+      "callers": [
+        "0x401100"
+      ]
+    },
+    {
+      "name": "handle_done",
+      "address": "0x401240",
+      "signature": "int handle_done(struct Packet* pkt)",
+      "callers": [
+        "0x401200"
+      ]
+    },
+    {
+      "name": "send_packet",
+      "address": "0x401300",
+      "signature": "int send_packet(const uint8_t* data, size_t len)",
+      "callers": [
+        "0x401000",
+        "0x401240"
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "name": "send_packet",
+      "address": "0x401300"
+    }
+  ]
+}
+

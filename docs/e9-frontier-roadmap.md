@@ -1,7 +1,7 @@
-# E9/E10/E11 Frontier Roadmap: SOTA Buildout to Adversarial Lift
+# E9/E10/E11/E12 Frontier Roadmap: SOTA Buildout to Native Real-Target Lift
 
 As-of: 2026-02-22  
-Scope: Extend Reverend beyond RC guardrails into frontier capabilities, productize those capabilities into operator-visible workflows, and then execute the next SOTA expansion on diff/deobf/symex/fuzz/firmware lift.
+Scope: Extend Reverend beyond RC guardrails into frontier capabilities, productize those capabilities into operator-visible workflows, execute SOTA expansion on diff/deobf/symex/fuzz/firmware lift, then harden native real-target integrations.
 
 ## 1) Why E9 Exists
 
@@ -76,20 +76,20 @@ scripts/cyntra/preflight.sh
 scripts/cyntra/cyntra.sh status
 ```
 
-## 6) E10 Productization Wave (Next Execution Set)
+## 6) E10 Productization Wave (Execution Complete)
 
 E9 delivered core primitives. E10 focuses on making them analyst-visible in Ghidra and proving lift on real-world binary slices.
 
-| E10 Story | Bead ID | Initial Status | Lane | Primary Outcome |
+| E10 Story | Bead ID | Current Status | Lane | Primary Outcome |
 |---|---|---|---|---|
-| E10-S1 Semantic Query Cockpit Panel | `2101` | `ready` | Plugin/UI | Operator cockpit for intent queries + similarity navigation |
-| E10-S2 Mission Hotspot Map | `2102` | `open` | Backend/ML | Ranked auth/network/crypto/protocol hotspot mapping |
-| E10-S3 Proposal Review Inbox | `2103` | `open` | Plugin/Collab | Accept/reject/revert workflow with evidence and rollback |
-| E10-S4 Corpus Retrieval Hardening | `2104` | `open` | Backend/Data | Non-toy corpus index/retrieval with SLA evidence |
-| E10-S5 Multi-Source Trace Adapters | `2105` | `open` | Debugger/Data | Unified trace evidence ingestion from multiple sources |
-| E10-S6 Mission Orchestrator | `2106` | `open` | ML/Plugin | Deterministic mission runs with artifact packs |
-| E10-S7 Real-World Benchmark Lift Suite | `2107` | `open` | Eval/Research | Lift metrics vs baseline on representative binaries |
-| E10-S8 GA Readiness Packet | `2108` | `open` | Release/Validation | GA decision packet and reproducible demo workflow |
+| E10-S1 Semantic Query Cockpit Panel | `2101` | `done` | Plugin/UI | Operator cockpit for intent queries + similarity navigation |
+| E10-S2 Mission Hotspot Map | `2102` | `done` | Backend/ML | Ranked auth/network/crypto/protocol hotspot mapping |
+| E10-S3 Proposal Review Inbox | `2103` | `done` | Plugin/Collab | Accept/reject/revert workflow with evidence and rollback |
+| E10-S4 Corpus Retrieval Hardening | `2104` | `done` | Backend/Data | Non-toy corpus index/retrieval with SLA evidence |
+| E10-S5 Multi-Source Trace Adapters | `2105` | `done` | Debugger/Data | Unified trace evidence ingestion from multiple sources |
+| E10-S6 Mission Orchestrator | `2106` | `done` | ML/Plugin | Deterministic mission runs with artifact packs |
+| E10-S7 Real-World Benchmark Lift Suite | `2107` | `done` | Eval/Research | Lift metrics vs baseline on representative binaries |
+| E10-S8 GA Readiness Packet | `2108` | `done` | Release/Validation | GA decision packet and reproducible demo workflow |
 
 ### E10 Dependency Graph
 
@@ -120,20 +120,20 @@ flowchart LR
 3. Wave 2 (parallel): `2106`, `2107`
 4. Wave 3: `2108`
 
-## 7) E11 SOTA Expansion Wave (Post-E10)
+## 7) E11 SOTA Expansion Wave (Execution Complete)
 
 E11 turns E10 productization into deep technical lift on still-open SOTA fronts called out in the deep research report: diffing quality, deobfuscation, symbolic + fuzz evidence fusion, firmware verticalization, and multi-analyst branch/merge workflows.
 
-| E11 Story | Bead ID | Initial Status | Lane | Primary Outcome |
+| E11 Story | Bead ID | Current Status | Lane | Primary Outcome |
 |---|---|---|---|---|
-| E11-S1 Semantic Diff Narrative Engine | `2201` | `open` | Backend/Plugin | Evidence-backed semantic diff and impact narratives |
-| E11-S2 Deobfuscation Detector/Transform Pack | `2202` | `open` | ML/Backend | Deterministic obfuscation detection + reversible transforms |
-| E11-S3 Symbolic Evidence Bridge | `2203` | `open` | Debugger/Data | Counterexample/path-constraint overlays in static views |
-| E11-S4 Fuzz Harness + Coverage Sync | `2204` | `open` | Eval/ML | Harness generation and coverage/crash feedback into analysis |
-| E11-S5 Firmware Vertical Pipeline | `2205` | `open` | Pipeline/Data | Reproducible firmware ingest/component-attribution/triage |
-| E11-S6 Branch/Merge Review Topology | `2206` | `open` | Plugin/Collab | Multi-analyst proposal branching, merge, and conflict workflows |
-| E11-S7 Adversarial Lift Benchmark | `2207` | `open` | Eval/Research | Red-team style scorecard for practical analyst lift |
-| E11-S8 Frontier-v2 Decision Packet | `2208` | `open` | Release/Validation | Final packet, rollout playbook, and residual risk register |
+| E11-S1 Semantic Diff Narrative Engine | `2201` | `done` | Backend/Plugin | Evidence-backed semantic diff and impact narratives |
+| E11-S2 Deobfuscation Detector/Transform Pack | `2202` | `done` | ML/Backend | Deterministic obfuscation detection + reversible transforms |
+| E11-S3 Symbolic Evidence Bridge | `2203` | `done` | Debugger/Data | Counterexample/path-constraint overlays in static views |
+| E11-S4 Fuzz Harness + Coverage Sync | `2204` | `done` | Eval/ML | Harness generation and coverage/crash feedback into analysis |
+| E11-S5 Firmware Vertical Pipeline | `2205` | `done` | Pipeline/Data | Reproducible firmware ingest/component-attribution/triage |
+| E11-S6 Branch/Merge Review Topology | `2206` | `done` | Plugin/Collab | Multi-analyst proposal branching, merge, and conflict workflows |
+| E11-S7 Adversarial Lift Benchmark | `2207` | `done` | Eval/Research | Red-team style scorecard for practical analyst lift |
+| E11-S8 Frontier-v2 Decision Packet | `2208` | `done` | Release/Validation | Final packet, rollout playbook, and residual risk register |
 
 ### E11 Dependency Graph
 
@@ -164,3 +164,47 @@ flowchart LR
 2. Wave 1 (parallel): `2202`, `2203`, `2204`, `2205`
 3. Wave 2 (parallel): `2206`, `2207`
 4. Wave 3: `2208`
+
+## 8) E12 Native SOTA Core Wave (Queued)
+
+E12 moves from feature breadth to native depth: tighter p-code graph extraction, hybrid symbolic+vector retrieval, cockpit v2 UX, stronger interprocedural typing, multi-source runtime overlays, deterministic mission DAG execution, and real-target benchmark scorecards.
+
+| E12 Story | Bead ID | Current Status | Lane | Primary Outcome |
+|---|---|---|---|---|
+| E12-S1 P-code/CFG/SSA Graph Extractor | `2301` | `done` | Backend/Data | Persistent function knowledge graph with deterministic IDs |
+| E12-S2 Hybrid Retrieval + Symbolic Rerank | `2302` | `open` | ML/Backend | Corpus retrieval with vector + constraint-aware scoring |
+| E12-S3 Cockpit v2 Graph + Evidence Panel | `2303` | `open` | Plugin/UI | Query cockpit with graph facets and evidence drilldown |
+| E12-S4 Type Inference v2 Propagation Engine | `2304` | `open` | ML/Type | Interprocedural type propagation with conflict proofs |
+| E12-S5 Dynamic Adapter + Timeline Overlay | `2305` | `open` | Debugger/Data | Unified runtime ingest and static timeline overlays |
+| E12-S6 Mission DAG Runner + Signed Packs | `2306` | `open` | Orchestration | Deterministic stage DAG and signed artifact packs |
+| E12-S7 Pullback Governance + Merge Policies | `2307` | `open` | Backend/Collab | Reviewer-governed transfer/merge policy scoring |
+| E12-S8 Real-Target Lift + GA3 Packet | `2308` | `open` | Release/Validation | Full benchmark campaign and decision packet |
+
+### E12 Dependency Graph
+
+```mermaid
+flowchart LR
+    E11DONE["2208 E11 complete"] --> V1["2301 E12-S1"]
+    V1 --> V2["2302 E12-S2"]
+    V1 --> V3["2303 E12-S3"]
+    V1 --> V4["2304 E12-S4"]
+    V1 --> V5["2305 E12-S5"]
+
+    V2 --> V6["2306 E12-S6"]
+    V3 --> V6
+    V4 --> V6
+    V5 --> V6
+
+    V2 --> V7["2307 E12-S7"]
+    V4 --> V7
+
+    V6 --> V8["2308 E12-S8"]
+    V7 --> V8
+```
+
+### E12 Dispatch Waves
+
+1. Wave 0: `2301`
+2. Wave 1 (parallel): `2302`, `2303`, `2304`, `2305`
+3. Wave 2 (parallel): `2306`, `2307`
+4. Wave 3: `2308`

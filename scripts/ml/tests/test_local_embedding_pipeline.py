@@ -41,6 +41,15 @@ generate_type_suggestion_report = MODULE.generate_type_suggestion_report
 render_triage_panel = MODULE.render_triage_panel
 run_sync_job = SYNC_MODULE.run_sync_job
 
+ScopedRetrievalService = MODULE.ScopedRetrievalService
+CorpusRecordAdapter = MODULE.CorpusRecordAdapter
+BenchmarkArtifact = MODULE.BenchmarkArtifact
+create_benchmark_artifact = MODULE.create_benchmark_artifact
+RETRIEVAL_SCOPE_LOCAL = MODULE.RETRIEVAL_SCOPE_LOCAL
+RETRIEVAL_SCOPE_CORPUS = MODULE.RETRIEVAL_SCOPE_CORPUS
+RETRIEVAL_SCOPE_BOTH = MODULE.RETRIEVAL_SCOPE_BOTH
+JsonFileCorpusBackend = SYNC_MODULE.JsonFileCorpusBackend
+
 
 class LocalEmbeddingPipelineTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -2486,6 +2495,196 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
                 MODULE.DEFAULT_TRIAGE_UNKNOWN_THRESHOLD,
             )
             self.assertTrue(all(check["passed"] for check in report["candidate"]["checks"].values()))
+
+
+class ScopedRetrievalServiceTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.pipeline = LocalEmbeddingPipeline(vector_dimension=64)
+        self.records = [
+            FunctionRecord.from_json({
+                "id": "fn.local.parse_headers",
+                "name": "parse_headers",
+                "text": "parse headers from binary file",
+            }),
+            FunctionRecord.from_json({
+                "id": "fn.local.connect_socket",
+                "name": "connect_socket",
+                "text": "connect socket to remote host",
+            }),
+        ]
+        self.index = self.pipeline.build_index(self.records)
+        self.adapter = BaselineSimilarityAdapter(self.pipeline, self.index)
+        self.local_service = SemanticSearchQueryService(
+            adapter=self.adapter, index=self.index
+        )
+
+    def test_local_scope_intent_query(self) -> None:
+        service = ScopedRetrievalService(local_service=self.local_service)
+        response = service.search_intent("parse binary headers", top_k=2, scope=RETRIEVAL_SCOPE_LOCAL)
+        self.assertEqual(response.mode, "intent")
+        self.assertGreater(len(response.results), 0)
+        self.assertEqual(response.results[0].function_id, "fn.local.parse_headers")
+
+    def test_local_scope_similar_function(self) -> None:
+        service = ScopedRetrievalService(local_service=self.local_service)
+        response = service.search_similar_function(
+            "fn.local.parse_headers", top_k=2, scope=RETRIEVAL_SCOPE_LOCAL
+        )
+        self.assertEqual(response.mode, "similar-function")
+        self.assertGreater(len(response.results), 0)
+        for result in response.results:
+            self.assertNotEqual(result.function_id, "fn.local.parse_headers")
+
+    def test_corpus_scope_returns_corpus_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            backend_path = Path(tmpdir) / "corpus.json"
+            backend_path.write_text(json.dumps({
+                "schema_version": 1,
+                "kind": "shared_corpus_backend",
+                "artifacts": {
+                    "proposal.corpus.001": {
+                        "title": "corpus_socket_handler",
+                        "description": "handle socket connections in corpus",
+                        "provenance": {"source": "corpus", "id": "proposal.corpus.001"},
+                    }
+                }
+            }) + "\n", encoding="utf-8")
+
+            backend = JsonFileCorpusBackend(backend_path)
+            corpus_adapter = CorpusRecordAdapter(backend)
+
+            service = ScopedRetrievalService(
+                local_service=self.local_service,
+                corpus_adapter=corpus_adapter,
+                local_pipeline=self.pipeline,
+            )
+
+            response = service.search_intent(
+                "socket handler", top_k=2, scope=RETRIEVAL_SCOPE_CORPUS
+            )
+            self.assertEqual(response.mode, "intent")
+            result_ids = [r.function_id for r in response.results]
+            self.assertIn("proposal.corpus.001", result_ids)
+
+    def test_both_scope_merges_local_and_corpus(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            backend_path = Path(tmpdir) / "corpus.json"
+            backend_path.write_text(json.dumps({
+                "schema_version": 1,
+                "kind": "shared_corpus_backend",
+                "artifacts": {
+                    "proposal.corpus.002": {
+                        "title": "corpus_header_parser",
+                        "description": "parse headers from corpus data",
+                        "provenance": {"source": "corpus", "id": "proposal.corpus.002"},
+                    }
+                }
+            }) + "\n", encoding="utf-8")
+
+            backend = JsonFileCorpusBackend(backend_path)
+            corpus_adapter = CorpusRecordAdapter(backend)
+
+            service = ScopedRetrievalService(
+                local_service=self.local_service,
+                corpus_adapter=corpus_adapter,
+                local_pipeline=self.pipeline,
+            )
+
+            response = service.search_intent(
+                "parse headers", top_k=5, scope=RETRIEVAL_SCOPE_BOTH
+            )
+            result_ids = [r.function_id for r in response.results]
+            self.assertIn("fn.local.parse_headers", result_ids)
+            self.assertIn("proposal.corpus.002", result_ids)
+
+    def test_invalid_scope_raises_error(self) -> None:
+        service = ScopedRetrievalService(local_service=self.local_service)
+        with self.assertRaises(ValueError) as ctx:
+            service.search_intent("test", top_k=2, scope="INVALID")
+        self.assertIn("scope must be one of", str(ctx.exception))
+
+
+class BenchmarkArtifactTest(unittest.TestCase):
+    def test_create_benchmark_artifact_passing(self) -> None:
+        artifact = create_benchmark_artifact(
+            scope=RETRIEVAL_SCOPE_LOCAL,
+            baseline_recall=0.60,
+            candidate_recall=0.75,
+            baseline_latency_p95_ms=250.0,
+            candidate_latency_p95_ms=200.0,
+            corpus_size=10000,
+            query_count=100,
+        )
+        self.assertTrue(artifact.passed)
+        self.assertAlmostEqual(artifact.recall_at_10_delta, 0.15, places=5)
+        self.assertAlmostEqual(artifact.latency_p95_delta_ms, -50.0, places=5)
+        self.assertEqual(artifact.scope, RETRIEVAL_SCOPE_LOCAL)
+
+    def test_create_benchmark_artifact_failing_recall(self) -> None:
+        artifact = create_benchmark_artifact(
+            scope=RETRIEVAL_SCOPE_CORPUS,
+            baseline_recall=0.70,
+            candidate_recall=0.72,
+            baseline_latency_p95_ms=250.0,
+            candidate_latency_p95_ms=200.0,
+            corpus_size=5000,
+            query_count=50,
+            recall_gate=0.10,
+        )
+        self.assertFalse(artifact.passed)
+        self.assertAlmostEqual(artifact.recall_at_10_delta, 0.02)
+
+    def test_create_benchmark_artifact_failing_latency(self) -> None:
+        artifact = create_benchmark_artifact(
+            scope=RETRIEVAL_SCOPE_BOTH,
+            baseline_recall=0.50,
+            candidate_recall=0.80,
+            baseline_latency_p95_ms=200.0,
+            candidate_latency_p95_ms=350.0,
+            corpus_size=8000,
+            query_count=75,
+            latency_gate_ms=300.0,
+        )
+        self.assertFalse(artifact.passed)
+        self.assertEqual(artifact.latency_p95_delta_ms, 150.0)
+
+    def test_benchmark_artifact_to_json(self) -> None:
+        artifact = create_benchmark_artifact(
+            scope=RETRIEVAL_SCOPE_LOCAL,
+            baseline_recall=0.50,
+            candidate_recall=0.65,
+            baseline_latency_p95_ms=100.0,
+            candidate_latency_p95_ms=120.0,
+            corpus_size=1000,
+            query_count=20,
+            artifact_id="test-artifact-001",
+        )
+        doc = artifact.to_json()
+        self.assertEqual(doc["schema_version"], 1)
+        self.assertEqual(doc["kind"], "benchmark_artifact")
+        self.assertEqual(doc["artifact_id"], "test-artifact-001")
+        self.assertEqual(doc["recall"]["delta"], 0.15)
+        self.assertEqual(doc["latency_p95"]["delta_ms"], 20.0)
+        self.assertTrue(doc["recall"]["passed"])
+        self.assertTrue(doc["latency_p95"]["passed"])
+        self.assertTrue(doc["passed"])
+
+    def test_benchmark_artifact_custom_gates(self) -> None:
+        artifact = create_benchmark_artifact(
+            scope=RETRIEVAL_SCOPE_LOCAL,
+            baseline_recall=0.70,
+            candidate_recall=0.85,
+            baseline_latency_p95_ms=400.0,
+            candidate_latency_p95_ms=450.0,
+            corpus_size=2000,
+            query_count=30,
+            recall_gate=0.20,
+            latency_gate_ms=500.0,
+        )
+        self.assertFalse(artifact.passed)
+        self.assertAlmostEqual(artifact.recall_at_10_delta, 0.15, places=5)
+        self.assertAlmostEqual(artifact.recall_gate_threshold, 0.20, places=5)
+        self.assertAlmostEqual(artifact.latency_gate_threshold_ms, 500.0, places=5)
 
 
 if __name__ == "__main__":

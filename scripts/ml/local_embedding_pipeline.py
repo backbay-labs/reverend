@@ -104,6 +104,15 @@ TYPE_PROPAGATION_ALLOWED_SCOPES = (
     TYPE_PROPAGATION_SCOPE_CORPUS_KB,
 )
 
+RETRIEVAL_SCOPE_LOCAL = "LOCAL"
+RETRIEVAL_SCOPE_CORPUS = "CORPUS"
+RETRIEVAL_SCOPE_BOTH = "BOTH"
+RETRIEVAL_ALLOWED_SCOPES = (
+    RETRIEVAL_SCOPE_LOCAL,
+    RETRIEVAL_SCOPE_CORPUS,
+    RETRIEVAL_SCOPE_BOTH,
+)
+
 TYPE_PROPAGATION_MODE_AUTO = "AUTO_PROPAGATE"
 TYPE_PROPAGATION_MODE_PROPOSE = "PROPOSE"
 TYPE_PROPAGATION_MODE_DISABLED = "DISABLED"
@@ -559,6 +568,52 @@ class SemanticSearchResponse:
             },
             "results": [result.to_json() for result in self.results],
             "metrics": self.metrics.to_json(),
+        }
+
+
+@dataclass(frozen=True)
+class BenchmarkArtifact:
+    """Benchmark artifact capturing recall and p95 latency deltas."""
+
+    artifact_id: str
+    timestamp_utc: str
+    scope: str
+    recall_at_10_baseline: float
+    recall_at_10_candidate: float
+    recall_at_10_delta: float
+    latency_p95_baseline_ms: float
+    latency_p95_candidate_ms: float
+    latency_p95_delta_ms: float
+    corpus_size: int
+    query_count: int
+    passed: bool
+    recall_gate_threshold: float = 0.10
+    latency_gate_threshold_ms: float = 300.0
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "kind": "benchmark_artifact",
+            "artifact_id": self.artifact_id,
+            "timestamp_utc": self.timestamp_utc,
+            "scope": self.scope,
+            "recall": {
+                "baseline": round(self.recall_at_10_baseline, 6),
+                "candidate": round(self.recall_at_10_candidate, 6),
+                "delta": round(self.recall_at_10_delta, 6),
+                "gate_threshold": round(self.recall_gate_threshold, 6),
+                "passed": self.recall_at_10_delta >= self.recall_gate_threshold,
+            },
+            "latency_p95": {
+                "baseline_ms": round(self.latency_p95_baseline_ms, 3),
+                "candidate_ms": round(self.latency_p95_candidate_ms, 3),
+                "delta_ms": round(self.latency_p95_delta_ms, 3),
+                "gate_threshold_ms": round(self.latency_gate_threshold_ms, 3),
+                "passed": self.latency_p95_candidate_ms <= self.latency_gate_threshold_ms,
+            },
+            "corpus_size": self.corpus_size,
+            "query_count": self.query_count,
+            "passed": self.passed,
         }
 
 
@@ -5462,6 +5517,368 @@ class SemanticSearchQueryService:
             metrics=metrics,
             seed_function_id=seed_function_id,
         )
+
+
+class CorpusRecordAdapter:
+    """Adapter to convert corpus backend artifacts into FunctionRecord format."""
+
+    def __init__(self, backend: Any):
+        self._backend = backend
+        self._cache: dict[str, FunctionRecord] = {}
+
+    def list_function_ids(self) -> list[str]:
+        if hasattr(self._backend, "_ensure_loaded"):
+            self._backend._ensure_loaded()
+        if not hasattr(self._backend, "_doc"):
+            return []
+        artifacts = getattr(self._backend, "_doc", {}).get("artifacts", {})
+        if not isinstance(artifacts, dict):
+            return []
+        return list(artifacts.keys())
+
+    def get_record(self, proposal_id: str) -> FunctionRecord | None:
+        if proposal_id in self._cache:
+            return self._cache[proposal_id]
+        raw = self._backend.get(proposal_id)
+        if raw is None:
+            return None
+        record = self._parse_corpus_artifact(raw, proposal_id)
+        if record is not None:
+            self._cache[proposal_id] = record
+        return record
+
+    def _parse_corpus_artifact(self, raw: Mapping[str, Any], proposal_id: str) -> FunctionRecord | None:
+        functions_raw = raw.get("functions")
+        if isinstance(functions_raw, list) and functions_raw:
+            first = functions_raw[0]
+            if isinstance(first, Mapping):
+                return FunctionRecord.from_json(first)
+        name = str(raw.get("title") or raw.get("name") or proposal_id)
+        text = str(raw.get("description") or raw.get("text") or "")
+        provenance_raw = raw.get("provenance")
+        if isinstance(provenance_raw, Mapping):
+            provenance = tuple(sorted((str(k), str(v)) for k, v in provenance_raw.items()))
+        else:
+            provenance = (("proposal_id", proposal_id), ("source", "corpus_backend"))
+        return FunctionRecord(
+            function_id=proposal_id,
+            name=name,
+            text=text,
+            provenance=provenance,
+            evidence_refs=(),
+        )
+
+
+class ScopedRetrievalService:
+    """Similarity retrieval with local and corpus scope support."""
+
+    def __init__(
+        self,
+        *,
+        local_service: SemanticSearchQueryService,
+        corpus_adapter: CorpusRecordAdapter | None = None,
+        local_pipeline: Any = None,
+    ):
+        self._local_service = local_service
+        self._corpus_adapter = corpus_adapter
+        self._local_pipeline = local_pipeline
+
+    def search_intent(
+        self,
+        query_text: str,
+        top_k: int = 5,
+        scope: str = RETRIEVAL_SCOPE_LOCAL,
+    ) -> SemanticSearchResponse:
+        if scope not in RETRIEVAL_ALLOWED_SCOPES:
+            raise ValueError(f"scope must be one of: {', '.join(RETRIEVAL_ALLOWED_SCOPES)}")
+
+        if scope == RETRIEVAL_SCOPE_LOCAL:
+            return self._local_service.search_intent(query_text, top_k=top_k)
+
+        if scope == RETRIEVAL_SCOPE_CORPUS:
+            return self._search_corpus_intent(query_text, top_k=top_k)
+
+        local_response = self._local_service.search_intent(query_text, top_k=top_k)
+        corpus_response = self._search_corpus_intent(query_text, top_k=top_k)
+        return self._merge_responses(local_response, corpus_response, top_k=top_k)
+
+    def search_similar_function(
+        self,
+        function_id: str,
+        top_k: int = 5,
+        scope: str = RETRIEVAL_SCOPE_LOCAL,
+    ) -> SemanticSearchResponse:
+        if scope not in RETRIEVAL_ALLOWED_SCOPES:
+            raise ValueError(f"scope must be one of: {', '.join(RETRIEVAL_ALLOWED_SCOPES)}")
+
+        if scope == RETRIEVAL_SCOPE_LOCAL:
+            return self._local_service.search_similar_function(function_id, top_k=top_k)
+
+        if scope == RETRIEVAL_SCOPE_CORPUS:
+            return self._search_corpus_similar(function_id, top_k=top_k)
+
+        local_response = self._local_service.search_similar_function(function_id, top_k=top_k)
+        corpus_response = self._search_corpus_similar(function_id, top_k=top_k)
+        return self._merge_responses(local_response, corpus_response, top_k=top_k)
+
+    def _search_corpus_intent(self, query_text: str, top_k: int) -> SemanticSearchResponse:
+        start = _now_ns()
+        if self._corpus_adapter is None or self._local_pipeline is None:
+            latency_ms = _ms(start, _now_ns())
+            return self._empty_response(
+                mode=SemanticSearchQueryService.MODE_INTENT,
+                query_text=query_text,
+                top_k=top_k,
+                latency_ms=latency_ms,
+            )
+
+        corpus_records = [
+            record
+            for fid in self._corpus_adapter.list_function_ids()
+            if (record := self._corpus_adapter.get_record(fid)) is not None
+        ]
+        if not corpus_records:
+            latency_ms = _ms(start, _now_ns())
+            return self._empty_response(
+                mode=SemanticSearchQueryService.MODE_INTENT,
+                query_text=query_text,
+                top_k=top_k,
+                latency_ms=latency_ms,
+            )
+
+        corpus_index = self._local_pipeline.build_index(corpus_records)
+        corpus_adapter = BaselineSimilarityAdapter(
+            pipeline=self._local_pipeline, index=corpus_index
+        )
+        hits = corpus_adapter.top_k(query_text.strip(), top_k=top_k)
+        latency_ms = _ms(start, _now_ns())
+        return self._build_corpus_response(
+            mode=SemanticSearchQueryService.MODE_INTENT,
+            query_text=query_text,
+            top_k=top_k,
+            hits=hits,
+            corpus_index=corpus_index,
+            latency_ms=latency_ms,
+        )
+
+    def _search_corpus_similar(self, function_id: str, top_k: int) -> SemanticSearchResponse:
+        start = _now_ns()
+        if self._corpus_adapter is None or self._local_pipeline is None:
+            latency_ms = _ms(start, _now_ns())
+            return self._empty_response(
+                mode=SemanticSearchQueryService.MODE_SIMILAR_FUNCTION,
+                query_text="",
+                top_k=top_k,
+                latency_ms=latency_ms,
+                seed_function_id=function_id,
+            )
+
+        seed_record = self._corpus_adapter.get_record(function_id)
+        local_index = getattr(self._local_service, "_index", None)
+        if seed_record is None and local_index is not None:
+            seed_record = local_index.get_record(function_id)
+        if seed_record is None:
+            raise ValueError(f"unknown function id: {function_id}")
+
+        query_text = f"{seed_record.name} {seed_record.text}".strip()
+
+        corpus_records = [
+            record
+            for fid in self._corpus_adapter.list_function_ids()
+            if (record := self._corpus_adapter.get_record(fid)) is not None
+        ]
+        if not corpus_records:
+            latency_ms = _ms(start, _now_ns())
+            return self._empty_response(
+                mode=SemanticSearchQueryService.MODE_SIMILAR_FUNCTION,
+                query_text=query_text,
+                top_k=top_k,
+                latency_ms=latency_ms,
+                seed_function_id=function_id,
+            )
+
+        corpus_index = self._local_pipeline.build_index(corpus_records)
+        corpus_adapter = BaselineSimilarityAdapter(
+            pipeline=self._local_pipeline, index=corpus_index
+        )
+        raw_hits = corpus_adapter.top_k(query_text, top_k=top_k + 1)
+        hits = [h for h in raw_hits if h.function_id != function_id][:top_k]
+        latency_ms = _ms(start, _now_ns())
+        return self._build_corpus_response(
+            mode=SemanticSearchQueryService.MODE_SIMILAR_FUNCTION,
+            query_text=query_text,
+            top_k=top_k,
+            hits=hits,
+            corpus_index=corpus_index,
+            latency_ms=latency_ms,
+            seed_function_id=function_id,
+        )
+
+    def _empty_response(
+        self,
+        *,
+        mode: str,
+        query_text: str,
+        top_k: int,
+        latency_ms: float,
+        seed_function_id: str | None = None,
+    ) -> SemanticSearchResponse:
+        metrics = SearchLatencyMetric(
+            mode=mode,
+            latency_ms=latency_ms,
+            top_k=top_k,
+            result_count=0,
+            query_chars=len(query_text),
+            query_tokens=len(_TOKEN_RE.findall(query_text.lower())),
+            timestamp_utc=_utc_now(),
+            seed_function_id=seed_function_id,
+        )
+        return SemanticSearchResponse(
+            mode=mode,
+            query_text=query_text,
+            top_k=top_k,
+            results=(),
+            metrics=metrics,
+            seed_function_id=seed_function_id,
+        )
+
+    def _build_corpus_response(
+        self,
+        *,
+        mode: str,
+        query_text: str,
+        top_k: int,
+        hits: list[Any],
+        corpus_index: Any,
+        latency_ms: float,
+        seed_function_id: str | None = None,
+    ) -> SemanticSearchResponse:
+        ranked: list[RankedSearchResult] = []
+        for rank, hit in enumerate(hits[:top_k], start=1):
+            record = corpus_index.get_record(hit.function_id)
+            provenance = record.provenance if record else ()
+            evidence_refs = record.evidence_refs if record else ()
+            ranked.append(
+                RankedSearchResult(
+                    rank=rank,
+                    function_id=hit.function_id,
+                    name=hit.name,
+                    score=hit.score,
+                    provenance=provenance,
+                    evidence_refs=evidence_refs,
+                )
+            )
+
+        metrics = SearchLatencyMetric(
+            mode=mode,
+            latency_ms=latency_ms,
+            top_k=top_k,
+            result_count=len(ranked),
+            query_chars=len(query_text),
+            query_tokens=len(_TOKEN_RE.findall(query_text.lower())),
+            timestamp_utc=_utc_now(),
+            seed_function_id=seed_function_id,
+        )
+        return SemanticSearchResponse(
+            mode=mode,
+            query_text=query_text,
+            top_k=top_k,
+            results=tuple(ranked),
+            metrics=metrics,
+            seed_function_id=seed_function_id,
+        )
+
+    def _merge_responses(
+        self,
+        local: SemanticSearchResponse,
+        corpus: SemanticSearchResponse,
+        top_k: int,
+    ) -> SemanticSearchResponse:
+        all_results = list(local.results) + list(corpus.results)
+        seen: set[str] = set()
+        deduplicated: list[RankedSearchResult] = []
+        for result in sorted(all_results, key=lambda r: -r.score):
+            if result.function_id in seen:
+                continue
+            seen.add(result.function_id)
+            deduplicated.append(result)
+            if len(deduplicated) >= top_k:
+                break
+
+        reranked = [
+            RankedSearchResult(
+                rank=i,
+                function_id=r.function_id,
+                name=r.name,
+                score=r.score,
+                provenance=r.provenance,
+                evidence_refs=r.evidence_refs,
+            )
+            for i, r in enumerate(deduplicated, start=1)
+        ]
+
+        combined_latency = local.metrics.latency_ms + corpus.metrics.latency_ms
+        metrics = SearchLatencyMetric(
+            mode=local.metrics.mode,
+            latency_ms=combined_latency,
+            top_k=top_k,
+            result_count=len(reranked),
+            query_chars=local.metrics.query_chars,
+            query_tokens=local.metrics.query_tokens,
+            timestamp_utc=_utc_now(),
+            seed_function_id=local.metrics.seed_function_id,
+        )
+        return SemanticSearchResponse(
+            mode=local.mode,
+            query_text=local.query_text,
+            top_k=top_k,
+            results=tuple(reranked),
+            metrics=metrics,
+            seed_function_id=local.seed_function_id,
+        )
+
+
+def create_benchmark_artifact(
+    *,
+    scope: str,
+    baseline_recall: float,
+    candidate_recall: float,
+    baseline_latency_p95_ms: float,
+    candidate_latency_p95_ms: float,
+    corpus_size: int,
+    query_count: int,
+    recall_gate: float = 0.10,
+    latency_gate_ms: float = 300.0,
+    artifact_id: str | None = None,
+) -> BenchmarkArtifact:
+    """Create a benchmark artifact capturing recall and p95 latency deltas."""
+    recall_delta = candidate_recall - baseline_recall
+    latency_delta = candidate_latency_p95_ms - baseline_latency_p95_ms
+    recall_passed = recall_delta >= recall_gate
+    latency_passed = candidate_latency_p95_ms <= latency_gate_ms
+    passed = recall_passed and latency_passed
+
+    resolved_id = artifact_id
+    if not resolved_id:
+        stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        resolved_id = f"benchmark-{scope.lower()}-{stamp}"
+
+    return BenchmarkArtifact(
+        artifact_id=resolved_id,
+        timestamp_utc=_utc_now(),
+        scope=scope,
+        recall_at_10_baseline=baseline_recall,
+        recall_at_10_candidate=candidate_recall,
+        recall_at_10_delta=recall_delta,
+        latency_p95_baseline_ms=baseline_latency_p95_ms,
+        latency_p95_candidate_ms=candidate_latency_p95_ms,
+        latency_p95_delta_ms=latency_delta,
+        corpus_size=corpus_size,
+        query_count=query_count,
+        passed=passed,
+        recall_gate_threshold=recall_gate,
+        latency_gate_threshold_ms=latency_gate_ms,
+    )
 
 
 def render_search_panel(response: SemanticSearchResponse) -> dict[str, Any]:
