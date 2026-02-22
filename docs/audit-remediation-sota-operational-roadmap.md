@@ -50,6 +50,11 @@ Execution order:
 - `scripts/cyntra/validate-roadmap-completion.sh`
 - `scripts/cyntra/preflight.sh`
 
+## Context Reproducibility
+- Keep every bead `context_files` path committed on branch `main` before dispatch.
+- Do not point beads at uncommitted worktree-only files; workcells are created from committed refs.
+- Treat `preflight` context warnings as blockers unless you intentionally set `CYNTRA_STRICT_CONTEXT_MAIN=0` for emergency recovery.
+
 ## Kernel Execution
 - One cycle: `scripts/cyntra/run-once.sh`
 - Continuous: `scripts/cyntra/run-watch.sh`
