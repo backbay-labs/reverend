@@ -1,0 +1,64 @@
+{
+  "description": "Promoted baseline snapshot from smoke metrics",
+  "kind": "deterministic_eval_baseline_snapshot",
+  "metrics": {
+    "real_target": {
+      "corpus_size": {
+        "min_threshold": 11.95,
+        "operator": ">=",
+        "value": 12.0
+      },
+      "latency_p50_ms": {
+        "max_threshold": 0.007399,
+        "operator": "<=",
+        "value": 0.006166
+      },
+      "latency_p95_ms": {
+        "max_threshold": 0.00865,
+        "operator": "<=",
+        "value": 0.007208
+      },
+      "mrr": {
+        "min_threshold": 0.95,
+        "operator": ">=",
+        "value": 1.0
+      },
+      "queries": {
+        "min_threshold": 11.95,
+        "operator": ">=",
+        "value": 12.0
+      },
+      "recall@1": {
+        "min_threshold": 0.95,
+        "operator": ">=",
+        "value": 1.0
+      },
+      "recall@5": {
+        "min_threshold": 0.95,
+        "operator": ">=",
+        "value": 1.0
+      },
+      "slice_count": {
+        "min_threshold": 0.95,
+        "operator": ">=",
+        "value": 1.0
+      },
+      "top_k": {
+        "min_threshold": 4.95,
+        "operator": ">=",
+        "value": 5.0
+      }
+    }
+  },
+  "promote_areas": [
+    "real_target"
+  ],
+  "schema_version": 3,
+  "source_current_file": "eval/output/smoke/e23-smoke-metrics.json",
+  "source_current_schema_version": 1,
+  "source_current_sha256": "f79de6b422a9e78898028c9db1ec49279defd01e5cceefcc9bf64472514e2361",
+  "tolerances": {
+    "latency_tolerance_ratio": 0.2,
+    "relevance_drop_tolerance": 0.05
+  }
+}
