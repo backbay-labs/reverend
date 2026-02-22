@@ -9,8 +9,6 @@ scheduling:
 toolchain_priority:
   - codex
   - claude
-  - opencode
-  - crush
 
 toolchains:
   codex:
@@ -31,12 +29,12 @@ toolchains:
       output_format: "json"
       allowed_tools: ["Edit", "Write", "Bash", "Read"]
   opencode:
-    enabled: true
+    enabled: false
     path: "opencode"
     timeout_minutes: 45
     max_tokens: 100000
   crush:
-    enabled: true
+    enabled: false
     path: "crush"
     timeout_minutes: 45
     max_tokens: 100000
@@ -50,16 +48,16 @@ routing:
     - match: { dk_tool_hint: "claude" }
       use: ["claude"]
     - match: { dk_tool_hint: "opencode" }
-      use: ["opencode"]
+      use: ["codex", "claude"]
     - match: { dk_tool_hint: "crush" }
-      use: ["crush"]
+      use: ["codex", "claude"]
     - match: {}
       use: ["codex"]
   fallbacks:
-    codex: ["claude", "opencode"]
-    claude: ["codex", "opencode"]
+    codex: ["claude"]
+    claude: ["codex"]
     opencode: ["codex", "claude"]
-    crush: ["codex", "opencode"]
+    crush: ["codex", "claude"]
 
 gates:
   # Lightweight, repository-safe quality gate script run inside each workcell.
