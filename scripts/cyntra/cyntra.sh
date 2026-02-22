@@ -7,6 +7,21 @@ config_path="${CYNTRA_CONFIG_PATH:-$repo_root/.cyntra/config.yaml}"
 issues_path="${CYNTRA_ISSUES_PATH:-$repo_root/.beads/issues.jsonl}"
 merge_guards="${CYNTRA_MERGE_GUARDS:-1}"
 uv_refresh_kernel="${CYNTRA_UV_REFRESH_KERNEL:-1}"
+fallback_policy="${CYNTRA_FALLBACK_POLICY:-prompt_stall_no_output=claude}"
+fallback_max_hops="${CYNTRA_FALLBACK_MAX_HOPS:-1}"
+fallback_record_path="${CYNTRA_FALLBACK_RECORD_PATH:-$repo_root/.cyntra/state/fallback-routing.json}"
+
+cleanup_paths=()
+
+cleanup_temp_files() {
+  local path
+  for path in "${cleanup_paths[@]-}"; do
+    [[ -n "$path" ]] || continue
+    rm -f "$path"
+  done
+}
+
+trap cleanup_temp_files EXIT
 
 normalize_merge_conflict_beads() {
   [[ -f "$issues_path" ]] || return 0
@@ -218,6 +233,299 @@ rewrite_issue_arg_to_canonical() {
   echo "[cyntra] remapped --issue $issue_value -> $canonical_issue"
 }
 
+extract_issue_arg() {
+  local i
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      --issue=*)
+        printf '%s\n' "${args[$i]#--issue=}"
+        return 0
+        ;;
+      --issue)
+        if (( i + 1 < ${#args[@]} )); then
+          printf '%s\n' "${args[$((i + 1))]}"
+          return 0
+        fi
+        ;;
+    esac
+  done
+  return 1
+}
+
+read_workcell_field() {
+  local field_name="$1"
+  local workcell_path="$repo_root/.workcell"
+  [[ -f "$workcell_path" ]] || return 1
+  python3 - "$workcell_path" "$field_name" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+field = sys.argv[2]
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+value = data.get(field)
+if value is None:
+    raise SystemExit(1)
+print(str(value))
+PY
+}
+
+resolve_fallback_toolchain() {
+  local failure_class="${1:-}"
+  local normalized_class
+  normalized_class="$(printf '%s' "$failure_class" | tr '[:upper:]' '[:lower:]')"
+  [[ -n "$normalized_class" ]] || return 1
+
+  local old_ifs="$IFS"
+  IFS=',;'
+  read -r -a entries <<<"$fallback_policy"
+  IFS="$old_ifs"
+
+  local entry=""
+  local lhs=""
+  local rhs=""
+  for entry in "${entries[@]}"; do
+    entry="${entry#"${entry%%[![:space:]]*}"}"
+    entry="${entry%"${entry##*[![:space:]]}"}"
+    [[ -n "$entry" ]] || continue
+    if [[ "$entry" == *"="* ]]; then
+      lhs="${entry%%=*}"
+      rhs="${entry#*=}"
+    elif [[ "$entry" == *":"* ]]; then
+      lhs="${entry%%:*}"
+      rhs="${entry#*:}"
+    else
+      continue
+    fi
+    lhs="${lhs#"${lhs%%[![:space:]]*}"}"
+    lhs="${lhs%"${lhs##*[![:space:]]}"}"
+    rhs="${rhs#"${rhs%%[![:space:]]*}"}"
+    rhs="${rhs%"${rhs##*[![:space:]]}"}"
+    [[ -n "$lhs" && -n "$rhs" ]] || continue
+    if [[ "$(printf '%s' "$lhs" | tr '[:upper:]' '[:lower:]')" == "$normalized_class" ]]; then
+      printf '%s\n' "$rhs"
+      return 0
+    fi
+  done
+  return 1
+}
+
+toolchain_in_chain() {
+  local chain="${1:-}"
+  local candidate="${2:-}"
+  [[ -n "$chain" && -n "$candidate" ]] || return 1
+  local normalized_candidate
+  normalized_candidate="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]')"
+  local old_ifs="$IFS"
+  IFS=',:;>'
+  read -r -a parts <<<"$chain"
+  IFS="$old_ifs"
+  local item
+  for item in "${parts[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [[ -n "$item" ]] || continue
+    if [[ "$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]')" == "$normalized_candidate" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+resolve_active_toolchain() {
+  local toolchain="${CYNTRA_PRIMARY_TOOLCHAIN:-}"
+  if [[ -n "$toolchain" ]]; then
+    printf '%s\n' "$toolchain"
+    return 0
+  fi
+
+  local manifest_path="$repo_root/manifest.json"
+  [[ -f "$manifest_path" ]] || return 1
+  python3 - "$manifest_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+toolchain = manifest.get("toolchain")
+if not toolchain:
+    raise SystemExit(1)
+print(str(toolchain))
+PY
+}
+
+apply_issue_toolchain_override() {
+  local issue_id="${1:-}"
+  local fallback_toolchain="${2:-}"
+  [[ -n "$issue_id" && -n "$fallback_toolchain" ]] || return 1
+  [[ -f "$issues_path" ]] || return 1
+
+  local tmp_issues
+  tmp_issues="$(mktemp "${TMPDIR:-/tmp}/cyntra-fallback-beads.XXXXXX.jsonl")"
+
+  python3 - "$issues_path" "$tmp_issues" "$issue_id" "$fallback_toolchain" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+issue_id = str(sys.argv[3])
+fallback_toolchain = str(sys.argv[4])
+
+updated = False
+rows = []
+for line in src.read_text(encoding="utf-8").splitlines():
+    raw = line.strip()
+    if not raw:
+        continue
+    issue = json.loads(raw)
+    if str(issue.get("id")) == issue_id:
+        issue["dk_tool_hint"] = fallback_toolchain
+        updated = True
+    rows.append(issue)
+
+if not updated:
+    raise SystemExit(2)
+
+dst.write_text(
+    "".join(json.dumps(issue, ensure_ascii=False) + "\n" for issue in rows),
+    encoding="utf-8",
+)
+PY
+  local override_status=$?
+  if (( override_status != 0 )); then
+    rm -f "$tmp_issues"
+    return 1
+  fi
+
+  cleanup_paths+=("$tmp_issues")
+  export CYNTRA_BEADS_PATH="$tmp_issues"
+  return 0
+}
+
+write_fallback_provenance() {
+  local issue_id="${1:-}"
+  local source_toolchain="${2:-}"
+  local fallback_toolchain="${3:-}"
+  local failure_class="${4:-}"
+  local workcell_id="${5:-}"
+  local proof_path="${6:-}"
+
+  mkdir -p "$(dirname "$fallback_record_path")"
+  python3 - "$fallback_record_path" <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+path = Path(__import__("sys").argv[1])
+record = {
+    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    "issue_id": os.environ.get("CYNTRA_FALLBACK_ISSUE_ID"),
+    "workcell_id": os.environ.get("CYNTRA_FALLBACK_WORKCELL_ID"),
+    "failure_class": os.environ.get("CYNTRA_FALLBACK_CLASS"),
+    "source_toolchain": os.environ.get("CYNTRA_FALLBACK_SOURCE_TOOLCHAIN"),
+    "target_toolchain": os.environ.get("CYNTRA_FALLBACK_TARGET_TOOLCHAIN"),
+    "proof_path": os.environ.get("CYNTRA_FALLBACK_PROOF_PATH"),
+}
+path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+configure_fallback_routing_if_requested() {
+  [[ "${args[0]:-}" == "run" ]] || return 0
+  local failure_class="${CYNTRA_FAILURE_CLASS:-}"
+  [[ -n "$failure_class" ]] || return 0
+
+  local fallback_toolchain=""
+  if ! fallback_toolchain="$(resolve_fallback_toolchain "$failure_class")"; then
+    echo "[cyntra] no fallback route configured for failure class '$failure_class'"
+    return 0
+  fi
+
+  local source_toolchain=""
+  source_toolchain="$(resolve_active_toolchain || true)"
+  local source_normalized
+  source_normalized="$(printf '%s' "$source_toolchain" | tr '[:upper:]' '[:lower:]')"
+  local fallback_normalized
+  fallback_normalized="$(printf '%s' "$fallback_toolchain" | tr '[:upper:]' '[:lower:]')"
+  if [[ -n "$source_normalized" && "$source_normalized" == "$fallback_normalized" ]]; then
+    echo "[cyntra] fallback route resolved to same toolchain '$fallback_toolchain'; skipping"
+    return 0
+  fi
+
+  local fallback_chain="${CYNTRA_FALLBACK_CHAIN:-}"
+  if [[ -n "$fallback_chain" ]] && toolchain_in_chain "$fallback_chain" "$fallback_toolchain"; then
+    echo "[cyntra] fallback loop guard: '$fallback_toolchain' already in chain '$fallback_chain'; skipping"
+    return 0
+  fi
+
+  local fallback_hops=0
+  if [[ -n "$fallback_chain" ]]; then
+    fallback_hops="$(python3 - "$fallback_chain" <<'PY'
+import sys
+parts = [p.strip() for p in sys.argv[1].replace(">", ",").replace(";", ",").split(",")]
+print(sum(1 for p in parts if p))
+PY
+)"
+  fi
+  if [[ "$fallback_max_hops" =~ ^[0-9]+$ ]] && (( fallback_hops >= fallback_max_hops )); then
+    echo "[cyntra] fallback max hops reached ($fallback_hops/$fallback_max_hops); skipping"
+    return 0
+  fi
+
+  local issue_id=""
+  issue_id="$(extract_issue_arg || true)"
+  if [[ -z "$issue_id" ]]; then
+    issue_id="$(read_workcell_field issue_id || true)"
+  fi
+  local workcell_id=""
+  workcell_id="$(read_workcell_field id || true)"
+  local proof_path="${CYNTRA_FALLBACK_PROOF_PATH:-}"
+
+  if [[ -n "$issue_id" ]]; then
+    if ! apply_issue_toolchain_override "$issue_id" "$fallback_toolchain"; then
+      echo "[cyntra] failed to apply fallback toolchain override for issue '$issue_id'; continuing without override"
+      return 0
+    fi
+  fi
+
+  if [[ -n "$fallback_chain" ]]; then
+    export CYNTRA_FALLBACK_CHAIN="${fallback_chain},${fallback_toolchain}"
+  elif [[ -n "$source_toolchain" ]]; then
+    export CYNTRA_FALLBACK_CHAIN="${source_toolchain},${fallback_toolchain}"
+  else
+    export CYNTRA_FALLBACK_CHAIN="${fallback_toolchain}"
+  fi
+  export CYNTRA_FALLBACK_CLASS="$failure_class"
+  export CYNTRA_FALLBACK_SOURCE_TOOLCHAIN="$source_toolchain"
+  export CYNTRA_FALLBACK_TARGET_TOOLCHAIN="$fallback_toolchain"
+  export CYNTRA_FALLBACK_ISSUE_ID="$issue_id"
+  export CYNTRA_FALLBACK_WORKCELL_ID="$workcell_id"
+  export CYNTRA_FALLBACK_PROOF_PATH="$proof_path"
+  export CYNTRA_FALLBACK_APPLIED=1
+
+  write_fallback_provenance "$issue_id" "$source_toolchain" "$fallback_toolchain" "$failure_class" "$workcell_id" "$proof_path"
+  echo "[cyntra] fallback routing: class='$failure_class' source='${source_toolchain:-unknown}' target='$fallback_toolchain' issue='${issue_id:-unknown}'"
+}
+
+invoke_kernel() {
+  local uv_args=()
+  if [[ "$uv_refresh_kernel" == "1" ]]; then
+    uv_args+=(--refresh-package cyntra)
+  fi
+  uv tool run "${uv_args[@]}" --from "$kernel_path" cyntra --config "$config_path" "${args[@]}"
+}
+
 args=("$@")
 
 if [[ "${args[0]:-}" == "repair-merge-conflicts" ]]; then
@@ -241,9 +549,6 @@ if [[ "$merge_guards" == "1" && "${args[0]:-}" == "run" ]]; then
   normalize_merge_conflict_beads
 fi
 
-uv_args=()
-if [[ "$uv_refresh_kernel" == "1" ]]; then
-  uv_args+=(--refresh-package cyntra)
-fi
+configure_fallback_routing_if_requested
 
-exec uv tool run "${uv_args[@]}" --from "$kernel_path" cyntra --config "$config_path" "${args[@]}"
+invoke_kernel
