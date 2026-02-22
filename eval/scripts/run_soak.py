@@ -342,6 +342,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Max metric stddev before flagging instability (default: 0.01)",
     )
     parser.add_argument(
+        "--deadlock-threshold-seconds",
+        type=float,
+        default=30.0,
+        help="Elapsed-seconds threshold used to classify an iteration as a deadlock/stall (default: 30.0)",
+    )
+    parser.add_argument(
+        "--max-retries-on-error",
+        type=int,
+        default=0,
+        help="Retry attempts after iteration errors; retries are counted as fallback usage (default: 0)",
+    )
+    parser.add_argument(
         "--disable-non-toy-slice",
         action="store_true",
         help="Disable non-toy triage benchmark slice execution",
@@ -390,6 +402,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.max_retries_on_error < 0:
+        print("[soak] ERROR: --max-retries-on-error must be >= 0", file=sys.stderr)
+        return 2
+    if args.deadlock_threshold_seconds <= 0:
+        print("[soak] ERROR: --deadlock-threshold-seconds must be > 0", file=sys.stderr)
+        return 2
+
     # Materialize datasets
     try:
         datasets.materialize_datasets(args.lockfile, args.data_root)
@@ -429,35 +448,82 @@ def main(argv: list[str] | None = None) -> int:
 
     for i in range(iterations):
         seed = i
-        metrics, elapsed = _run_one_iteration(
-            args.data_root,
-            seed,
-            non_toy_benchmark=non_toy_benchmark,
-            stock_thresholds=stock_thresholds,
-            current_thresholds=current_thresholds,
-        )
-        timing_values.append(elapsed)
+        metrics: dict = {}
+        elapsed = 0.0
+        completed = False
+        deadlock = False
+        fallback_applied = False
+        iteration_error: dict[str, str] | None = None
+
+        for attempt in range(args.max_retries_on_error + 1):
+            attempt_started = time.monotonic()
+            try:
+                metrics, elapsed = _run_one_iteration(
+                    args.data_root,
+                    seed,
+                    non_toy_benchmark=non_toy_benchmark,
+                    stock_thresholds=stock_thresholds,
+                    current_thresholds=current_thresholds,
+                )
+                completed = True
+                deadlock = elapsed > args.deadlock_threshold_seconds
+                iteration_error = None
+                break
+            except Exception as exc:
+                elapsed = time.monotonic() - attempt_started
+                iteration_error = {
+                    "type": exc.__class__.__name__,
+                    "message": str(exc),
+                }
+                if attempt < args.max_retries_on_error:
+                    fallback_applied = True
+                    print(
+                        f"[soak]   iter {i+1}/{iterations}: attempt {attempt+1} failed "
+                        f"({exc.__class__.__name__}); retrying"
+                    )
+                    continue
+
+        if completed:
+            timing_values.append(elapsed)
+
+        reliability_record = {
+            "completed": completed,
+            "deadlock": deadlock,
+            "fallback_applied": fallback_applied,
+            "error": iteration_error is not None,
+        }
+        if iteration_error is not None:
+            reliability_record["error_type"] = iteration_error["type"]
+            reliability_record["error_message"] = iteration_error["message"]
 
         iteration_record = {
             "iteration": i,
             "seed": seed,
             "elapsed_seconds": round(elapsed, 6),
             "metrics": metrics,
+            "reliability": reliability_record,
         }
         all_iterations.append(iteration_record)
 
         # Accumulate metric values for stability analysis
-        for area, area_metrics in metrics.items():
-            if area not in metric_series:
-                metric_series[area] = {}
-            for metric_name, value in area_metrics.items():
-                if not isinstance(value, (int, float)):
-                    continue
-                if metric_name not in metric_series[area]:
-                    metric_series[area][metric_name] = []
-                metric_series[area][metric_name].append(float(value))
+        if completed:
+            for area, area_metrics in metrics.items():
+                if area not in metric_series:
+                    metric_series[area] = {}
+                for metric_name, value in area_metrics.items():
+                    if not isinstance(value, (int, float)):
+                        continue
+                    if metric_name not in metric_series[area]:
+                        metric_series[area][metric_name] = []
+                    metric_series[area][metric_name].append(float(value))
 
         status = f"iter {i+1}/{iterations}: {elapsed*1000:.1f}ms"
+        if deadlock:
+            status += " [DEADLOCK]"
+        if fallback_applied:
+            status += " [FALLBACK]"
+        if iteration_error is not None:
+            status += f" [ERROR: {iteration_error['type']}]"
         print(f"[soak]   {status}")
 
     # Compute performance statistics
@@ -466,6 +532,48 @@ def main(argv: list[str] | None = None) -> int:
           f"p50={perf_stats['p50']*1000:.1f}ms "
           f"p95={perf_stats['p95']*1000:.1f}ms "
           f"p99={perf_stats['p99']*1000:.1f}ms")
+
+    # Compute reliability counters/SLO metrics
+    completed_iterations = sum(
+        1 for iteration in all_iterations if bool((iteration.get("reliability") or {}).get("completed"))
+    )
+    fallback_iterations = sum(
+        1 for iteration in all_iterations if bool((iteration.get("reliability") or {}).get("fallback_applied"))
+    )
+    deadlock_iterations = sum(
+        1 for iteration in all_iterations if bool((iteration.get("reliability") or {}).get("deadlock"))
+    )
+    error_iterations = sum(
+        1 for iteration in all_iterations if bool((iteration.get("reliability") or {}).get("error"))
+    )
+    successful_completions = sum(
+        1
+        for iteration in all_iterations
+        if bool((iteration.get("reliability") or {}).get("completed"))
+        and not bool((iteration.get("reliability") or {}).get("deadlock"))
+        and not bool((iteration.get("reliability") or {}).get("error"))
+    )
+    denominator = iterations if iterations > 0 else 1
+    reliability_metrics = {
+        "total_iterations": iterations,
+        "completed_iterations": completed_iterations,
+        "successful_completions": successful_completions,
+        "deadlock_iterations": deadlock_iterations,
+        "fallback_iterations": fallback_iterations,
+        "error_iterations": error_iterations,
+        "deadlock_rate": round(deadlock_iterations / denominator, 6),
+        "fallback_rate": round(fallback_iterations / denominator, 6),
+        "error_rate": round(error_iterations / denominator, 6),
+        "successful_completion_slo": round(successful_completions / denominator, 6),
+        "deadlock_threshold_seconds": args.deadlock_threshold_seconds,
+    }
+    print(
+        "\n[soak] Reliability:"
+        f" deadlock_rate={reliability_metrics['deadlock_rate']:.6f}"
+        f" fallback_rate={reliability_metrics['fallback_rate']:.6f}"
+        f" error_rate={reliability_metrics['error_rate']:.6f}"
+        f" successful_completion_slo={reliability_metrics['successful_completion_slo']:.6f}"
+    )
 
     # Compute stability analysis
     stability_results: dict[str, dict[str, dict]] = {}
@@ -553,7 +661,9 @@ def main(argv: list[str] | None = None) -> int:
     # Overall verdict
     all_stable = len(stability_issues) == 0
     all_passing = len(regression_issues) == 0
-    overall_passed = all_stable and all_passing
+    completion_passed = error_iterations == 0
+    deadlock_passed = deadlock_iterations == 0
+    overall_passed = all_stable and all_passing and completion_passed and deadlock_passed
 
     # Build report
     report = {
@@ -568,7 +678,10 @@ def main(argv: list[str] | None = None) -> int:
             "passed": overall_passed,
             "stability_passed": all_stable,
             "regression_passed": all_passing,
+            "completion_passed": completion_passed,
+            "deadlock_passed": deadlock_passed,
         },
+        "reliability": reliability_metrics,
         "performance": {
             "timing_seconds": perf_stats,
             "timing_ms": {
@@ -602,6 +715,13 @@ def main(argv: list[str] | None = None) -> int:
         report["stability_issues"] = stability_issues
     if regression_issues:
         report["regression_issues"] = regression_issues
+    if deadlock_iterations:
+        report["deadlock_issues"] = [
+            f"deadlock iterations: {deadlock_iterations}/{iterations} exceeded threshold "
+            f"{args.deadlock_threshold_seconds:.3f}s"
+        ]
+    if error_iterations:
+        report["completion_issues"] = [f"error iterations: {error_iterations}/{iterations}"]
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -610,6 +730,10 @@ def main(argv: list[str] | None = None) -> int:
     if overall_passed:
         print(f"[soak] PASSED (stable={all_stable}, regression={all_passing})")
     else:
+        if deadlock_iterations:
+            print(f"[soak] DEADLOCK ISSUES: {deadlock_iterations}/{iterations} iterations")
+        if error_iterations:
+            print(f"[soak] COMPLETION ISSUES: {error_iterations}/{iterations} iterations with errors")
         if stability_issues:
             print(f"[soak] STABILITY ISSUES ({len(stability_issues)}):")
             for issue in stability_issues:

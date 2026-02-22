@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "metrics": {
+    "deadlock_rate": {
+      "operator": "<=",
+      "threshold": 0.0,
+      "severity": "critical",
+      "description": "No soak iteration may exceed the deadlock/stall threshold."
+    },
+    "fallback_rate": {
+      "operator": "<=",
+      "threshold": 0.05,
+      "severity": "warning",
+      "description": "Fallback retries must remain within reliability budget."
+    },
+    "error_rate": {
+      "operator": "<=",
+      "threshold": 0.0,
+      "severity": "critical",
+      "description": "No iteration errors are allowed in soak runs."
+    },
+    "successful_completion_slo": {
+      "operator": ">=",
+      "threshold": 0.99,
+      "severity": "critical",
+      "description": "Successful completion SLO must stay at or above 99%."
+    }
+  }
+}
