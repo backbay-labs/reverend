@@ -13,6 +13,46 @@ for arg in "$@"; do
   esac
 done
 
+module_coverage_generic="not-run"
+module_coverage_reverend="not-run"
+module_coverage_softwaremodeling="not-run"
+module_coverage_base="not-run"
+
+set_module_coverage() {
+  local module="$1"
+  local status="$2"
+  local reason="${3:-}"
+  local value="$status"
+  if [[ -n "$reason" ]]; then
+    value="${value} (${reason})"
+  fi
+
+  case "$module" in
+    Generic)
+      module_coverage_generic="$value"
+      ;;
+    Reverend)
+      module_coverage_reverend="$value"
+      ;;
+    SoftwareModeling)
+      module_coverage_softwaremodeling="$value"
+      ;;
+    Base)
+      module_coverage_base="$value"
+      ;;
+    *)
+      echo "[gates] WARN: unknown module coverage key '${module}'"
+      ;;
+  esac
+
+  echo "[gates] MODULE_COVERAGE: ${module}=${value}"
+}
+
+join_by_comma() {
+  local IFS=","
+  echo "$*"
+}
+
 check_manifest_context() {
   python3 - <<'PY'
 import json
@@ -517,7 +557,7 @@ has_java_scope_changes() {
 run_security_compile_regression() {
   if ! has_java_scope_changes; then
     echo "[gates] security compile gate skipped (no Java/Ghidra scope changes)"
-    echo "[gates] MODULE_COVERAGE: Generic=skipped (no scope changes)"
+    set_module_coverage "Generic" "skipped" "no scope changes"
     return 0
   fi
 
@@ -540,13 +580,13 @@ run_security_compile_regression() {
   python3 scripts/cyntra/check-junit-failures.py \
     --results-dir Ghidra/Framework/Generic/build/test-results/test
   echo "[gates] Generic security compile/test regression OK"
-  echo "[gates] MODULE_COVERAGE: Generic=executed"
+  set_module_coverage "Generic" "executed"
 }
 
 run_reverend_compile_regression() {
   if ! has_java_scope_changes; then
     echo "[gates] Reverend compile gate skipped (no Java/Ghidra scope changes)"
-    echo "[gates] MODULE_COVERAGE: Reverend=skipped (no scope changes)"
+    set_module_coverage "Reverend" "skipped" "no scope changes"
     return 0
   fi
 
@@ -569,13 +609,14 @@ run_reverend_compile_regression() {
   python3 scripts/cyntra/check-junit-failures.py \
     --results-dir Ghidra/Features/Reverend/build/test-results/test
   echo "[gates] Reverend compile/test regression OK"
-  echo "[gates] MODULE_COVERAGE: Reverend=executed"
+  set_module_coverage "Reverend" "executed"
 }
 
 run_frontier_compile_regression() {
   if ! has_java_scope_changes; then
     echo "[gates] frontier compile gate skipped (no Java/Ghidra scope changes)"
-    echo "[gates] MODULE_COVERAGE: SoftwareModeling=skipped,Base=skipped (no scope changes)"
+    set_module_coverage "SoftwareModeling" "skipped" "no scope changes"
+    set_module_coverage "Base" "skipped" "no scope changes"
     return 0
   fi
 
@@ -595,7 +636,8 @@ run_frontier_compile_regression() {
   echo "[gates] compiling frontier modules: SoftwareModeling, Base (blocking)"
   "${gradle_cmd[@]}" --no-daemon :SoftwareModeling:compileJava :Base:compileJava
   echo "[gates] frontier module compile OK"
-  echo "[gates] MODULE_COVERAGE: SoftwareModeling=executed,Base=executed"
+  set_module_coverage "SoftwareModeling" "executed"
+  set_module_coverage "Base" "executed"
 }
 
 run_security_evidence_integrity() {
@@ -743,9 +785,55 @@ run_reliability_soak_slo() {
 }
 
 print_module_coverage_summary() {
+  local -a executed_modules=()
+  local -a skipped_modules=()
+  local -a unresolved_modules=()
+  local module value
+
+  for module in "Generic" "Reverend" "SoftwareModeling" "Base"; do
+    case "$module" in
+      Generic)
+        value="$module_coverage_generic"
+        ;;
+      Reverend)
+        value="$module_coverage_reverend"
+        ;;
+      SoftwareModeling)
+        value="$module_coverage_softwaremodeling"
+        ;;
+      Base)
+        value="$module_coverage_base"
+        ;;
+    esac
+
+    case "$value" in
+      executed*)
+        executed_modules+=("$module")
+        ;;
+      skipped*)
+        skipped_modules+=("$module")
+        ;;
+      *)
+        unresolved_modules+=("${module}=${value}")
+        ;;
+    esac
+  done
+
   echo "[gates] ====== MODULE COVERAGE SUMMARY ======"
-  echo "[gates] Executed: Generic, Reverend, SoftwareModeling, Base (when Java scope changes detected)"
-  echo "[gates] Skipped: (modules without scope changes are automatically skipped)"
+  if [[ ${#executed_modules[@]} -gt 0 ]]; then
+    echo "[gates] Executed: $(join_by_comma "${executed_modules[@]}")"
+  else
+    echo "[gates] Executed: none"
+  fi
+  if [[ ${#skipped_modules[@]} -gt 0 ]]; then
+    echo "[gates] Skipped: $(join_by_comma "${skipped_modules[@]}")"
+  else
+    echo "[gates] Skipped: none"
+  fi
+  if [[ ${#unresolved_modules[@]} -gt 0 ]]; then
+    echo "[gates] Unresolved: $(join_by_comma "${unresolved_modules[@]}")"
+  fi
+  echo "[gates] Detailed: Generic=${module_coverage_generic}; Reverend=${module_coverage_reverend}; SoftwareModeling=${module_coverage_softwaremodeling}; Base=${module_coverage_base}"
   echo "[gates] ======================================="
 }
 

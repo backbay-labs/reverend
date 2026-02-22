@@ -49,6 +49,7 @@ Dispatch waves:
 ## Required Verification Commands
 - `./gradlew --no-daemon :Reverend:compileJava :Reverend:test --tests "ghidra.reverend.*"`
 - `./gradlew --no-daemon :Generic:compileJava :Generic:test --tests "ghidra.security.*"`
+- `./gradlew --no-daemon :SoftwareModeling:compileJava :Base:compileJava`
 - `bash scripts/cyntra/gates.sh --mode=all`
 - `scripts/cyntra/validate-roadmap-completion.sh`
 - `scripts/cyntra/preflight.sh`
