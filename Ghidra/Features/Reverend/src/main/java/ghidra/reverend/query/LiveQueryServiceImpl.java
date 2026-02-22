@@ -30,6 +30,7 @@ import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.program.util.ProgramEvent;
 import ghidra.program.util.ProgramChangeRecord;
 import ghidra.reverend.api.v1.QueryService;
+import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
 /**
@@ -46,6 +47,15 @@ import ghidra.util.task.TaskMonitor;
  * @since 1.0
  */
 public class LiveQueryServiceImpl implements QueryService, DomainObjectListener, AutoCloseable {
+
+	private static final String CONFIG_PREFIX = "ghidra.reverend.semantic.";
+	private static final boolean SYMBOLIC_STAGE_ENABLED = getBooleanConfig("symbolic.enabled", true);
+	private static final boolean LEXICAL_STAGE_ENABLED = getBooleanConfig("lexical.enabled", true);
+	private static final boolean EMBEDDING_STAGE_ENABLED = getBooleanConfig("embedding.enabled", true);
+	private static final double LEXICAL_MIN_SCORE = getDoubleConfig("lexical.minScore", 0.05d);
+	private static final double EMBEDDING_MIN_SCORE = getDoubleConfig("embedding.minScore", 0.10d);
+	private static final int EMBEDDING_STAGE_MULTIPLIER =
+		Math.max(1, getIntConfig("embedding.candidateMultiplier", 3));
 
 	private final QueryCacheManager cacheManager;
 	private final DecompilerContextProvider decompilerProvider;
@@ -250,32 +260,102 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			// Normalize query
 			String normalizedQuery = query.toLowerCase().trim();
 			String[] queryTerms = normalizedQuery.split("\\s+");
+			SymbolicQueryConstraints symbolicConstraints = SymbolicQueryConstraints.parse(normalizedQuery);
 
-			// Search functions by name, comments, and decompiled output
-			List<QueryResult> results = new ArrayList<>();
+			// Stage 1: symbolic candidate generation
+			List<Function> symbolicCandidates = new ArrayList<>();
 			FunctionIterator functions = program.getFunctionManager().getFunctions(
 				scope != null ? scope : program.getMemory(), true);
-
-			int processed = 0;
+			int symbolicInputCount = 0;
 			for (Function func : functions) {
 				if (monitor != null && monitor.isCancelled()) {
 					break;
 				}
-
-				double score = computeSemanticScore(program, func, queryTerms, monitor);
-				if (score > 0.1) { // Minimum relevance threshold
-					results.add(new QueryResultImpl(
-						func.getEntryPoint(),
-						score,
-						buildSemanticSummary(func, query),
-						null
-					));
+				symbolicInputCount++;
+				if (!SYMBOLIC_STAGE_ENABLED || symbolicConstraints.matches(func)) {
+					symbolicCandidates.add(func);
 				}
+			}
+			symbolicCandidates.sort(Comparator
+				.comparing((Function functionCandidate) -> functionCandidate.getEntryPoint().toString())
+				.thenComparing(Function::getName));
+			logCandidateStageMetrics(operationId, normalizedQuery, "symbolic",
+				symbolicInputCount, symbolicCandidates.size(),
+				Map.of(
+					"enabled", SYMBOLIC_STAGE_ENABLED,
+					"constraintCount", symbolicConstraints.getConstraintCount()
+				));
 
-				processed++;
-				if (monitor != null) {
-					monitor.setProgress(processed % 100);
+			// Stage 2: lexical filtering
+			Map<Function, Double> lexicalScores = new HashMap<>();
+			List<Function> lexicalCandidates = new ArrayList<>();
+			for (Function candidate : symbolicCandidates) {
+				double lexicalScore = computeLexicalScore(candidate, queryTerms);
+				lexicalScores.put(candidate, lexicalScore);
+				if (!LEXICAL_STAGE_ENABLED || lexicalScore >= LEXICAL_MIN_SCORE) {
+					lexicalCandidates.add(candidate);
 				}
+			}
+			if (LEXICAL_STAGE_ENABLED && lexicalCandidates.isEmpty()) {
+				lexicalCandidates.addAll(symbolicCandidates);
+			}
+			logCandidateStageMetrics(operationId, normalizedQuery, "lexical",
+				symbolicCandidates.size(), lexicalCandidates.size(),
+				Map.of(
+					"enabled", LEXICAL_STAGE_ENABLED,
+					"minScore", LEXICAL_MIN_SCORE
+				));
+
+			// Stage 3: embedding candidate scoring with fallback when backend is unavailable
+			boolean embeddingBackendAvailable = EMBEDDING_STAGE_ENABLED && isEmbeddingBackendAvailable();
+			List<FunctionScore> scoredCandidates = new ArrayList<>();
+			int embeddingWindow = Math.min(
+				Math.max(maxResults, maxResults * EMBEDDING_STAGE_MULTIPLIER),
+				lexicalCandidates.size());
+			for (Function candidate : lexicalCandidates) {
+				double lexicalScore = lexicalScores.getOrDefault(candidate, 0.0);
+				double finalScore;
+				if (embeddingBackendAvailable) {
+					double embeddingScore = computeEmbeddingScore(program, candidate, queryTerms, monitor);
+					finalScore = (0.65 * embeddingScore) + (0.35 * lexicalScore);
+					if (finalScore < EMBEDDING_MIN_SCORE) {
+						continue;
+					}
+				}
+				else {
+					finalScore = lexicalScore;
+				}
+				scoredCandidates.add(new FunctionScore(candidate, finalScore));
+			}
+			scoredCandidates.sort((a, b) -> {
+				int scoreCmp = Double.compare(b.score, a.score);
+				if (scoreCmp != 0) {
+					return scoreCmp;
+				}
+				return a.function.getEntryPoint().toString().compareTo(b.function.getEntryPoint().toString());
+			});
+			if (scoredCandidates.size() > embeddingWindow) {
+				scoredCandidates = new ArrayList<>(scoredCandidates.subList(0, embeddingWindow));
+			}
+			logCandidateStageMetrics(operationId, normalizedQuery, "embedding",
+				lexicalCandidates.size(), scoredCandidates.size(),
+				Map.of(
+					"enabled", EMBEDDING_STAGE_ENABLED,
+					"backendAvailable", embeddingBackendAvailable,
+					"fallbackApplied", !embeddingBackendAvailable,
+					"minScore", EMBEDDING_MIN_SCORE,
+					"candidateMultiplier", EMBEDDING_STAGE_MULTIPLIER
+				));
+
+			// Build result set
+			List<QueryResult> results = new ArrayList<>();
+			for (FunctionScore scored : scoredCandidates) {
+				results.add(new QueryResultImpl(
+					scored.function.getEntryPoint(),
+					scored.score,
+					buildSemanticSummary(scored.function, query),
+					null
+				));
 			}
 
 			// Sort by score descending
@@ -623,6 +703,102 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			function.getName(), function.getParameterCount());
 	}
 
+	private double computeLexicalScore(Function function, String[] queryTerms) {
+		if (queryTerms.length == 0) {
+			return 0.0;
+		}
+		double score = 0.0;
+		String functionName = function.getName().toLowerCase();
+		String comment = function.getComment() != null ? function.getComment().toLowerCase() : "";
+		for (String term : queryTerms) {
+			if (functionName.contains(term)) {
+				score += 0.6;
+			}
+			if (!comment.isEmpty() && comment.contains(term)) {
+				score += 0.4;
+			}
+		}
+		return Math.min(1.0, score / queryTerms.length);
+	}
+
+	private double computeEmbeddingScore(Program program, Function function,
+			String[] queryTerms, TaskMonitor monitor) {
+		if (queryTerms.length == 0) {
+			return 0.0;
+		}
+		try {
+			DecompileResults results = decompilerProvider.decompile(program, function, monitor);
+			if (results == null || !results.decompileCompleted() || results.getDecompiledFunction() == null) {
+				return 0.0;
+			}
+			String decompiledCode = results.getDecompiledFunction().getC().toLowerCase();
+			int matches = 0;
+			for (String term : queryTerms) {
+				if (decompiledCode.contains(term)) {
+					matches++;
+				}
+			}
+			return Math.min(1.0, matches / (double) queryTerms.length);
+		}
+		catch (Exception e) {
+			return 0.0;
+		}
+	}
+
+	private boolean isEmbeddingBackendAvailable() {
+		String backend = System.getProperty(CONFIG_PREFIX + "embedding.backend", "local");
+		if (backend == null) {
+			return true;
+		}
+		String normalized = backend.trim().toLowerCase(Locale.ROOT);
+		return !(normalized.isEmpty() || "none".equals(normalized) || "unavailable".equals(normalized));
+	}
+
+	private void logCandidateStageMetrics(String operationId, String query, String stage,
+			int inputCount, int outputCount, Map<String, Object> details) {
+		int contributionCount = Math.max(0, inputCount - outputCount);
+		Msg.info(this, String.format(
+			"semantic-search-stage op=%s query=\"%s\" stage=%s input=%d output=%d contribution=%d details=%s",
+			operationId,
+			query,
+			stage,
+			inputCount,
+			outputCount,
+			contributionCount,
+			details
+		));
+	}
+
+	private static boolean getBooleanConfig(String suffix, boolean defaultValue) {
+		return Boolean.parseBoolean(System.getProperty(CONFIG_PREFIX + suffix, String.valueOf(defaultValue)));
+	}
+
+	private static double getDoubleConfig(String suffix, double defaultValue) {
+		String raw = System.getProperty(CONFIG_PREFIX + suffix);
+		if (raw == null) {
+			return defaultValue;
+		}
+		try {
+			return Double.parseDouble(raw);
+		}
+		catch (NumberFormatException e) {
+			return defaultValue;
+		}
+	}
+
+	private static int getIntConfig(String suffix, int defaultValue) {
+		String raw = System.getProperty(CONFIG_PREFIX + suffix);
+		if (raw == null) {
+			return defaultValue;
+		}
+		try {
+			return Integer.parseInt(raw);
+		}
+		catch (NumberFormatException e) {
+			return defaultValue;
+		}
+	}
+
 	private void invalidateCodeRecord(Program program, ghidra.framework.model.DomainObjectChangeRecord record) {
 		if (record instanceof ProgramChangeRecord changeRecord &&
 			changeRecord.getStart() != null && changeRecord.getEnd() != null) {
@@ -664,6 +840,114 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		ProgramBindingState(Program program) {
 			this.program = program;
 			this.bindTime = System.currentTimeMillis();
+		}
+	}
+
+	private static class FunctionScore {
+		private final Function function;
+		private final double score;
+
+		FunctionScore(Function function, double score) {
+			this.function = function;
+			this.score = score;
+		}
+	}
+
+	private static class SymbolicQueryConstraints {
+		private final Optional<String> nameContains;
+		private final Optional<String> commentContains;
+		private final OptionalInt minParams;
+		private final OptionalInt maxParams;
+
+		private SymbolicQueryConstraints(Optional<String> nameContains, Optional<String> commentContains,
+				OptionalInt minParams, OptionalInt maxParams) {
+			this.nameContains = nameContains;
+			this.commentContains = commentContains;
+			this.minParams = minParams;
+			this.maxParams = maxParams;
+		}
+
+		static SymbolicQueryConstraints parse(String normalizedQuery) {
+			Optional<String> nameContains = Optional.empty();
+			Optional<String> commentContains = Optional.empty();
+			OptionalInt minParams = OptionalInt.empty();
+			OptionalInt maxParams = OptionalInt.empty();
+			String[] tokens = normalizedQuery.split("\\s+");
+			for (String token : tokens) {
+				String[] kv = token.split(":", 2);
+				if (kv.length != 2) {
+					continue;
+				}
+				String key = kv[0].trim();
+				String value = kv[1].trim();
+				if (value.isEmpty()) {
+					continue;
+				}
+				switch (key) {
+					case "name":
+						nameContains = Optional.of(value);
+						break;
+					case "comment":
+						commentContains = Optional.of(value);
+						break;
+					case "minparams":
+						try {
+							minParams = OptionalInt.of(Integer.parseInt(value));
+						}
+						catch (NumberFormatException e) {
+							// Ignore malformed symbolic constraint.
+						}
+						break;
+					case "maxparams":
+						try {
+							maxParams = OptionalInt.of(Integer.parseInt(value));
+						}
+						catch (NumberFormatException e) {
+							// Ignore malformed symbolic constraint.
+						}
+						break;
+					default:
+						break;
+				}
+			}
+			return new SymbolicQueryConstraints(
+				nameContains, commentContains, minParams, maxParams);
+		}
+
+		boolean matches(Function function) {
+			String name = function.getName().toLowerCase();
+			String comment = function.getComment() != null ? function.getComment().toLowerCase() : "";
+			if (nameContains.isPresent() && !name.contains(nameContains.get())) {
+				return false;
+			}
+			if (commentContains.isPresent() && !comment.contains(commentContains.get())) {
+				return false;
+			}
+			int paramCount = function.getParameterCount();
+			if (minParams.isPresent() && paramCount < minParams.getAsInt()) {
+				return false;
+			}
+			if (maxParams.isPresent() && paramCount > maxParams.getAsInt()) {
+				return false;
+			}
+			return true;
+		}
+
+		int getConstraintCount() {
+			int count = 0;
+			if (nameContains.isPresent()) {
+				count++;
+			}
+			if (commentContains.isPresent()) {
+				count++;
+			}
+			if (minParams.isPresent()) {
+				count++;
+			}
+			if (maxParams.isPresent()) {
+				count++;
+			}
+			return count;
 		}
 	}
 
