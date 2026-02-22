@@ -690,6 +690,58 @@ run_eval_regression() {
   echo "[gates] eval regression OK (artifacts: $metrics_out, $regression_out)"
 }
 
+run_reliability_soak_slo() {
+  local soak_runner="eval/run_soak.sh"
+  local slo_reporter="eval/scripts/reliability_slo_report.py"
+  local thresholds_path="eval/config/reliability_slo_thresholds.json"
+  local eval_gate_out="${artifact_root}/eval"
+  local soak_out="${eval_gate_out}/soak-report.json"
+  local slo_json="${eval_gate_out}/reliability-slo-report.json"
+  local slo_md="${eval_gate_out}/reliability-slo-report.md"
+  local soak_iterations="${CYNTRA_RELIABILITY_SOAK_ITERATIONS:-3}"
+  local deadlock_threshold_seconds="${CYNTRA_RELIABILITY_DEADLOCK_THRESHOLD_SECONDS:-30}"
+  local soak_status=0
+
+  if [[ ! "$soak_iterations" =~ ^[0-9]+$ ]] || (( soak_iterations <= 0 )); then
+    echo "[gates] ERROR: CYNTRA_RELIABILITY_SOAK_ITERATIONS must be a positive integer (got '$soak_iterations')" >&2
+    exit 1
+  fi
+  if [[ ! -f "$soak_runner" ]]; then
+    echo "[gates] ERROR: missing soak runner: $soak_runner" >&2
+    exit 1
+  fi
+  if [[ ! -f "$slo_reporter" ]]; then
+    echo "[gates] ERROR: missing reliability SLO reporter: $slo_reporter" >&2
+    exit 1
+  fi
+  if [[ ! -f "$thresholds_path" ]]; then
+    echo "[gates] ERROR: missing reliability threshold config: $thresholds_path" >&2
+    exit 1
+  fi
+
+  mkdir -p "$eval_gate_out"
+  if ! bash "$soak_runner" \
+    --iterations "$soak_iterations" \
+    --deadlock-threshold-seconds "$deadlock_threshold_seconds" \
+    --output "$soak_out"; then
+    soak_status=$?
+  fi
+
+  python3 "$slo_reporter" \
+    --soak-report "$soak_out" \
+    --thresholds "$thresholds_path" \
+    --output-json "$slo_json" \
+    --output-md "$slo_md" \
+    --fail-on-breach
+
+  if (( soak_status != 0 )); then
+    echo "[gates] ERROR: soak runner failed with exit code ${soak_status}" >&2
+    exit "$soak_status"
+  fi
+
+  echo "[gates] reliability soak SLO OK (artifacts: $soak_out, $slo_json, $slo_md)"
+}
+
 print_module_coverage_summary() {
   echo "[gates] ====== MODULE COVERAGE SUMMARY ======"
   echo "[gates] Executed: Generic, Reverend, SoftwareModeling, Base (when Java scope changes detected)"
@@ -708,6 +760,7 @@ case "$mode" in
     run_reverend_compile_regression
     run_frontier_compile_regression
     run_eval_regression
+    run_reliability_soak_slo
     run_security_evidence_integrity
     print_module_coverage_summary
     ;;

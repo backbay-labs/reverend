@@ -27,6 +27,10 @@ permissions:
 env:
   STOCK_BASELINE_OUTPUT_DIR: eval/output/stock-baseline
   STOCK_BASELINE_SLICES: semantic-search,type-recovery
+  RELIABILITY_OUTPUT_DIR: eval/output/reliability
+  RELIABILITY_SOAK_ITERATIONS: '3'
+  RELIABILITY_DEADLOCK_THRESHOLD_SECONDS: '30'
+  RELIABILITY_SLO_THRESHOLDS: eval/config/reliability_slo_thresholds.json
   REQUIRED_PYTHON_VERSION: '3.11'
   REQUIRED_JAVA_VERSION: '21'
 
@@ -187,6 +191,35 @@ jobs:
             --baseline eval/snapshots/baseline.json \
             --output eval/output/smoke/regression.json
 
+      - name: Run reliability soak (writes ${{ env.RELIABILITY_OUTPUT_DIR }}/soak-report.json)
+        run: |
+          bash eval/run_soak.sh \
+            --iterations "${RELIABILITY_SOAK_ITERATIONS}" \
+            --deadlock-threshold-seconds "${RELIABILITY_DEADLOCK_THRESHOLD_SECONDS}" \
+            --output "${RELIABILITY_OUTPUT_DIR}/soak-report.json"
+
+      - name: Build reliability SLO report (writes JSON + markdown, blocking)
+        run: |
+          python3 eval/scripts/reliability_slo_report.py \
+            --soak-report "${RELIABILITY_OUTPUT_DIR}/soak-report.json" \
+            --thresholds "${RELIABILITY_SLO_THRESHOLDS}" \
+            --output-json "${RELIABILITY_OUTPUT_DIR}/slo-report.json" \
+            --output-md "${RELIABILITY_OUTPUT_DIR}/slo-report.md" \
+            --fail-on-breach
+
+      - name: Add reliability SLO summary
+        if: always()
+        run: |
+          {
+            echo "## Reliability SLO (${GITHUB_JOB})"
+            echo ""
+            if [[ -f "${RELIABILITY_OUTPUT_DIR}/slo-report.md" ]]; then
+              cat "${RELIABILITY_OUTPUT_DIR}/slo-report.md"
+            else
+              echo "_reliability report unavailable_"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Upload smoke metrics
         uses: actions/upload-artifact@v4
         if: always()
@@ -194,6 +227,14 @@ jobs:
           name: smoke-metrics-${{ github.sha }}
           path: eval/output/smoke/
           retention-days: 30
+
+      - name: Upload reliability SLO artifacts (smoke lane)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reliability-slo-smoke-${{ github.run_id }}
+          path: ${{ env.RELIABILITY_OUTPUT_DIR }}/
+          retention-days: 90
 
       - name: Upload stock baseline artifacts (smoke lane)
         uses: actions/upload-artifact@v4
@@ -338,6 +379,35 @@ jobs:
       - name: Run smoke tests (writes eval/output/smoke/metrics.json)
         run: bash eval/run_smoke.sh
 
+      - name: Run reliability soak (writes ${{ env.RELIABILITY_OUTPUT_DIR }}/soak-report.json)
+        run: |
+          bash eval/run_soak.sh \
+            --iterations "${RELIABILITY_SOAK_ITERATIONS}" \
+            --deadlock-threshold-seconds "${RELIABILITY_DEADLOCK_THRESHOLD_SECONDS}" \
+            --output "${RELIABILITY_OUTPUT_DIR}/soak-report.json"
+
+      - name: Build reliability SLO report (writes JSON + markdown, blocking)
+        run: |
+          python3 eval/scripts/reliability_slo_report.py \
+            --soak-report "${RELIABILITY_OUTPUT_DIR}/soak-report.json" \
+            --thresholds "${RELIABILITY_SLO_THRESHOLDS}" \
+            --output-json "${RELIABILITY_OUTPUT_DIR}/slo-report.json" \
+            --output-md "${RELIABILITY_OUTPUT_DIR}/slo-report.md" \
+            --fail-on-breach
+
+      - name: Add reliability SLO summary
+        if: always()
+        run: |
+          {
+            echo "## Reliability SLO (${GITHUB_JOB})"
+            echo ""
+            if [[ -f "${RELIABILITY_OUTPUT_DIR}/slo-report.md" ]]; then
+              cat "${RELIABILITY_OUTPUT_DIR}/slo-report.md"
+            else
+              echo "_reliability report unavailable_"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Resolve previous nightly baseline
         id: previous_nightly
         uses: actions/github-script@v7
@@ -424,6 +494,14 @@ jobs:
         with:
           name: nightly-results-${{ github.run_id }}
           path: eval/output/
+          retention-days: 90
+
+      - name: Upload reliability SLO artifacts (nightly lane)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reliability-slo-nightly-${{ github.run_id }}
+          path: ${{ env.RELIABILITY_OUTPUT_DIR }}/
           retention-days: 90
 
       - name: Upload stock baseline artifacts (nightly lane)
@@ -576,12 +654,49 @@ jobs:
             --baseline eval/snapshots/baseline.json \
             --output eval/output/smoke/release-regression.json
 
+      - name: Run reliability soak (writes ${{ env.RELIABILITY_OUTPUT_DIR }}/soak-report.json)
+        run: |
+          bash eval/run_soak.sh \
+            --iterations "${RELIABILITY_SOAK_ITERATIONS}" \
+            --deadlock-threshold-seconds "${RELIABILITY_DEADLOCK_THRESHOLD_SECONDS}" \
+            --output "${RELIABILITY_OUTPUT_DIR}/soak-report.json"
+
+      - name: Build reliability SLO report (writes JSON + markdown, blocking)
+        run: |
+          python3 eval/scripts/reliability_slo_report.py \
+            --soak-report "${RELIABILITY_OUTPUT_DIR}/soak-report.json" \
+            --thresholds "${RELIABILITY_SLO_THRESHOLDS}" \
+            --output-json "${RELIABILITY_OUTPUT_DIR}/slo-report.json" \
+            --output-md "${RELIABILITY_OUTPUT_DIR}/slo-report.md" \
+            --fail-on-breach
+
+      - name: Add reliability SLO summary
+        if: always()
+        run: |
+          {
+            echo "## Reliability SLO (${GITHUB_JOB})"
+            echo ""
+            if [[ -f "${RELIABILITY_OUTPUT_DIR}/slo-report.md" ]]; then
+              cat "${RELIABILITY_OUTPUT_DIR}/slo-report.md"
+            else
+              echo "_reliability report unavailable_"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Upload release results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: release-results-${{ github.run_id }}
           path: eval/output/
+          retention-days: 365
+
+      - name: Upload reliability SLO artifacts (release lane)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reliability-slo-release-${{ github.run_id }}
+          path: ${{ env.RELIABILITY_OUTPUT_DIR }}/
           retention-days: 365
 
       - name: Upload stock baseline artifacts (release lane)
