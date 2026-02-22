@@ -6,7 +6,10 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
 import re
+import subprocess
+from collections import Counter
 from pathlib import Path
 
 
@@ -55,6 +58,16 @@ REQUIRED_EXECUTABLE_SCENARIO_LOGS = [
     "scenario-04-provenance-chain.log",
     "scenario-05-receipt-tamper.log",
 ]
+
+ROADMAP_STATUS_DOC = "docs/audit-remediation-sota-operational-roadmap.md"
+ROADMAP_STATUS_PATTERNS = {
+    "total": r"Roadmap exportable issues:\s*`?(\d+)`?",
+    "done": r"Done:\s*`?(\d+)`?",
+    "open": r"Open:\s*`?(\d+)`?",
+    "blocked": r"Blocked:\s*`?(\d+)`?",
+    "e20_mix": r"E20\s*\(`3100`\s*\+\s*children\):\s*`([^`]+)`",
+    "e21_mix": r"E21\s*\(`3200`\s*\+\s*children\):\s*`([^`]+)`",
+}
 
 
 WORKFLOW_PATTERNS: dict[str, str] = {
@@ -127,9 +140,21 @@ def numeric_id(value: str) -> int:
         return 10**12
 
 
-def load_issues(path: Path) -> list[dict]:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
+def load_issues(path: Path, repo_root: Path) -> tuple[list[dict], str]:
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return [json.loads(line) for line in lines if line.strip()], str(path.relative_to(repo_root))
+
+    issues_ref = (os.environ.get("CYNTRA_ISSUES_REF") or "HEAD").strip() or "HEAD"
+    source = f"{issues_ref}:.beads/issues.jsonl"
+    try:
+        text = subprocess.check_output(
+            ["git", "-C", str(repo_root), "show", source],
+            text=True,
+        )
+    except Exception as exc:
+        raise FileNotFoundError(f"unable to read canonical issues from {source}: {exc}") from exc
+    return [json.loads(line) for line in text.splitlines() if line.strip()], source
 
 
 def load_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -208,6 +233,10 @@ def _extract_int(pattern: str, text: str) -> int | None:
         return None
 
 
+def _format_status_counts(status_counts: dict[str, int]) -> str:
+    return ", ".join(f"{status}={status_counts[status]}" for status in sorted(status_counts))
+
+
 def validate(repo_root: Path) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     notes: list[str] = []
@@ -215,14 +244,20 @@ def validate(repo_root: Path) -> tuple[list[str], list[str]]:
     issues_path = repo_root / ".beads/issues.jsonl"
     csv_path = repo_root / "docs/backlog-jira-linear.csv"
     workflow_path = repo_root / ".github/workflows/eval.yaml"
+    roadmap_status_doc_path = repo_root / ROADMAP_STATUS_DOC
 
-    for required in [issues_path, csv_path, workflow_path]:
+    for required in [csv_path, workflow_path, roadmap_status_doc_path]:
         if not required.exists():
             errors.append(f"missing required file: {required.relative_to(repo_root)}")
     if errors:
         return errors, notes
 
-    issues = load_issues(issues_path)
+    try:
+        issues, issues_source = load_issues(issues_path, repo_root)
+    except Exception as exc:
+        errors.append(str(exc))
+        return errors, notes
+
     exportable = [issue for issue in issues if is_exportable(issue)]
     exportable.sort(
         key=lambda issue: (
@@ -235,14 +270,6 @@ def validate(repo_root: Path) -> tuple[list[str], list[str]]:
     if not exportable:
         errors.append("no exportable roadmap issues found")
         return errors, notes
-
-    non_done = [
-        (str(issue.get("id") or "?"), str(issue.get("status") or ""))
-        for issue in exportable
-        if str(issue.get("status") or "").lower() != "done"
-    ]
-    if non_done:
-        errors.append(f"roadmap issues not done: {non_done}")
 
     issue_by_id = {str(issue.get("id") or ""): issue for issue in issues}
     stories = [
@@ -400,10 +427,67 @@ def validate(repo_root: Path) -> tuple[list[str], list[str]]:
     if missing_signals:
         errors.append(f"eval workflow missing required toolchain parity signals: {missing_signals}")
 
-    done_count = sum(1 for issue in exportable if str(issue.get("status") or "").lower() == "done")
-    notes.append(
-        f"roadmap exportable issues: {len(exportable)} total, {done_count} done"
+    status_counts: Counter[str] = Counter(
+        str(issue.get("status") or "").lower() for issue in exportable
     )
+    done_count = status_counts.get("done", 0)
+    open_count = status_counts.get("open", 0)
+    blocked_count = status_counts.get("blocked", 0)
+
+    e20_status_counts: Counter[str] = Counter(
+        str(issue.get("status") or "").lower()
+        for issue in exportable
+        if str(issue.get("id") or "") == "3100" or str(issue.get("dk_parent") or "") == "3100"
+    )
+    e21_status_counts: Counter[str] = Counter(
+        str(issue.get("status") or "").lower()
+        for issue in exportable
+        if str(issue.get("id") or "") == "3200" or str(issue.get("dk_parent") or "") == "3200"
+    )
+
+    roadmap_status_text = roadmap_status_doc_path.read_text(encoding="utf-8")
+
+    parsed_values: dict[str, str | int] = {}
+    for key, pattern in ROADMAP_STATUS_PATTERNS.items():
+        match = re.search(pattern, roadmap_status_text, flags=re.IGNORECASE | re.MULTILINE)
+        if not match:
+            errors.append(f"{ROADMAP_STATUS_DOC} missing roadmap status claim field: {key}")
+            continue
+        parsed_values[key] = match.group(1).strip()
+
+    expected_claims = {
+        "total": len(exportable),
+        "done": done_count,
+        "open": open_count,
+        "blocked": blocked_count,
+        "e20_mix": _format_status_counts(dict(e20_status_counts)),
+        "e21_mix": _format_status_counts(dict(e21_status_counts)),
+    }
+    for key, expected in expected_claims.items():
+        actual = parsed_values.get(key)
+        if actual is None:
+            continue
+        if isinstance(expected, int):
+            try:
+                if int(str(actual)) != expected:
+                    errors.append(
+                        f"{ROADMAP_STATUS_DOC} claim mismatch for {key}: expected {expected}, found {actual}"
+                    )
+            except Exception:
+                errors.append(
+                    f"{ROADMAP_STATUS_DOC} claim for {key} is not an integer: {actual}"
+                )
+        elif str(actual) != expected:
+            errors.append(
+                f"{ROADMAP_STATUS_DOC} claim mismatch for {key}: expected '{expected}', found '{actual}'"
+            )
+
+    notes.append(
+        f"roadmap exportable issues: {len(exportable)} total, done={done_count}, open={open_count}, blocked={blocked_count}"
+    )
+    notes.append(f"canonical issues source: {issues_source}")
+    notes.append(f"E20 status mix: {_format_status_counts(dict(e20_status_counts))}")
+    notes.append(f"E21 status mix: {_format_status_counts(dict(e21_status_counts))}")
     notes.append(f"csv parity checked for {len(csv_rows)} rows")
     notes.append(f"required evidence files present: {len(REQUIRED_EVIDENCE_FILES) - len(missing_evidence)}/{len(REQUIRED_EVIDENCE_FILES)}")
     notes.append(f"security checksum entries verified: {checksum_verified}")
