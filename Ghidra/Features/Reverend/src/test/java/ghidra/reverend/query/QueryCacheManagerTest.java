@@ -17,6 +17,10 @@ package ghidra.reverend.query;
 
 import static org.junit.Assert.*;
 
+import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.stream.Stream;
 import java.util.*;
 
 import org.junit.*;
@@ -37,6 +41,7 @@ public class QueryCacheManagerTest {
 	private Program stubProgram;
 	private AddressSpace testSpace;
 	private Address testAddress;
+	private Address secondAddress;
 
 	@Before
 	public void setUp() {
@@ -46,6 +51,7 @@ public class QueryCacheManagerTest {
 		// Create a test address space and address for context cache testing
 		testSpace = new GenericAddressSpace("test", 32, AddressSpace.TYPE_RAM, 0);
 		testAddress = testSpace.getAddress(0x1000);
+		secondAddress = testSpace.getAddress(0x2000);
 	}
 
 	@After
@@ -159,6 +165,28 @@ public class QueryCacheManagerTest {
 	}
 
 	@Test
+	public void testIncrementalFunctionInvalidationByEntryPoint() {
+		cacheManager.initializeForProgram(stubProgram);
+
+		String keyA = CacheKeyGenerator.forSimilarFunctions(testAddress.toString());
+		String keyB = CacheKeyGenerator.forSimilarFunctions(secondAddress.toString());
+
+		cacheManager.cacheSimilarFunctions(stubProgram, keyA, createMockResultsForAddresses(testAddress));
+		cacheManager.cacheSimilarFunctions(stubProgram, keyB, createMockResultsForAddresses(secondAddress));
+		cacheManager.cacheSemanticSearch(stubProgram, "semantic:keyA",
+			createMockResultsForAddresses(testAddress));
+		cacheManager.cacheSemanticSearch(stubProgram, "semantic:keyB",
+			createMockResultsForAddresses(secondAddress));
+
+		cacheManager.invalidateFunctionCaches(stubProgram, List.of(testAddress));
+
+		assertNull(cacheManager.getCachedSimilarFunctions(stubProgram, keyA));
+		assertNotNull(cacheManager.getCachedSimilarFunctions(stubProgram, keyB));
+		assertNull(cacheManager.getCachedSemanticSearch(stubProgram, "semantic:keyA"));
+		assertNotNull(cacheManager.getCachedSemanticSearch(stubProgram, "semantic:keyB"));
+	}
+
+	@Test
 	public void testSymbolCacheInvalidation() {
 		cacheManager.initializeForProgram(stubProgram);
 
@@ -210,6 +238,48 @@ public class QueryCacheManagerTest {
 		assertNull(cacheManager.getCachedSemanticSearch(stubProgram, "semantic:key1"));
 		assertNull(cacheManager.getCachedPatternSearch(stubProgram, "pattern:key1"));
 		assertNull(cacheManager.getCachedContext(stubProgram, testAddress));
+	}
+
+	@Test
+	public void testVerifyAndRepairIndexDrift() throws Exception {
+		cacheManager.initializeForProgram(stubProgram);
+		cacheManager.cacheSemanticSearch(stubProgram, "semantic:key",
+			createMockResultsForAddresses(testAddress));
+
+		Field programCachesField = QueryCacheManager.class.getDeclaredField("programCaches");
+		programCachesField.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<Program, Object> programCaches = (Map<Program, Object>) programCachesField.get(cacheManager);
+		Object perProgramCache = programCaches.get(stubProgram);
+
+		Field reverseMapField =
+			perProgramCache.getClass().getDeclaredField("functionEntriesBySemanticKey");
+		reverseMapField.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<String, Set<String>> reverseMap = (Map<String, Set<String>>) reverseMapField.get(perProgramCache);
+		reverseMap.put("orphan-semantic-key", new HashSet<>(Set.of("test:1000")));
+
+		assertTrue(cacheManager.verifyAndRepairIndex(stubProgram));
+		assertFalse(reverseMap.containsKey("orphan-semantic-key"));
+	}
+
+	@Test
+	public void testFeatureIndexPersistsAcrossManagerInstances() throws Exception {
+		Path tempDir = Files.createTempDirectory("query-cache-manager-test");
+		QueryCacheManager first = new QueryCacheManager(tempDir);
+		first.initializeForProgram(stubProgram);
+		first.cacheSemanticSearch(stubProgram, "semantic:persisted",
+			createMockResultsForAddresses(testAddress));
+		first.invalidateProgram(stubProgram);
+		try (Stream<Path> persisted = Files.list(tempDir)) {
+			assertTrue(persisted.findAny().isPresent());
+		}
+
+		QueryCacheManager second = new QueryCacheManager(tempDir);
+		second.initializeForProgram(stubProgram);
+		second.invalidateFunctionCaches(stubProgram, List.of(testAddress));
+
+		assertNull(second.getCachedSemanticSearch(stubProgram, "semantic:persisted"));
 	}
 
 	@Test
@@ -272,6 +342,34 @@ public class QueryCacheManagerTest {
 				@Override
 				public String getSummary() {
 					return "Result " + index;
+				}
+
+				@Override
+				public Optional<String> getEvidenceId() {
+					return Optional.empty();
+				}
+			});
+		}
+		return results;
+	}
+
+	private List<QueryResult> createMockResultsForAddresses(Address... addresses) {
+		List<QueryResult> results = new ArrayList<>();
+		for (Address address : addresses) {
+			results.add(new QueryResult() {
+				@Override
+				public Address getAddress() {
+					return address;
+				}
+
+				@Override
+				public double getScore() {
+					return 0.5;
+				}
+
+				@Override
+				public String getSummary() {
+					return "Address result";
 				}
 
 				@Override

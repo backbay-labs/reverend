@@ -28,6 +28,7 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.program.util.ProgramEvent;
+import ghidra.program.util.ProgramChangeRecord;
 import ghidra.reverend.api.v1.QueryService;
 import ghidra.util.task.TaskMonitor;
 
@@ -420,24 +421,25 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		// Check for events that require cache invalidation
 		if (ev.contains(ProgramEvent.FUNCTION_ADDED, ProgramEvent.FUNCTION_REMOVED,
 				ProgramEvent.FUNCTION_CHANGED, ProgramEvent.FUNCTION_BODY_CHANGED)) {
+			Set<Address> changedFunctionEntries = new HashSet<>();
 
-			// Invalidate function-related caches
 			ev.forEach(ProgramEvent.FUNCTION_ADDED, record -> {
-				cacheManager.invalidateFunctionCaches(changedProgram);
+				extractFunctionEntry(record).ifPresent(changedFunctionEntries::add);
 				telemetry.recordCacheInvalidation("FUNCTION_ADDED", changedProgram);
 			});
 			ev.forEach(ProgramEvent.FUNCTION_REMOVED, record -> {
-				cacheManager.invalidateFunctionCaches(changedProgram);
+				extractFunctionEntry(record).ifPresent(changedFunctionEntries::add);
 				telemetry.recordCacheInvalidation("FUNCTION_REMOVED", changedProgram);
 			});
 			ev.forEach(ProgramEvent.FUNCTION_CHANGED, record -> {
-				cacheManager.invalidateFunctionCaches(changedProgram);
+				extractFunctionEntry(record).ifPresent(changedFunctionEntries::add);
 				telemetry.recordCacheInvalidation("FUNCTION_CHANGED", changedProgram);
 			});
 			ev.forEach(ProgramEvent.FUNCTION_BODY_CHANGED, record -> {
-				cacheManager.invalidateFunctionCaches(changedProgram);
+				extractFunctionEntry(record).ifPresent(changedFunctionEntries::add);
 				telemetry.recordCacheInvalidation("FUNCTION_BODY_CHANGED", changedProgram);
 			});
+			cacheManager.invalidateFunctionCaches(changedProgram, changedFunctionEntries);
 		}
 
 		if (ev.contains(ProgramEvent.SYMBOL_ADDED, ProgramEvent.SYMBOL_REMOVED,
@@ -449,8 +451,9 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 
 		if (ev.contains(ProgramEvent.CODE_ADDED, ProgramEvent.CODE_REMOVED,
 				ProgramEvent.CODE_REPLACED)) {
-			// Invalidate code-related caches
-			cacheManager.invalidateCodeCaches(changedProgram);
+			ev.forEach(ProgramEvent.CODE_ADDED, record -> invalidateCodeRecord(changedProgram, record));
+			ev.forEach(ProgramEvent.CODE_REMOVED, record -> invalidateCodeRecord(changedProgram, record));
+			ev.forEach(ProgramEvent.CODE_REPLACED, record -> invalidateCodeRecord(changedProgram, record));
 			telemetry.recordCacheInvalidation("CODE_CHANGED", changedProgram);
 		}
 
@@ -460,6 +463,10 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			cacheManager.invalidateAllCaches(changedProgram);
 			decompilerProvider.invalidateAllCaches(changedProgram);
 			telemetry.recordCacheInvalidation("MEMORY_CHANGED", changedProgram);
+		}
+
+		if (cacheManager.verifyAndRepairIndex(changedProgram)) {
+			telemetry.recordCacheInvalidation("INDEX_DRIFT_REPAIRED", changedProgram);
 		}
 	}
 
@@ -614,6 +621,35 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 	private String buildSemanticSummary(Function function, String query) {
 		return String.format("Match in %s: function with %d parameters",
 			function.getName(), function.getParameterCount());
+	}
+
+	private void invalidateCodeRecord(Program program, ghidra.framework.model.DomainObjectChangeRecord record) {
+		if (record instanceof ProgramChangeRecord changeRecord &&
+			changeRecord.getStart() != null && changeRecord.getEnd() != null) {
+			cacheManager.invalidateCodeCaches(program, changeRecord.getStart(), changeRecord.getEnd());
+			return;
+		}
+		cacheManager.invalidateCodeCaches(program);
+	}
+
+	private Optional<Address> extractFunctionEntry(ghidra.framework.model.DomainObjectChangeRecord record) {
+		if (!(record instanceof ProgramChangeRecord changeRecord)) {
+			return Optional.empty();
+		}
+		Object affected = changeRecord.getObject();
+		if (affected instanceof Function function && function.getEntryPoint() != null) {
+			return Optional.of(function.getEntryPoint());
+		}
+		if (changeRecord.getStart() != null) {
+			return Optional.of(changeRecord.getStart());
+		}
+		if (changeRecord.getNewValue() instanceof Function function && function.getEntryPoint() != null) {
+			return Optional.of(function.getEntryPoint());
+		}
+		if (changeRecord.getOldValue() instanceof Function function && function.getEntryPoint() != null) {
+			return Optional.of(function.getEntryPoint());
+		}
+		return Optional.empty();
 	}
 
 	// --- Inner classes ---
