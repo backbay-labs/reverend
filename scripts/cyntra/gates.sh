@@ -483,9 +483,27 @@ run_java_regression() {
 }
 
 require_gradle_build_prereqs() {
+  if [[ -d "dependencies/flatRepo" || -f "ghidra.repos.config" ]]; then
+    return 0
+  fi
+
+  echo "[gates] build dependency configuration missing; bootstrapping via fetchDependencies.gradle"
+
+  local -a bootstrap_cmd=()
+  if [[ -x "./gradlew" ]]; then
+    bootstrap_cmd=("./gradlew" "-I" "gradle/support/fetchDependencies.gradle" "--no-daemon")
+  elif command -v gradle >/dev/null 2>&1; then
+    bootstrap_cmd=("gradle" "-I" "gradle/support/fetchDependencies.gradle" "--no-daemon")
+  else
+    echo "[gates] ERROR: cannot bootstrap dependencies (missing ./gradlew and gradle command)" >&2
+    exit 1
+  fi
+
+  "${bootstrap_cmd[@]}"
+
   if [[ ! -d "dependencies/flatRepo" && ! -f "ghidra.repos.config" ]]; then
-    echo "[gates] ERROR: missing build dependency configuration (need dependencies/flatRepo or ghidra.repos.config)" >&2
-    echo "[gates] hint: run 'gradle -I gradle/support/fetchDependencies.gradle' before strict Java module gates" >&2
+    echo "[gates] ERROR: missing build dependency configuration after bootstrap (need dependencies/flatRepo or ghidra.repos.config)" >&2
+    echo "[gates] hint: run 'gradle -I gradle/support/fetchDependencies.gradle' manually and check network/proxy config" >&2
     exit 1
   fi
 }
