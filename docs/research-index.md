@@ -13,10 +13,10 @@ This is the live control document for research outputs in `docs/`. It tracks cov
 | `docs/sources.md` | Working | Canonical reference list for time-sensitive and high-impact claims. |
 | `docs/claims-ledger.md` | Working | Claim-by-claim verification tracker with status and source mapping. |
 | `docs/execution-board-12-weeks.md` | Published | Concrete 12-week implementation board with owner lanes, milestones, exit gates, and Week 12 RC publication evidence links. |
-| `docs/backlog-jira-linear.md` | Published | Active backlog map for epics/stories, including E9 bead IDs and dependency wiring. |
+| `docs/backlog-jira-linear.md` | Published | Active backlog map for epics/stories, including E9-E11 bead IDs and dependency wiring. |
 | `docs/backlog-e9.csv` | Published | Jira/Linear import-ready CSV for E9-S1..E9-S8 execution set. |
 | `docs/cyntra-kernel-runbook.md` | Working | Operational runbook for executing the roadmap in Cyntra against `.beads/` graph files. |
-| `docs/e9-frontier-roadmap.md` | Published | Post-RC frontier execution board with research cross-reference, wave plan, and dependency graph for E9-S1..E9-S8. |
+| `docs/e9-frontier-roadmap.md` | Published | Post-RC frontier/productization/expansion board with research cross-reference, wave plan, and dependency graph for E9-S1..E11-S8. |
 | `docs/research/INDEX.md` | Draft | Good map; depends on per-topic docs for claim-level verification. |
 | `docs/research/ghidra-internals-architecture.md` | Draft | Core structural claims spot-checked against repo paths/classes and look consistent. |
 | `docs/research/decompilation-type-recovery.md` | Draft | Dense research references; needs focused pass on benchmark naming consistency. |
@@ -50,7 +50,7 @@ This is the live control document for research outputs in `docs/`. It tracks cov
 2. Promote high-impact factual claims from new spec docs (legal, Python compatibility, security controls) into `docs/claims-ledger.md`.
 3. Add concrete "as-of" dates for pricing/version/maintenance claims across research docs.
 4. Normalize naming collisions (e.g., similarly named benchmarks/tools) and link each claim to one canonical source.
-5. Keep `docs/e9-frontier-roadmap.md` synchronized with `.beads/issues.jsonl` IDs (`2001-2008`) before each Cyntra dispatch wave.
+5. Keep `docs/e9-frontier-roadmap.md` synchronized with `.beads/issues.jsonl` IDs (`2001-2208`) before each Cyntra dispatch wave.
 
 ## Source Hierarchy
 - Official vendor/project docs and release notes.
