@@ -1,4 +1,9 @@
 {
+  "manifest": {
+    "issue": {
+      "noop_justification": "Investigation-only run; no repository change required."
+    }
+  },
   "proof": {
     "status": "completed",
     "issue_id": "3108",
@@ -7,8 +12,7 @@
     "verification": {
       "gate_summary": {
         "diff_files": 0,
-        "diff_lines": 0,
-        "noop_justification": "Investigation-only run; no repository change required."
+        "diff_lines": 0
       }
     }
   },
@@ -18,7 +22,8 @@
   "expected_gate_summary": {
     "completion_classification": "noop",
     "noop_reason": "Investigation-only run; no repository change required.",
-    "noop_reason_source": "explicit_field",
+    "noop_reason_source": "manifest.issue.noop_justification",
+    "noop_justification_source": "manifest.issue.noop_justification",
     "explicit_noop_justification_present": true,
     "policy_result": "allow",
     "policy_blocked": false
@@ -28,7 +33,8 @@
     "gate_summary": {
       "completion_classification": "noop",
       "noop_reason": "Investigation-only run; no repository change required.",
-      "noop_reason_source": "explicit_field",
+      "noop_reason_source": "manifest.issue.noop_justification",
+      "noop_justification_source": "manifest.issue.noop_justification",
       "explicit_noop_justification_present": true,
       "policy_result": "allow",
       "policy_blocked": false

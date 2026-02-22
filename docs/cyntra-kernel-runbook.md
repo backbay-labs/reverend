@@ -128,7 +128,7 @@ Failure taxonomy and completion-policy binding:
 - `scripts/cyntra/cyntra.sh` reads `CYNTRA_FAILURE_CODE` first (legacy `CYNTRA_FAILURE_CLASS` remains an alias).
 - Fallback provenance (`.cyntra/state/fallback-routing.json`) now includes canonical `failure_code`.
 - Completion integrity policy is fail-closed:
-  - completion results with zero diff require explicit `noop_justification` field
+  - completion results with zero diff require explicit manifest `noop_justification` (`manifest.issue.noop_justification` or `manifest.noop_justification`)
   - missing explicit justification is classified as `policy.completion_blocked`
   - `run-once` exits non-zero and does not trigger fallback rerun for `policy.completion_blocked`
 - Deterministic classification also annotates workcell artifacts with canonical `failure_code`:
@@ -140,7 +140,7 @@ Failure taxonomy and completion-policy binding:
   - workcell telemetry: `.workcells/<id>/telemetry.jsonl`
   - kernel telemetry: `.cyntra/logs/events.jsonl`
   - event: `completion_policy_gate_summary`
-  - gate summary fields: `completion_classification`, `noop_reason`, `noop_reason_source`, `explicit_noop_justification_present`, `policy_result`
+  - gate summary fields: `completion_classification`, `noop_reason`, `noop_reason_source`, `noop_justification_source`, `explicit_noop_justification_present`, `policy_result`
 
 ## 5. Cleanup and disk management
 
