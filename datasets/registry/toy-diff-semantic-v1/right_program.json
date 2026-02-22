@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "program_id": "toy-right-semantic-v1",
+  "functions": [
+    {
+      "id": "r_handle",
+      "stable_key": "handle_request",
+      "name": "handle_request",
+      "text": "orchestrates parsing, authorization, and payload copy",
+      "calls": ["parse_header", "authorize", "copy_payload"],
+      "cfg_edges": ["entry->dispatch", "dispatch->ret"],
+      "data_flows": ["packet->parse_header", "packet->authorize", "packet->copy_payload"]
+    },
+    {
+      "id": "r_copy",
+      "stable_key": "copy_payload",
+      "name": "copy_payload",
+      "text": "copies payload into buffer",
+      "calls": ["safe_copy"],
+      "cfg_edges": ["entry->call", "call->ret"],
+      "data_flows": ["src->dst"]
+    },
+    {
+      "id": "r_parse2",
+      "stable_key": "parse_header",
+      "name": "parse_header",
+      "text": "parses header and returns length",
+      "calls": [],
+      "cfg_edges": ["entry->check", "check->ret", "check->error", "error->ret"],
+      "data_flows": ["buf->len"]
+    },
+    {
+      "id": "r_auth2",
+      "stable_key": "authorize",
+      "name": "authorize",
+      "text": "validates user input and executes command",
+      "calls": ["exec_cmd", "sanitize"],
+      "cfg_edges": ["entry->sanitize", "sanitize->exec", "exec->ret"],
+      "data_flows": ["user_input->sanitize", "sanitize->exec_cmd"]
+    }
+  ]
+}
+

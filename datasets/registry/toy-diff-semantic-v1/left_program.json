@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "program_id": "toy-left-semantic-v1",
+  "functions": [
+    {
+      "id": "l_handle",
+      "stable_key": "handle_request",
+      "name": "handle_request",
+      "text": "orchestrates parsing, authorization, and payload copy",
+      "calls": ["parse_header", "authorize", "copy_payload"],
+      "cfg_edges": ["entry->dispatch", "dispatch->ret"],
+      "data_flows": ["packet->parse_header", "packet->authorize", "packet->copy_payload"]
+    },
+    {
+      "id": "l_copy",
+      "stable_key": "copy_payload",
+      "name": "copy_payload",
+      "text": "copies payload into buffer",
+      "calls": ["memcpy"],
+      "cfg_edges": ["entry->call", "call->ret"],
+      "data_flows": ["src->dst"]
+    },
+    {
+      "id": "l_parse",
+      "stable_key": "parse_header",
+      "name": "parse_header",
+      "text": "parses header and returns length",
+      "calls": [],
+      "cfg_edges": ["entry->check", "check->ret"],
+      "data_flows": ["buf->len"]
+    },
+    {
+      "id": "l_auth",
+      "stable_key": "authorize",
+      "name": "authorize",
+      "text": "validates user input and executes command",
+      "calls": ["exec_cmd"],
+      "cfg_edges": ["entry->exec", "exec->ret"],
+      "data_flows": ["user_input->exec_cmd"]
+    }
+  ]
+}
+

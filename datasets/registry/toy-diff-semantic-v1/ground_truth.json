@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "diff_semantic_ground_truth",
+  "changes": [
+    {
+      "kind": "CALL_SURFACE",
+      "function_key": "copy_payload",
+      "before": { "calls": ["memcpy"] },
+      "after": { "calls": ["safe_copy"] }
+    },
+    {
+      "kind": "CONTROL_FLOW",
+      "function_key": "parse_header",
+      "before": { "cfg_edges": ["check->ret", "entry->check"] },
+      "after": { "cfg_edges": ["check->error", "check->ret", "entry->check", "error->ret"] }
+    },
+    {
+      "kind": "DATA_FLOW",
+      "function_key": "authorize",
+      "before": { "data_flows": ["user_input->exec_cmd"] },
+      "after": { "data_flows": ["sanitize->exec_cmd", "user_input->sanitize"] }
+    }
+  ]
+}
+

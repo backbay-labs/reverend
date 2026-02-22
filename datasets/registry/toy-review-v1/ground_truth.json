@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "description": "Ground truth for spec extraction review benchmark",
+  "expected_hypotheses": [
+    {
+      "id": "schema-request",
+      "spec_type": "schema",
+      "name": "Request",
+      "expected_fields": ["type", "token", "payload", "payload_len"],
+      "expected_verdict": "accept",
+      "rationale": "Well-defined struct with clear field usage"
+    },
+    {
+      "id": "schema-response",
+      "spec_type": "schema",
+      "name": "Response",
+      "expected_fields": ["status", "data", "data_len"],
+      "expected_verdict": "accept",
+      "rationale": "Well-defined output struct"
+    },
+    {
+      "id": "api-handle-request",
+      "spec_type": "api",
+      "name": "handle_request",
+      "expected_verdict": "accept",
+      "rationale": "Exported API with clear signature"
+    },
+    {
+      "id": "api-handle-auth",
+      "spec_type": "api",
+      "name": "handle_auth",
+      "expected_verdict": "accept",
+      "rationale": "Exported authentication handler"
+    },
+    {
+      "id": "state-machine-handlers",
+      "spec_type": "state_machine",
+      "expected_verdict": "reject",
+      "rationale": "False positive - handler functions don't form a true state machine"
+    }
+  ],
+  "review_cases": [
+    {
+      "case_id": "accept-good-schema",
+      "hypothesis_type": "schema",
+      "action": "accept",
+      "expected_result": "approved",
+      "description": "Accept a well-evidenced schema hypothesis"
+    },
+    {
+      "case_id": "reject-false-state-machine",
+      "hypothesis_type": "state_machine",
+      "action": "reject",
+      "expected_result": "rejected",
+      "description": "Reject a false state machine inference"
+    },
+    {
+      "case_id": "request-changes-missing-evidence",
+      "hypothesis_type": "api",
+      "action": "request_changes",
+      "expected_result": "open",
+      "description": "Request more evidence for low-confidence API"
+    }
+  ],
+  "metrics": {
+    "expected_schema_count": 2,
+    "expected_api_count": 2,
+    "expected_state_machine_count": 1,
+    "expected_accept_rate": 0.8,
+    "expected_reject_rate": 0.2
+  }
+}

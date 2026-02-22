@@ -35,6 +35,48 @@
         }
       }
     },
+    "toy-diff-semantic-v1": {
+      "version": "1.0.0",
+      "source": {
+        "type": "local_directory",
+        "path": "datasets/registry/toy-diff-semantic-v1"
+      },
+      "files": {
+        "baseline_vt_ghidriff.json": {
+          "bytes": 534,
+          "sha256": "ed8a2d4b4af487b3f87d58b3d8eeac92a209e9d70b9f79024b4dbd400b26d5c8"
+        },
+        "ground_truth.json": {
+          "bytes": 704,
+          "sha256": "80d746e8c64edac8ccf582dc130e3fffdb8c57bf1aaa780f52993b430fff0477"
+        },
+        "left_program.json": {
+          "bytes": 1261,
+          "sha256": "9ea2dca9c486668238f320eec9379fcd3df89d433427b60cd634be3ae4dd4554"
+        },
+        "right_program.json": {
+          "bytes": 1353,
+          "sha256": "10e250b6d0906f240e02e69fdf97a71de1bd46f4d93835923b2ac33593a8eb70"
+        }
+      }
+    },
+    "toy-review-v1": {
+      "version": "1.0.0",
+      "source": {
+        "type": "local_directory",
+        "path": "datasets/registry/toy-review-v1"
+      },
+      "files": {
+        "analysis.json": {
+          "bytes": 3003,
+          "sha256": "87d820e0455520f48c60015608586382f0566dce21e1c097eb740f45185299dd"
+        },
+        "ground_truth.json": {
+          "bytes": 2114,
+          "sha256": "9a22ec579526493affec9cbb9676ae135ef7fd8259203e11b50c31eaa14d7cf5"
+        }
+      }
+    },
     "toy-similarity-v1": {
       "version": "1.0.0",
       "source": {

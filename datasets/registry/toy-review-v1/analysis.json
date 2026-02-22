@@ -1,0 +1,77 @@
+{
+  "program_name": "sample_binary",
+  "program_sha256": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  "functions": [
+    {
+      "address": "0x00401000",
+      "name": "handle_request",
+      "signature": "int handle_request(Request* req, Response* resp)",
+      "decompiled": "int handle_request(Request *req, Response *resp) {\n  if (req->type == REQ_AUTH) {\n    return handle_auth(req, resp);\n  }\n  return process_data(req, resp);\n}",
+      "callers": ["0x00401200", "0x00401300"],
+      "callees": ["0x00401100", "0x00401150"]
+    },
+    {
+      "address": "0x00401100",
+      "name": "handle_auth",
+      "signature": "int handle_auth(Request* req, Response* resp)",
+      "decompiled": "int handle_auth(Request *req, Response *resp) {\n  if (validate_token(req->token)) {\n    resp->status = AUTH_OK;\n    return 0;\n  }\n  resp->status = AUTH_FAIL;\n  return -1;\n}",
+      "callers": ["0x00401000"],
+      "callees": ["0x00401180"]
+    },
+    {
+      "address": "0x00401150",
+      "name": "process_data",
+      "signature": "int process_data(Request* req, Response* resp)",
+      "decompiled": "int process_data(Request *req, Response *resp) {\n  memcpy(resp->data, req->payload, req->payload_len);\n  resp->data_len = req->payload_len;\n  return 0;\n}",
+      "callers": ["0x00401000"],
+      "callees": []
+    },
+    {
+      "address": "0x00401180",
+      "name": "validate_token",
+      "signature": "int validate_token(char* token)",
+      "decompiled": "int validate_token(char *token) {\n  return strcmp(token, SECRET_TOKEN) == 0;\n}",
+      "callers": ["0x00401100"],
+      "callees": []
+    }
+  ],
+  "data_types": [
+    {
+      "name": "Request",
+      "category": "/project/structs",
+      "size": 64,
+      "fields": [
+        {"name": "type", "type": "int", "offset": 0, "size": 4},
+        {"name": "token", "type": "char[32]", "offset": 4, "size": 32},
+        {"name": "payload", "type": "void*", "offset": 40, "size": 8},
+        {"name": "payload_len", "type": "size_t", "offset": 48, "size": 8}
+      ],
+      "source_addresses": ["0x00401000", "0x00401100", "0x00401150"]
+    },
+    {
+      "name": "Response",
+      "category": "/project/structs",
+      "size": 32,
+      "fields": [
+        {"name": "status", "type": "int", "offset": 0, "size": 4},
+        {"name": "data", "type": "void*", "offset": 8, "size": 8},
+        {"name": "data_len", "type": "size_t", "offset": 16, "size": 8}
+      ],
+      "source_addresses": ["0x00401000", "0x00401100", "0x00401150"]
+    }
+  ],
+  "strings": [
+    {"address": "0x00402000", "value": "AUTH_OK"},
+    {"address": "0x00402010", "value": "AUTH_FAIL"},
+    {"address": "0x00402020", "value": "SECRET_TOKEN"}
+  ],
+  "entry_points": ["0x00401000"],
+  "imports": [
+    {"library": "libc.so.6", "function": "memcpy"},
+    {"library": "libc.so.6", "function": "strcmp"}
+  ],
+  "exports": [
+    {"address": "0x00401000", "name": "handle_request"},
+    {"address": "0x00401100", "name": "handle_auth"}
+  ]
+}
