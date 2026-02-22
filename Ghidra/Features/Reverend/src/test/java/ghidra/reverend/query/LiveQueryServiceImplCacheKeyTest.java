@@ -74,6 +74,29 @@ public class LiveQueryServiceImplCacheKeyTest {
 		assertNotEquals(keyA, keyB);
 	}
 
+	@Test
+	public void testSimilarFunctionsCacheKeyIsDeterministicAndCollisionSafe() {
+		assertEquals("Aa".hashCode(), "BB".hashCode());
+
+		String keyA1 = CacheKeyGenerator.forSimilarFunctions(" Aa ");
+		String keyA2 = CacheKeyGenerator.forSimilarFunctions("aa");
+		String keyB = CacheKeyGenerator.forSimilarFunctions("BB");
+
+		assertEquals(keyA1, keyA2);
+		assertNotEquals(keyA1, keyB);
+	}
+
+	@Test
+	public void testGeneratedKeysHaveStableDigestFormat() throws Exception {
+		String semanticKey = buildSemanticCacheKey("find memcpy", null);
+		String patternKey = buildPatternCacheKey("mov eax, ebx", null);
+		String similarKey = CacheKeyGenerator.forSimilarFunctions("0x401000");
+
+		assertTrue(semanticKey.matches("^semantic:v1:[0-9a-f]{64}$"));
+		assertTrue(patternKey.matches("^pattern:v1:[0-9a-f]{64}$"));
+		assertTrue(similarKey.matches("^similar:v1:[0-9a-f]{64}$"));
+	}
+
 	private String buildSemanticCacheKey(String query, AddressSetView scope) throws Exception {
 		Method method = LiveQueryServiceImpl.class.getDeclaredMethod(
 			"buildSemanticSearchCacheKey", String.class, AddressSetView.class);
