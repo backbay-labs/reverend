@@ -19,7 +19,7 @@ Close every finding from the 2026-02-22 audit, then prove Reverend is operationa
 | F5 | Integrated-branch compile blockers pending | `3105` | reproducible compile checks for integrated path pass |
 | F6 | Hash-collision-prone cache keys | `3106` | canonical serialization + digest cache keys with tests |
 | F7 | Roadmap/docs drift | `3107` | `.beads`/CSV/docs validator parity + CI enforcement |
-| F8 | Zero-diff auto-close integrity gap | `3108`, `3110`, `3111` | no-op close requires explicit justification + telemetry audit + reopen policy |
+| F8 | Zero-diff auto-close integrity gap | `3108`, `3110`, `3111` | no-op close requires explicit `noop_justification` field + completion gate-summary telemetry (`completion_policy_gate_summary`) + reopen policy |
 | F9 | O(N) query architecture + TODO embedding | `3201-3204` | indexed retrieval + embedding-backed ranking path |
 | F10 | Weak Java/Python/plugin runtime integration | `3205` | query -> proposal -> apply/rollback loop operational in cockpit |
 | F11 | “Operational” claim not benchmark-gated | `3206-3208` | benchmark thresholds enforced and GA packet published |

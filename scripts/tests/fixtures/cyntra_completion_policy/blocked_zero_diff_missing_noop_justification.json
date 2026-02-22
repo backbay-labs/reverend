@@ -1,0 +1,36 @@
+{
+  "proof": {
+    "status": "completed",
+    "issue_id": "3108",
+    "workcell_id": "wc-3108-fixture-blocked",
+    "metadata": {},
+    "verification": {
+      "gate_summary": {
+        "diff_files": 0,
+        "diff_lines": 0
+      }
+    }
+  },
+  "expect_exit_code": 1,
+  "expected_failure_code": "policy.completion_blocked",
+  "expect_cyntra_calls": 1,
+  "expected_gate_summary": {
+    "completion_classification": "noop",
+    "noop_reason": "missing_explicit_noop_justification",
+    "noop_reason_source": "missing_explicit_field",
+    "explicit_noop_justification_present": false,
+    "policy_result": "blocked",
+    "policy_blocked": true
+  },
+  "expected_event": {
+    "event": "completion_policy_gate_summary",
+    "gate_summary": {
+      "completion_classification": "noop",
+      "noop_reason": "missing_explicit_noop_justification",
+      "noop_reason_source": "missing_explicit_field",
+      "explicit_noop_justification_present": false,
+      "policy_result": "blocked",
+      "policy_blocked": true
+    }
+  }
+}

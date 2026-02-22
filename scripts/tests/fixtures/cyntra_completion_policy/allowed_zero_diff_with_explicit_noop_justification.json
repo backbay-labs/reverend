@@ -1,0 +1,37 @@
+{
+  "proof": {
+    "status": "completed",
+    "issue_id": "3108",
+    "workcell_id": "wc-3108-fixture-allowed",
+    "metadata": {},
+    "verification": {
+      "gate_summary": {
+        "diff_files": 0,
+        "diff_lines": 0,
+        "noop_justification": "Investigation-only run; no repository change required."
+      }
+    }
+  },
+  "expect_exit_code": 0,
+  "expected_failure_code": "",
+  "expect_cyntra_calls": 1,
+  "expected_gate_summary": {
+    "completion_classification": "noop",
+    "noop_reason": "Investigation-only run; no repository change required.",
+    "noop_reason_source": "explicit_field",
+    "explicit_noop_justification_present": true,
+    "policy_result": "allow",
+    "policy_blocked": false
+  },
+  "expected_event": {
+    "event": "completion_policy_gate_summary",
+    "gate_summary": {
+      "completion_classification": "noop",
+      "noop_reason": "Investigation-only run; no repository change required.",
+      "noop_reason_source": "explicit_field",
+      "explicit_noop_justification_present": true,
+      "policy_result": "allow",
+      "policy_blocked": false
+    }
+  }
+}
