@@ -522,6 +522,28 @@ class RankedSearchResult:
 
 
 @dataclass(frozen=True)
+class CandidateStageMetric:
+    """Per-stage candidate generation accounting emitted with each query."""
+
+    stage: str
+    enabled: bool
+    input_count: int
+    output_count: int
+    contribution_count: int
+    details: tuple[tuple[str, Any], ...] = ()
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "stage": self.stage,
+            "enabled": self.enabled,
+            "input_count": self.input_count,
+            "output_count": self.output_count,
+            "contribution_count": self.contribution_count,
+            "details": dict(self.details),
+        }
+
+
+@dataclass(frozen=True)
 class SearchLatencyMetric:
     """Latency metric emitted for semantic search interactions."""
 
@@ -533,6 +555,9 @@ class SearchLatencyMetric:
     query_tokens: int
     timestamp_utc: str
     seed_function_id: str | None = None
+    candidate_stage_metrics: tuple[CandidateStageMetric, ...] = ()
+    embedding_backend_status: str = "available"
+    embedding_fallback_applied: bool = False
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -544,6 +569,9 @@ class SearchLatencyMetric:
             "query_tokens": self.query_tokens,
             "timestamp_utc": self.timestamp_utc,
             "seed_function_id": self.seed_function_id,
+            "embedding_backend_status": self.embedding_backend_status,
+            "embedding_fallback_applied": self.embedding_fallback_applied,
+            "candidate_stage_metrics": [stage.to_json() for stage in self.candidate_stage_metrics],
         }
 
 
@@ -5397,13 +5425,23 @@ class SemanticSearchQueryService:
         index: EmbeddingIndex,
         reranker: EvidenceWeightedReranker | None = None,
         rerank_candidate_multiplier: int = 4,
+        enable_symbolic_stage: bool = True,
+        enable_lexical_stage: bool = True,
+        enable_embedding_stage: bool = True,
+        lexical_min_overlap: float = 0.0,
     ):
         if rerank_candidate_multiplier <= 0:
             raise ValueError("rerank_candidate_multiplier must be > 0")
+        if lexical_min_overlap < 0.0 or lexical_min_overlap > 1.0:
+            raise ValueError("lexical_min_overlap must be within [0.0, 1.0]")
         self._adapter = adapter
         self._index = index
         self._reranker = reranker
         self._rerank_candidate_multiplier = rerank_candidate_multiplier
+        self._enable_symbolic_stage = enable_symbolic_stage
+        self._enable_lexical_stage = enable_lexical_stage
+        self._enable_embedding_stage = enable_embedding_stage
+        self._lexical_min_overlap = lexical_min_overlap
 
     def search_intent(self, query_text: str, top_k: int = 5) -> SemanticSearchResponse:
         normalized = query_text.strip()
@@ -5411,7 +5449,11 @@ class SemanticSearchQueryService:
         if self._reranker is not None:
             candidate_k = max(top_k, top_k * self._rerank_candidate_multiplier)
         start = _now_ns()
-        hits = self._adapter.top_k(normalized, top_k=candidate_k)
+        hits, stage_metrics, embedding_backend_status, embedding_fallback_applied = self._generate_candidates(
+            query_text=normalized,
+            candidate_k=candidate_k,
+            exclude_function_id=None,
+        )
         reranked_hits = self._rerank_or_fallback(
             query_text=normalized,
             hits=hits,
@@ -5425,6 +5467,9 @@ class SemanticSearchQueryService:
             raw_hits=reranked_hits,
             latency_ms=latency_ms,
             seed_function_id=None,
+            candidate_stage_metrics=stage_metrics,
+            embedding_backend_status=embedding_backend_status,
+            embedding_fallback_applied=embedding_fallback_applied,
         )
 
     def search_similar_function(self, function_id: str, top_k: int = 5) -> SemanticSearchResponse:
@@ -5437,8 +5482,13 @@ class SemanticSearchQueryService:
         if self._reranker is not None:
             candidate_k = max(top_k * self._rerank_candidate_multiplier, top_k) + 1
         start = _now_ns()
-        raw_hits = self._adapter.top_k(query_text, top_k=candidate_k)
-        filtered_hits = [item for item in raw_hits if item.function_id != function_id]
+        filtered_hits, stage_metrics, embedding_backend_status, embedding_fallback_applied = (
+            self._generate_candidates(
+                query_text=query_text,
+                candidate_k=candidate_k,
+                exclude_function_id=function_id,
+            )
+        )
         reranked_hits = self._rerank_or_fallback(
             query_text=query_text,
             hits=filtered_hits,
@@ -5452,7 +5502,276 @@ class SemanticSearchQueryService:
             raw_hits=reranked_hits,
             latency_ms=latency_ms,
             seed_function_id=function_id,
+            candidate_stage_metrics=stage_metrics,
+            embedding_backend_status=embedding_backend_status,
+            embedding_fallback_applied=embedding_fallback_applied,
         )
+
+    def _generate_candidates(
+        self,
+        *,
+        query_text: str,
+        candidate_k: int,
+        exclude_function_id: str | None,
+    ) -> tuple[list[SearchResult], tuple[CandidateStageMetric, ...], str, bool]:
+        stage_metrics: list[CandidateStageMetric] = []
+        initial_ids = sorted(self._index.function_ids())
+        if exclude_function_id is not None:
+            initial_ids = [fid for fid in initial_ids if fid != exclude_function_id]
+        symbolic_ids = self._apply_symbolic_stage(initial_ids, query_text, stage_metrics)
+        lexical_ids = self._apply_lexical_stage(symbolic_ids, query_text, stage_metrics)
+        hits, embedding_backend_status, embedding_fallback_applied = self._apply_embedding_stage(
+            lexical_ids,
+            query_text=query_text,
+            candidate_k=candidate_k,
+            stage_metrics=stage_metrics,
+        )
+        if exclude_function_id is not None:
+            hits = [hit for hit in hits if hit.function_id != exclude_function_id]
+        return hits, tuple(stage_metrics), embedding_backend_status, embedding_fallback_applied
+
+    def _apply_symbolic_stage(
+        self,
+        candidate_ids: list[str],
+        query_text: str,
+        stage_metrics: list[CandidateStageMetric],
+    ) -> list[str]:
+        input_count = len(candidate_ids)
+        constraints = self._parse_symbolic_constraints(query_text)
+        if not self._enable_symbolic_stage or not constraints:
+            stage_metrics.append(
+                CandidateStageMetric(
+                    stage="symbolic",
+                    enabled=self._enable_symbolic_stage,
+                    input_count=input_count,
+                    output_count=input_count,
+                    contribution_count=0,
+                    details=(("constraint_count", len(constraints)),),
+                )
+            )
+            return candidate_ids
+
+        filtered: list[str] = []
+        for function_id in candidate_ids:
+            record = self._index.get_record(function_id)
+            if record is None:
+                continue
+            if self._matches_symbolic_constraints(record, constraints):
+                filtered.append(function_id)
+        stage_metrics.append(
+            CandidateStageMetric(
+                stage="symbolic",
+                enabled=True,
+                input_count=input_count,
+                output_count=len(filtered),
+                contribution_count=input_count - len(filtered),
+                details=(("constraint_count", len(constraints)),),
+            )
+        )
+        return filtered
+
+    def _apply_lexical_stage(
+        self,
+        candidate_ids: list[str],
+        query_text: str,
+        stage_metrics: list[CandidateStageMetric],
+    ) -> list[str]:
+        input_count = len(candidate_ids)
+        if not self._enable_lexical_stage:
+            stage_metrics.append(
+                CandidateStageMetric(
+                    stage="lexical",
+                    enabled=False,
+                    input_count=input_count,
+                    output_count=input_count,
+                    contribution_count=0,
+                    details=(("min_overlap", self._lexical_min_overlap),),
+                )
+            )
+            return candidate_ids
+
+        query_tokens = set(_TOKEN_RE.findall(query_text.lower()))
+        if not query_tokens:
+            stage_metrics.append(
+                CandidateStageMetric(
+                    stage="lexical",
+                    enabled=True,
+                    input_count=input_count,
+                    output_count=input_count,
+                    contribution_count=0,
+                    details=(("min_overlap", self._lexical_min_overlap), ("query_tokens", 0)),
+                )
+            )
+            return candidate_ids
+
+        kept: list[str] = []
+        for function_id in candidate_ids:
+            record = self._index.get_record(function_id)
+            if record is None:
+                continue
+            overlap = self._lexical_overlap(query_tokens, record)
+            if overlap >= self._lexical_min_overlap:
+                kept.append(function_id)
+        if not kept and candidate_ids:
+            kept = list(candidate_ids)
+
+        stage_metrics.append(
+            CandidateStageMetric(
+                stage="lexical",
+                enabled=True,
+                input_count=input_count,
+                output_count=len(kept),
+                contribution_count=input_count - len(kept),
+                details=(
+                    ("min_overlap", self._lexical_min_overlap),
+                    ("query_tokens", len(query_tokens)),
+                ),
+            )
+        )
+        return kept
+
+    def _apply_embedding_stage(
+        self,
+        candidate_ids: list[str],
+        *,
+        query_text: str,
+        candidate_k: int,
+        stage_metrics: list[CandidateStageMetric],
+    ) -> tuple[list[SearchResult], str, bool]:
+        input_count = len(candidate_ids)
+        if input_count == 0:
+            stage_metrics.append(
+                CandidateStageMetric(
+                    stage="embedding",
+                    enabled=self._enable_embedding_stage,
+                    input_count=0,
+                    output_count=0,
+                    contribution_count=0,
+                )
+            )
+            return [], "unavailable" if not self._enable_embedding_stage else "available", False
+
+        if not self._enable_embedding_stage:
+            fallback_hits = self._lexical_fallback_hits(candidate_ids, query_text, candidate_k)
+            stage_metrics.append(
+                CandidateStageMetric(
+                    stage="embedding",
+                    enabled=False,
+                    input_count=input_count,
+                    output_count=len(fallback_hits),
+                    contribution_count=input_count - len(fallback_hits),
+                )
+            )
+            return fallback_hits, "disabled", True
+
+        try:
+            raw_hits = self._adapter.top_k(query_text, top_k=max(candidate_k, input_count))
+            allowed = set(candidate_ids)
+            hits = [hit for hit in raw_hits if hit.function_id in allowed][: min(candidate_k, input_count)]
+            if not hits:
+                hits = self._lexical_fallback_hits(candidate_ids, query_text, candidate_k)
+                stage_metrics.append(
+                    CandidateStageMetric(
+                        stage="embedding",
+                        enabled=True,
+                        input_count=input_count,
+                        output_count=len(hits),
+                        contribution_count=input_count - len(hits),
+                        details=(("fallback_reason", "empty_embedding_hits"),),
+                    )
+                )
+                return hits, "available", True
+
+            stage_metrics.append(
+                CandidateStageMetric(
+                    stage="embedding",
+                    enabled=True,
+                    input_count=input_count,
+                    output_count=len(hits),
+                    contribution_count=input_count - len(hits),
+                )
+            )
+            return hits, "available", False
+        except Exception:
+            fallback_hits = self._lexical_fallback_hits(candidate_ids, query_text, candidate_k)
+            stage_metrics.append(
+                CandidateStageMetric(
+                    stage="embedding",
+                    enabled=True,
+                    input_count=input_count,
+                    output_count=len(fallback_hits),
+                    contribution_count=input_count - len(fallback_hits),
+                    details=(("fallback_reason", "embedding_backend_unavailable"),),
+                )
+            )
+            return fallback_hits, "unavailable", True
+
+    @staticmethod
+    def _parse_symbolic_constraints(query_text: str) -> tuple[tuple[str, str], ...]:
+        constraints: list[tuple[str, str]] = []
+        for token in query_text.split():
+            if ":" not in token:
+                continue
+            key, value = token.split(":", 1)
+            normalized_key = key.strip().lower()
+            normalized_value = value.strip().lower()
+            if not normalized_value:
+                continue
+            if normalized_key in {"id", "name", "source", "evidence"}:
+                constraints.append((normalized_key, normalized_value))
+        return tuple(constraints)
+
+    @staticmethod
+    def _matches_symbolic_constraints(
+        record: FunctionRecord,
+        constraints: tuple[tuple[str, str], ...],
+    ) -> bool:
+        provenance = {str(k).lower(): str(v).lower() for k, v in record.provenance}
+        evidence_kinds = {ref.kind.lower() for ref in record.evidence_refs}
+        record_id = record.function_id.lower()
+        record_name = record.name.lower()
+
+        for key, value in constraints:
+            if key == "id" and value not in record_id:
+                return False
+            if key == "name" and value not in record_name:
+                return False
+            if key == "source" and value != provenance.get("source", ""):
+                return False
+            if key == "evidence" and value not in evidence_kinds:
+                return False
+        return True
+
+    @staticmethod
+    def _lexical_overlap(query_tokens: set[str], record: FunctionRecord) -> float:
+        if not query_tokens:
+            return 0.0
+        record_tokens = set(_TOKEN_RE.findall(f"{record.name} {record.text}".lower()))
+        if not record_tokens:
+            return 0.0
+        overlap = len(query_tokens & record_tokens)
+        return overlap / float(len(query_tokens))
+
+    def _lexical_fallback_hits(
+        self,
+        candidate_ids: list[str],
+        query_text: str,
+        candidate_k: int,
+    ) -> list[SearchResult]:
+        query_tokens = set(_TOKEN_RE.findall(query_text.lower()))
+        rows: list[tuple[float, str, str]] = []
+        for function_id in candidate_ids:
+            record = self._index.get_record(function_id)
+            if record is None:
+                continue
+            score = self._lexical_overlap(query_tokens, record)
+            rows.append((score, record.function_id, record.name))
+        rows.sort(key=lambda item: (-item[0], item[1]))
+        limit = min(max(candidate_k, 0), len(rows))
+        return [
+            SearchResult(function_id=function_id, name=name, score=score)
+            for score, function_id, name in rows[:limit]
+        ]
 
     def _rerank_or_fallback(
         self,
@@ -5482,6 +5801,9 @@ class SemanticSearchQueryService:
         raw_hits: list[SearchResult],
         latency_ms: float,
         seed_function_id: str | None,
+        candidate_stage_metrics: tuple[CandidateStageMetric, ...] = (),
+        embedding_backend_status: str = "available",
+        embedding_fallback_applied: bool = False,
     ) -> SemanticSearchResponse:
         ranked: list[RankedSearchResult] = []
         for rank, hit in enumerate(raw_hits, start=1):
@@ -5508,6 +5830,9 @@ class SemanticSearchQueryService:
             query_tokens=len(_TOKEN_RE.findall(query_text.lower())),
             timestamp_utc=_utc_now(),
             seed_function_id=seed_function_id,
+            candidate_stage_metrics=candidate_stage_metrics,
+            embedding_backend_status=embedding_backend_status,
+            embedding_fallback_applied=embedding_fallback_applied,
         )
         return SemanticSearchResponse(
             mode=mode,

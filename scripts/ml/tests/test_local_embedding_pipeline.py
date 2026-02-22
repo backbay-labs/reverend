@@ -485,6 +485,12 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         self.assertEqual(intent_doc["query"]["mode"], "intent")
         self.assertEqual(intent_doc["query"]["top_k"], 2)
         self.assertGreaterEqual(intent_doc["metrics"]["latency_ms"], 0.0)
+        self.assertEqual(intent_doc["metrics"]["embedding_backend_status"], "available")
+        self.assertEqual(intent_doc["metrics"]["embedding_fallback_applied"], False)
+        self.assertEqual(
+            [stage["stage"] for stage in intent_doc["metrics"]["candidate_stage_metrics"]],
+            ["symbolic", "lexical", "embedding"],
+        )
         self.assertEqual(len(intent_doc["results"]), 2)
         self.assertIn("provenance", intent_doc["results"][0])
         self.assertIn("evidence_refs", intent_doc["results"][0])
@@ -494,6 +500,10 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         self.assertEqual(similar_doc["query"]["mode"], "similar-function")
         self.assertEqual(similar_doc["query"]["seed_function_id"], "fn.net.open_socket")
         self.assertGreaterEqual(similar_doc["metrics"]["latency_ms"], 0.0)
+        self.assertEqual(
+            [stage["stage"] for stage in similar_doc["metrics"]["candidate_stage_metrics"]],
+            ["symbolic", "lexical", "embedding"],
+        )
         self.assertTrue(
             all(item["function_id"] != "fn.net.open_socket" for item in similar_doc["results"])
         )
@@ -517,6 +527,21 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         baseline_ids = [item["function_id"] for item in baseline_doc["results"]]
         fallback_ids = [item["function_id"] for item in fallback_doc["results"]]
         self.assertEqual(fallback_ids, baseline_ids)
+
+    def test_semantic_search_falls_back_when_embedding_backend_unavailable(self) -> None:
+        class ExplodingAdapter:
+            def top_k(self, *_: object, **__: object) -> list[object]:
+                raise RuntimeError("embedding backend unavailable")
+
+        index = self.pipeline.build_index(self.records)
+        service = SemanticSearchQueryService(adapter=ExplodingAdapter(), index=index)
+
+        fallback_doc = service.search_intent("socket host connect", top_k=2).to_json()
+        self.assertEqual(fallback_doc["metrics"]["embedding_backend_status"], "unavailable")
+        self.assertEqual(fallback_doc["metrics"]["embedding_fallback_applied"], True)
+        stage_names = [stage["stage"] for stage in fallback_doc["metrics"]["candidate_stage_metrics"]]
+        self.assertEqual(stage_names, ["symbolic", "lexical", "embedding"])
+        self.assertGreaterEqual(len(fallback_doc["results"]), 1)
 
     def test_evaluate_command_can_disable_reranker(self) -> None:
         corpus_path = MODULE_PATH.parent / "fixtures" / "toy_similarity_corpus_slice.json"
