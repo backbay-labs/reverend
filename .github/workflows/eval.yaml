@@ -49,6 +49,9 @@ jobs:
         with:
           python-version: ${{ env.REQUIRED_PYTHON_VERSION }}
 
+      - name: Validate roadmap source-of-truth parity (blocking)
+        run: bash scripts/cyntra/validate-roadmap-completion.sh
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:

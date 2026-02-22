@@ -40,6 +40,14 @@ Dispatch waves:
 2. Plugin/runtime integration: `3203`, `3205`.
 3. Operational validation: `3206`, `3207`, `3208`.
 
+## Roadmap Source-of-Truth Status (Validator-Aligned)
+- Roadmap exportable issues: `121`
+- Done: `95`
+- Open: `17`
+- Blocked: `9`
+- E20 (`3100` + children): `blocked=1, done=5, open=9`
+- E21 (`3200` + children): `blocked=1, open=8`
+
 ## “SOTA Assistant Inside Ghidra” Operational Criteria
 - Search latency and retrieval quality are benchmarked against pinned baselines (`3206`).
 - Cockpit actions use real services and emit evidence/receipt chains (`3203`, `3205`).

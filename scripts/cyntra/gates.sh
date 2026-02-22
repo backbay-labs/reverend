@@ -784,6 +784,12 @@ run_reliability_soak_slo() {
   echo "[gates] reliability soak SLO OK (artifacts: $soak_out, $slo_json, $slo_md)"
 }
 
+run_roadmap_consistency_validation() {
+  echo "[gates] validating roadmap source-of-truth consistency (blocking)"
+  bash scripts/cyntra/validate-roadmap-completion.sh
+  echo "[gates] roadmap source-of-truth consistency OK"
+}
+
 print_module_coverage_summary() {
   local -a executed_modules=()
   local -a skipped_modules=()
@@ -850,6 +856,7 @@ case "$mode" in
     run_eval_regression
     run_reliability_soak_slo
     run_security_evidence_integrity
+    run_roadmap_consistency_validation
     print_module_coverage_summary
     ;;
   context)
