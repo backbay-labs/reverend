@@ -286,14 +286,12 @@ aliases = {
     "policy_blocked": "policy.completion_blocked",
     "policy.completion_blocked": "policy.completion_blocked",
 }
-known_codes = {
-    aliases[token.strip().lower()]
-    for token in sys.argv[2].replace(";", ",").split(",")
-    if token.strip() and token.strip().lower() in aliases
-}
+known_codes = set()
+for token in sys.argv[2].replace(";", ",").split(","):
+    raw = token.strip().lower()
+    if raw and raw in aliases:
+        known_codes.add(aliases[raw])
 run_started_epoch = int(sys.argv[3])
-if not known_codes:
-    raise SystemExit(1)
 
 proof_paths = list(repo_root.glob(".workcells/**/proof.json"))
 if not proof_paths:
@@ -314,6 +312,140 @@ if not isinstance(metadata, dict):
     metadata = {}
 if not isinstance(verification, dict):
     verification = {}
+gate_summary = verification.get("gate_summary") or {}
+if not isinstance(gate_summary, dict):
+    gate_summary = {}
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _as_int(value):
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text and text.lstrip("-").isdigit():
+            try:
+                return int(text)
+            except Exception:
+                return None
+    return None
+
+
+def _first_int(*values):
+    for value in values:
+        parsed = _as_int(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _first_text(*values):
+    for value in values:
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return ""
+
+
+completion_statuses = {
+    "completed",
+    "complete",
+    "done",
+    "success",
+    "succeeded",
+    "passed",
+    "ok",
+}
+is_completion_result = status in completion_statuses
+
+diff_files = _first_int(
+    gate_summary.get("diff_files"),
+    gate_summary.get("files_changed"),
+    verification.get("diff_files"),
+    verification.get("files_changed"),
+    metadata.get("diff_files"),
+    metadata.get("files_changed"),
+    proof.get("diff_files"),
+    proof.get("files_changed"),
+)
+diff_lines = _first_int(
+    gate_summary.get("diff_lines"),
+    gate_summary.get("lines_changed"),
+    gate_summary.get("total_lines"),
+    verification.get("diff_lines"),
+    verification.get("lines_changed"),
+    verification.get("total_lines"),
+    metadata.get("diff_lines"),
+    metadata.get("lines_changed"),
+    metadata.get("total_lines"),
+    proof.get("diff_lines"),
+    proof.get("lines_changed"),
+    proof.get("total_lines"),
+)
+diff_files_value = max(diff_files or 0, 0)
+diff_lines_value = max(diff_lines or 0, 0)
+
+issue_block = proof.get("issue") or {}
+if not isinstance(issue_block, dict):
+    issue_block = {}
+explicit_noop_justification = _first_text(
+    gate_summary.get("noop_justification"),
+    verification.get("noop_justification"),
+    metadata.get("noop_justification"),
+    issue_block.get("noop_justification"),
+    proof.get("noop_justification"),
+)
+has_explicit_noop_justification = bool(explicit_noop_justification)
+observed_noop_reason = _first_text(
+    gate_summary.get("noop_reason"),
+    gate_summary.get("reason"),
+    verification.get("noop_reason"),
+    metadata.get("noop_reason"),
+)
+
+existing_classification = _first_text(
+    gate_summary.get("completion_classification"),
+    gate_summary.get("classification"),
+).lower()
+if diff_files_value > 0 or diff_lines_value > 0:
+    completion_classification = "code_change"
+elif existing_classification in {"code_change", "noop"}:
+    completion_classification = existing_classification
+else:
+    completion_classification = "noop"
+
+noop_reason = ""
+noop_reason_source = ""
+policy_result = "allow"
+policy_blocked = False
+if completion_classification == "noop":
+    if has_explicit_noop_justification:
+        noop_reason = explicit_noop_justification
+        noop_reason_source = "explicit_field"
+    else:
+        noop_reason = observed_noop_reason or "missing_explicit_noop_justification"
+        noop_reason_source = "missing_explicit_field"
+        policy_result = "blocked"
+        policy_blocked = True
+
+gate_summary["diff_files"] = diff_files_value
+gate_summary["diff_lines"] = diff_lines_value
+gate_summary["completion_classification"] = completion_classification
+gate_summary["noop_reason"] = noop_reason
+gate_summary["noop_reason_source"] = noop_reason_source
+gate_summary["explicit_noop_justification_present"] = has_explicit_noop_justification
+gate_summary["policy_result"] = policy_result
+gate_summary["policy_blocked"] = policy_blocked
+verification["gate_summary"] = gate_summary
+proof["verification"] = verification
 
 detected_code = ""
 candidates: list[str] = []
@@ -332,38 +464,77 @@ for candidate in candidates:
         detected_code = normalized
         break
 
-if not detected_code:
-    raise SystemExit(1)
+if policy_blocked and is_completion_result:
+    detected_code = "policy.completion_blocked"
 
 proof_changed = False
-if str(proof.get("failure_code") or "") != detected_code:
+if detected_code and str(proof.get("failure_code") or "") != detected_code:
     proof["failure_code"] = detected_code
     proof_changed = True
-if str(metadata.get("failure_code") or "") != detected_code:
+if detected_code and str(metadata.get("failure_code") or "") != detected_code:
     metadata["failure_code"] = detected_code
     proof["metadata"] = metadata
     proof_changed = True
-if str(verification.get("failure_code") or "") != detected_code:
+if detected_code and str(verification.get("failure_code") or "") != detected_code:
     verification["failure_code"] = detected_code
     proof["verification"] = verification
     proof_changed = True
+blocking_failures = verification.get("blocking_failures")
+if not isinstance(blocking_failures, list):
+    blocking_failures = []
+if detected_code and detected_code.startswith("policy.") and detected_code not in blocking_failures:
+    verification["blocking_failures"] = [*blocking_failures, detected_code]
+    proof["verification"] = verification
+    proof_changed = True
+
+telemetry_path = latest.parent / "telemetry.jsonl"
+global_events_path = repo_root / ".cyntra" / "logs" / "events.jsonl"
+workcell_id = str(proof.get("workcell_id") or latest.parent.name or "")
+issue_id = str(proof.get("issue_id") or "")
+
+completion_summary_event = {
+    "timestamp_utc": now_iso(),
+    "event": "completion_policy_gate_summary",
+    "issue_id": issue_id,
+    "workcell_id": workcell_id,
+    "proof_path": str(latest),
+    "gate_summary": {
+        "diff_files": diff_files_value,
+        "diff_lines": diff_lines_value,
+        "completion_classification": completion_classification,
+        "noop_reason": noop_reason,
+        "noop_reason_source": noop_reason_source,
+        "explicit_noop_justification_present": has_explicit_noop_justification,
+        "policy_result": policy_result,
+        "policy_blocked": policy_blocked,
+    },
+}
+if is_completion_result:
+    with telemetry_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(completion_summary_event, ensure_ascii=False) + "\n")
+    global_events_path.parent.mkdir(parents=True, exist_ok=True)
+    with global_events_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(completion_summary_event, ensure_ascii=False) + "\n")
+    proof_changed = True
+
+if detected_code:
+    telemetry = {
+        "timestamp_utc": now_iso(),
+        "event": "failure_code_classified",
+        "failure_code": detected_code,
+        "issue_id": issue_id,
+        "workcell_id": workcell_id,
+        "proof_path": str(latest),
+    }
+    with telemetry_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(telemetry, ensure_ascii=False) + "\n")
+
 if proof_changed:
     latest.write_text(json.dumps(proof, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-telemetry_path = latest.parent / "telemetry.jsonl"
-telemetry = {
-    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-    "event": "failure_code_classified",
-    "failure_code": detected_code,
-    "issue_id": str(proof.get("issue_id") or ""),
-    "workcell_id": str(proof.get("workcell_id") or latest.parent.name or ""),
-    "proof_path": str(latest),
-}
-with telemetry_path.open("a", encoding="utf-8") as handle:
-    handle.write(json.dumps(telemetry, ensure_ascii=False) + "\n")
+if not detected_code and not is_completion_result:
+    raise SystemExit(1)
 
-workcell_id = str(proof.get("workcell_id") or latest.parent.name or "")
-issue_id = str(proof.get("issue_id") or "")
 print(
     json.dumps(
         {
@@ -371,6 +542,9 @@ print(
             "issue_id": issue_id,
             "workcell_id": workcell_id,
             "proof_path": str(latest),
+            "completion_classification": completion_classification,
+            "noop_reason": noop_reason,
+            "policy_result": policy_result,
         }
     )
 )
@@ -417,6 +591,11 @@ PY
 
 if [[ -z "$failure_code" ]]; then
   exit "$primary_status"
+fi
+
+if [[ "$failure_code" == "policy.completion_blocked" ]]; then
+  echo "[cyntra] completion policy blocked zero-diff closure (missing explicit no-op justification)"
+  exit 1
 fi
 
 echo "[cyntra] deterministic failure classified as failure_code='$failure_code'; attempting fallback route"
