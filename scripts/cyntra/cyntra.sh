@@ -7,7 +7,7 @@ config_path="${CYNTRA_CONFIG_PATH:-$repo_root/.cyntra/config.yaml}"
 issues_path="${CYNTRA_ISSUES_PATH:-$repo_root/.beads/issues.jsonl}"
 merge_guards="${CYNTRA_MERGE_GUARDS:-1}"
 uv_refresh_kernel="${CYNTRA_UV_REFRESH_KERNEL:-1}"
-fallback_policy="${CYNTRA_FALLBACK_POLICY:-prompt_stall_no_output=claude}"
+fallback_policy="${CYNTRA_FALLBACK_POLICY:-runtime.prompt_stall_no_output=claude}"
 fallback_max_hops="${CYNTRA_FALLBACK_MAX_HOPS:-1}"
 fallback_record_path="${CYNTRA_FALLBACK_RECORD_PATH:-$repo_root/.cyntra/state/fallback-routing.json}"
 
@@ -275,10 +275,10 @@ PY
 }
 
 resolve_fallback_toolchain() {
-  local failure_class="${1:-}"
-  local normalized_class
-  normalized_class="$(printf '%s' "$failure_class" | tr '[:upper:]' '[:lower:]')"
-  [[ -n "$normalized_class" ]] || return 1
+  local failure_code="${1:-}"
+  local normalized_code
+  normalized_code="$(normalize_failure_code "$failure_code" || true)"
+  [[ -n "$normalized_code" ]] || return 1
 
   local old_ifs="$IFS"
   IFS=',;'
@@ -288,6 +288,7 @@ resolve_fallback_toolchain() {
   local entry=""
   local lhs=""
   local rhs=""
+  local lhs_normalized=""
   for entry in "${entries[@]}"; do
     entry="${entry#"${entry%%[![:space:]]*}"}"
     entry="${entry%"${entry##*[![:space:]]}"}"
@@ -306,12 +307,39 @@ resolve_fallback_toolchain() {
     rhs="${rhs#"${rhs%%[![:space:]]*}"}"
     rhs="${rhs%"${rhs##*[![:space:]]}"}"
     [[ -n "$lhs" && -n "$rhs" ]] || continue
-    if [[ "$(printf '%s' "$lhs" | tr '[:upper:]' '[:lower:]')" == "$normalized_class" ]]; then
+    lhs_normalized="$(normalize_failure_code "$lhs" || true)"
+    [[ -n "$lhs_normalized" ]] || continue
+    if [[ "$lhs_normalized" == "$normalized_code" ]]; then
       printf '%s\n' "$rhs"
       return 0
     fi
   done
   return 1
+}
+
+normalize_failure_code() {
+  local raw="${1:-}"
+  local normalized
+  normalized="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+  normalized="${normalized#"${normalized%%[![:space:]]*}"}"
+  normalized="${normalized%"${normalized##*[![:space:]]}"}"
+  case "$normalized" in
+    runtime.prompt_stall_no_output|prompt_stall_no_output)
+      printf '%s\n' "runtime.prompt_stall_no_output"
+      ;;
+    gate.quality_gate_failed|quality_gate_failed|gate_failed)
+      printf '%s\n' "gate.quality_gate_failed"
+      ;;
+    gate.context_missing_on_main|context_missing_on_main)
+      printf '%s\n' "gate.context_missing_on_main"
+      ;;
+    policy.completion_blocked|completion_blocked|policy_blocked)
+      printf '%s\n' "policy.completion_blocked"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 toolchain_in_chain() {
@@ -416,7 +444,7 @@ write_fallback_provenance() {
   local issue_id="${1:-}"
   local source_toolchain="${2:-}"
   local fallback_toolchain="${3:-}"
-  local failure_class="${4:-}"
+  local failure_code="${4:-}"
   local workcell_id="${5:-}"
   local proof_path="${6:-}"
 
@@ -432,7 +460,8 @@ record = {
     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
     "issue_id": os.environ.get("CYNTRA_FALLBACK_ISSUE_ID"),
     "workcell_id": os.environ.get("CYNTRA_FALLBACK_WORKCELL_ID"),
-    "failure_class": os.environ.get("CYNTRA_FALLBACK_CLASS"),
+    "failure_code": os.environ.get("CYNTRA_FALLBACK_FAILURE_CODE"),
+    "failure_class": os.environ.get("CYNTRA_FALLBACK_FAILURE_CODE"),
     "source_toolchain": os.environ.get("CYNTRA_FALLBACK_SOURCE_TOOLCHAIN"),
     "target_toolchain": os.environ.get("CYNTRA_FALLBACK_TARGET_TOOLCHAIN"),
     "proof_path": os.environ.get("CYNTRA_FALLBACK_PROOF_PATH"),
@@ -443,12 +472,18 @@ PY
 
 configure_fallback_routing_if_requested() {
   [[ "${args[0]:-}" == "run" ]] || return 0
-  local failure_class="${CYNTRA_FAILURE_CLASS:-}"
-  [[ -n "$failure_class" ]] || return 0
+  local raw_failure_code="${CYNTRA_FAILURE_CODE:-${CYNTRA_FAILURE_CLASS:-}}"
+  [[ -n "$raw_failure_code" ]] || return 0
+  local failure_code=""
+  failure_code="$(normalize_failure_code "$raw_failure_code" || true)"
+  if [[ -z "$failure_code" ]]; then
+    echo "[cyntra] ignoring unknown failure code '$raw_failure_code' (supported taxonomy: runtime.*, gate.*, policy.*)"
+    return 0
+  fi
 
   local fallback_toolchain=""
-  if ! fallback_toolchain="$(resolve_fallback_toolchain "$failure_class")"; then
-    echo "[cyntra] no fallback route configured for failure class '$failure_class'"
+  if ! fallback_toolchain="$(resolve_fallback_toolchain "$failure_code")"; then
+    echo "[cyntra] no fallback route configured for failure code '$failure_code'"
     return 0
   fi
 
@@ -506,7 +541,8 @@ PY
   else
     export CYNTRA_FALLBACK_CHAIN="${fallback_toolchain}"
   fi
-  export CYNTRA_FALLBACK_CLASS="$failure_class"
+  export CYNTRA_FALLBACK_FAILURE_CODE="$failure_code"
+  export CYNTRA_FALLBACK_CLASS="$failure_code"
   export CYNTRA_FALLBACK_SOURCE_TOOLCHAIN="$source_toolchain"
   export CYNTRA_FALLBACK_TARGET_TOOLCHAIN="$fallback_toolchain"
   export CYNTRA_FALLBACK_ISSUE_ID="$issue_id"
@@ -514,8 +550,8 @@ PY
   export CYNTRA_FALLBACK_PROOF_PATH="$proof_path"
   export CYNTRA_FALLBACK_APPLIED=1
 
-  write_fallback_provenance "$issue_id" "$source_toolchain" "$fallback_toolchain" "$failure_class" "$workcell_id" "$proof_path"
-  echo "[cyntra] fallback routing: class='$failure_class' source='${source_toolchain:-unknown}' target='$fallback_toolchain' issue='${issue_id:-unknown}'"
+  write_fallback_provenance "$issue_id" "$source_toolchain" "$fallback_toolchain" "$failure_code" "$workcell_id" "$proof_path"
+  echo "[cyntra] fallback routing: failure_code='$failure_code' source='${source_toolchain:-unknown}' target='$fallback_toolchain' issue='${issue_id:-unknown}'"
 }
 
 invoke_kernel() {
