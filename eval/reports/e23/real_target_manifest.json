@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "kind": "real_target_benchmark_manifest",
+  "harness_id": "e23-s4-real-target",
+  "slices": [
+    {
+      "slice_id": "triage-curated-v2026.02.1",
+      "dataset": "triage-curated-v2026.02.1",
+      "benchmark_file": "benchmark.json",
+      "top_k": 5,
+      "warmup_runs": 1,
+      "measure_runs": 3
+    }
+  ]
+}
