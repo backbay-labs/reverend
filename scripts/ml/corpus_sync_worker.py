@@ -9,6 +9,7 @@ checks for both sync and retrieval operations.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -30,8 +31,10 @@ _VIOLATION_REMEDIATION_ACTIONS = {
     "CAPABILITY_DENIED": "DENY_ACTION_AND_REQUIRE_CAPABILITY_GRANT",
     "EGRESS_BLOCKED": "DENY_EGRESS_AND_REQUIRE_ALLOWLIST_UPDATE",
     "PROVENANCE_CHAIN_INVALID": "DENY_ACTION_AND_REQUIRE_PROVENANCE_REPAIR",
+    "INTEGRITY_MISMATCH": "DENY_ACTION_AND_REQUIRE_ARTIFACT_REPAIR",
 }
 _VIOLATION_EVENT_TYPES = frozenset(_VIOLATION_REMEDIATION_ACTIONS.keys())
+CAS_HASH_ALGORITHM = "sha256"
 
 
 def _utc_now() -> str:
@@ -44,6 +47,22 @@ def _now_ns() -> int:
 
 def _elapsed_ms(start_ns: int) -> float:
     return round((time.perf_counter_ns() - start_ns) / 1_000_000.0, 3)
+
+
+def _compute_content_hash(payload: Mapping[str, Any]) -> str:
+    """Compute deterministic content hash for CAS addressing.
+
+    The hash is computed over the canonical JSON representation of the payload
+    (sorted keys, no whitespace) to ensure determinism across serializations.
+    """
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _verify_content_hash(payload: Mapping[str, Any], expected_hash: str) -> bool:
+    """Verify that payload content matches expected CAS hash."""
+    computed = _compute_content_hash(payload)
+    return computed == expected_hash
 
 
 def _normalize_program_id(value: Any) -> str | None:
@@ -1020,6 +1039,26 @@ class AccessPolicy:
             reason=reason,
         )
 
+    def audit_integrity_violation(
+        self,
+        *,
+        action: str,
+        proposal_id: str,
+        program_id: str | None,
+        expected_hash: str,
+        computed_hash: str,
+        reason: str,
+    ) -> None:
+        self._emit(
+            event_type="INTEGRITY_MISMATCH",
+            severity="ERROR",
+            action=action,
+            outcome="DENY",
+            proposal_id=proposal_id,
+            program_id=program_id,
+            reason=f"{reason} (expected: {expected_hash}, computed: {computed_hash})",
+        )
+
     def _authorize(
         self,
         *,
@@ -1171,6 +1210,10 @@ class AccessPolicy:
         )
 
 
+class IntegrityMismatchError(ValueError):
+    """Raised when artifact content hash verification fails."""
+
+
 @dataclass(frozen=True)
 class ProposalArtifact:
     """Proposal payload from local store."""
@@ -1183,6 +1226,7 @@ class ProposalArtifact:
     program_id: str | None = None
     artifact: Mapping[str, Any] | None = None
     updated_at_utc: str | None = None
+    content_hash: str | None = None
 
     @classmethod
     def from_json(cls, raw: Mapping[str, Any]) -> "ProposalArtifact":
@@ -1213,6 +1257,14 @@ class ProposalArtifact:
 
         provenance_chain = _extract_provenance_chain(raw, artifact=artifact, receipt_id=receipt_id)
 
+        # Compute content hash for CAS addressing if artifact payload exists.
+        # If raw already contains a content_hash, use it for verification later.
+        existing_hash = str(raw.get("content_hash") or "").strip() or None
+        computed_hash: str | None = None
+        if artifact is not None:
+            computed_hash = _compute_content_hash(dict(artifact))
+        content_hash = existing_hash or computed_hash
+
         return cls(
             proposal_id=proposal_id,
             state=state,
@@ -1222,6 +1274,7 @@ class ProposalArtifact:
             program_id=program_id,
             artifact=artifact,
             updated_at_utc=updated_at_utc,
+            content_hash=content_hash,
         )
 
     def to_backend_json(self) -> dict[str, Any]:
@@ -1246,6 +1299,9 @@ class ProposalArtifact:
             payload["updated_at_utc"] = self.updated_at_utc
         if self.artifact is not None:
             payload["artifact"] = dict(self.artifact)
+        if self.content_hash is not None:
+            payload["content_hash"] = self.content_hash
+            payload["content_hash_algorithm"] = CAS_HASH_ALGORITHM
         return payload
 
 
@@ -1534,6 +1590,26 @@ class CorpusSyncWorker:
                 errors.append(SyncError(proposal_id=proposal.proposal_id, error=str(exc)))
                 continue
 
+            # CAS integrity verification: verify content hash before sync
+            if proposal.artifact is not None and proposal.content_hash is not None:
+                computed_hash = _compute_content_hash(dict(proposal.artifact))
+                if computed_hash != proposal.content_hash:
+                    reason = "content hash mismatch on write"
+                    self._access_policy.audit_integrity_violation(
+                        action="SYNC",
+                        proposal_id=proposal.proposal_id,
+                        program_id=proposal.program_id,
+                        expected_hash=proposal.content_hash,
+                        computed_hash=computed_hash,
+                        reason=reason,
+                    )
+                    error_msg = (
+                        f"{reason} (expected: {proposal.content_hash}, "
+                        f"computed: {computed_hash})"
+                    )
+                    errors.append(SyncError(proposal_id=proposal.proposal_id, error=error_msg))
+                    continue
+
             if proposal.proposal_id in synced_ids or self._backend.has(proposal.proposal_id):
                 already_synced_count += 1
                 if proposal.proposal_id not in synced_ids:
@@ -1659,6 +1735,25 @@ def read_synced_artifact(
             reason=str(exc),
         )
         raise
+
+    # CAS integrity verification: verify content hash on read
+    content_hash = str(artifact.get("content_hash") or "").strip() or None
+    artifact_payload = artifact.get("artifact")
+    if content_hash is not None and isinstance(artifact_payload, Mapping):
+        computed_hash = _compute_content_hash(dict(artifact_payload))
+        if computed_hash != content_hash:
+            reason = "content hash mismatch on read"
+            resolved_policy.audit_integrity_violation(
+                action="READ",
+                proposal_id=normalized_proposal_id,
+                program_id=program_id,
+                expected_hash=content_hash,
+                computed_hash=computed_hash,
+                reason=reason,
+            )
+            raise IntegrityMismatchError(
+                f"{reason} (expected: {content_hash}, computed: {computed_hash})"
+            )
 
     return dict(artifact)
 

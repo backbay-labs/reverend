@@ -202,12 +202,47 @@ from pathlib import Path
 
 
 def changed_stats() -> tuple[int, int]:
+    ignored_prefixes = (
+        ".beads/",
+        ".cyntra/",
+        ".gradle/",
+        ".gradle-user-home/",
+        ".idea/",
+        ".vscode/",
+        "build/",
+        "dist/",
+        "logs/",
+        "tmp/",
+    )
+    ignored_exact = {
+        ".DS_Store",
+        ".mise.toml",
+        ".workcell",
+        "manifest.json",
+        "prompt.md",
+        "proof.json",
+        "rollout.json",
+        "telemetry.jsonl",
+    }
+
+    def should_ignore(path: str) -> bool:
+        normalized = path.replace("\\", "/").lstrip("./")
+        if not normalized:
+            return True
+        if normalized in ignored_exact:
+            return True
+        return any(normalized.startswith(prefix) for prefix in ignored_prefixes)
+
     files_out = subprocess.check_output(
         ["git", "diff", "--name-only", "--", "."],
         text=True,
         stderr=subprocess.DEVNULL,
     )
-    files = [line.strip() for line in files_out.splitlines() if line.strip()]
+    files = [
+        line.strip()
+        for line in files_out.splitlines()
+        if line.strip() and not should_ignore(line.strip())
+    ]
     lines_out = subprocess.check_output(
         ["git", "diff", "--numstat", "--", "."],
         text=True,
@@ -237,7 +272,7 @@ def changed_stats() -> tuple[int, int]:
         path = row[3:].strip()
         if not path:
             continue
-        if code == "??":
+        if code == "??" and not should_ignore(path):
             untracked.append(path)
     all_files = set(files)
     all_files.update(untracked)
@@ -378,6 +413,7 @@ has_java_scope_changes() {
 run_security_compile_regression() {
   if ! has_java_scope_changes; then
     echo "[gates] security compile gate skipped (no Java/Ghidra scope changes)"
+    echo "[gates] MODULE_COVERAGE: Generic=skipped (no scope changes)"
     return 0
   fi
 
@@ -400,6 +436,62 @@ run_security_compile_regression() {
   python3 scripts/cyntra/check-junit-failures.py \
     --results-dir Ghidra/Framework/Generic/build/test-results/test
   echo "[gates] Generic security compile/test regression OK"
+  echo "[gates] MODULE_COVERAGE: Generic=executed"
+}
+
+run_reverend_compile_regression() {
+  if ! has_java_scope_changes; then
+    echo "[gates] Reverend compile gate skipped (no Java/Ghidra scope changes)"
+    echo "[gates] MODULE_COVERAGE: Reverend=skipped (no scope changes)"
+    return 0
+  fi
+
+  require_gradle_build_prereqs
+
+  local gradle_cmd=("./gradlew")
+  if [[ ! -x "./gradlew" ]]; then
+    if command -v gradle >/dev/null 2>&1; then
+      gradle_cmd=("gradle")
+    else
+      echo "[gates] ERROR: neither ./gradlew nor gradle command is available" >&2
+      exit 1
+    fi
+  fi
+
+  echo "[gates] compiling Reverend module (blocking)"
+  "${gradle_cmd[@]}" --no-daemon :Reverend:compileJava
+  echo "[gates] running Reverend unit tests (blocking)"
+  "${gradle_cmd[@]}" --no-daemon :Reverend:test --tests "ghidra.reverend.*"
+  python3 scripts/cyntra/check-junit-failures.py \
+    --results-dir Ghidra/Features/Reverend/build/test-results/test
+  echo "[gates] Reverend compile/test regression OK"
+  echo "[gates] MODULE_COVERAGE: Reverend=executed"
+}
+
+run_frontier_compile_regression() {
+  if ! has_java_scope_changes; then
+    echo "[gates] frontier compile gate skipped (no Java/Ghidra scope changes)"
+    echo "[gates] MODULE_COVERAGE: SoftwareModeling=skipped,Base=skipped (no scope changes)"
+    return 0
+  fi
+
+  require_gradle_build_prereqs
+
+  local gradle_cmd=("./gradlew")
+  if [[ ! -x "./gradlew" ]]; then
+    if command -v gradle >/dev/null 2>&1; then
+      gradle_cmd=("gradle")
+    else
+      echo "[gates] ERROR: neither ./gradlew nor gradle command is available" >&2
+      exit 1
+    fi
+  fi
+
+  # Compile key frontier modules that form the dependency backbone
+  echo "[gates] compiling frontier modules: SoftwareModeling, Base (blocking)"
+  "${gradle_cmd[@]}" --no-daemon :SoftwareModeling:compileJava :Base:compileJava
+  echo "[gates] frontier module compile OK"
+  echo "[gates] MODULE_COVERAGE: SoftwareModeling=executed,Base=executed"
 }
 
 run_security_evidence_integrity() {
@@ -494,6 +586,13 @@ run_eval_regression() {
   echo "[gates] eval regression OK (artifacts: $metrics_out, $regression_out)"
 }
 
+print_module_coverage_summary() {
+  echo "[gates] ====== MODULE COVERAGE SUMMARY ======"
+  echo "[gates] Executed: Generic, Reverend, SoftwareModeling, Base (when Java scope changes detected)"
+  echo "[gates] Skipped: (modules without scope changes are automatically skipped)"
+  echo "[gates] ======================================="
+}
+
 case "$mode" in
   all)
     check_manifest_context
@@ -502,8 +601,11 @@ case "$mode" in
     run_python_regression
     run_java_regression
     run_security_compile_regression
+    run_reverend_compile_regression
+    run_frontier_compile_regression
     run_eval_regression
     run_security_evidence_integrity
+    print_module_coverage_summary
     ;;
   context)
     check_manifest_context
@@ -516,6 +618,9 @@ case "$mode" in
   java)
     run_java_regression
     run_security_compile_regression
+    run_reverend_compile_regression
+    run_frontier_compile_regression
+    print_module_coverage_summary
     ;;
   evidence)
     run_security_evidence_integrity

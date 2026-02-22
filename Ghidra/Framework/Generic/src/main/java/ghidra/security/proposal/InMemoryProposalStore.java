@@ -88,4 +88,25 @@ public class InMemoryProposalStore implements ProposalStore {
 	public boolean isEmpty() {
 		return proposals.isEmpty();
 	}
+
+	/**
+	 * Clears all proposals from the store.
+	 * For testing and transaction rollback support.
+	 */
+	public void clear() {
+		proposals.clear();
+	}
+
+	/**
+	 * Replaces all proposals with the given collection.
+	 * For transaction rollback support.
+	 *
+	 * @param newProposals the proposals to set
+	 */
+	public void replaceAll(Collection<Proposal> newProposals) {
+		proposals.clear();
+		for (Proposal p : newProposals) {
+			proposals.put(p.getId(), p);
+		}
+	}
 }

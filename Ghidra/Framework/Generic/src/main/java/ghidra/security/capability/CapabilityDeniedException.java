@@ -53,7 +53,11 @@ public class CapabilityDeniedException extends SecurityException {
 		/** The mutation limit for the session has been exceeded */
 		MUTATION_LIMIT_EXCEEDED("Session mutation limit exceeded"),
 		/** The operation requires a receipt but none was provided */
-		RECEIPT_REQUIRED("Operation requires a receipt");
+		RECEIPT_REQUIRED("Operation requires a receipt"),
+		/** The token has been revoked */
+		TOKEN_REVOKED("Token has been revoked"),
+		/** The token has already been used (replay attempt) */
+		TOKEN_REPLAYED("Token has already been used (replay attempt)");
 
 		private final String description;
 
@@ -150,6 +154,42 @@ public class CapabilityDeniedException extends SecurityException {
 		return new CapabilityDeniedException(
 			required,
 			DenialReason.SCOPE_VIOLATION,
+			token.getProfile(),
+			token.getPrincipal(),
+			operation);
+	}
+
+	/**
+	 * Creates a capability denied exception for a revoked token.
+	 *
+	 * @param token the revoked token
+	 * @param required the required capability
+	 * @param operation description of the attempted operation
+	 * @return the exception
+	 */
+	public static CapabilityDeniedException tokenRevoked(CapabilityToken token,
+			Capability required, String operation) {
+		return new CapabilityDeniedException(
+			required,
+			DenialReason.TOKEN_REVOKED,
+			token.getProfile(),
+			token.getPrincipal(),
+			operation);
+	}
+
+	/**
+	 * Creates a capability denied exception for a replayed token.
+	 *
+	 * @param token the replayed token
+	 * @param required the required capability
+	 * @param operation description of the attempted operation
+	 * @return the exception
+	 */
+	public static CapabilityDeniedException tokenReplayed(CapabilityToken token,
+			Capability required, String operation) {
+		return new CapabilityDeniedException(
+			required,
+			DenialReason.TOKEN_REPLAYED,
 			token.getProfile(),
 			token.getPrincipal(),
 			operation);

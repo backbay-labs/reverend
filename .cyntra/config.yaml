@@ -14,13 +14,21 @@ toolchains:
   codex:
     enabled: true
     path: "codex"
-    default_model: "gpt-5.2"
+    default_model: "gpt-5.3-codex"
     timeout_minutes: 60
     max_tokens: 100000
     config:
       approval_mode: "full-auto"
+      default_reasoning_effort: "high"
+      reasoning_effort_map:
+        dk_risk_critical: "high"
+        dk_risk_high: "medium"
+        dk_size_XL: "high"
+        dk_size_L: "high"
+        dk_size_M: "medium"
+        dk_size_S: "medium"
   claude:
-    enabled: true
+    enabled: false
     path: "claude"
     timeout_minutes: 60
     max_tokens: 100000
@@ -54,7 +62,7 @@ routing:
     - match: {}
       use: ["codex"]
   fallbacks:
-    codex: ["claude"]
+    codex: []
     claude: ["codex"]
     opencode: ["codex", "claude"]
     crush: ["codex", "claude"]

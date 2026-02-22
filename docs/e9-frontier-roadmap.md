@@ -208,3 +208,23 @@ flowchart LR
 2. Wave 1 (parallel): `2302`, `2303`, `2304`, `2305`
 3. Wave 2 (parallel): `2306`, `2307`
 4. Wave 3: `2308`
+
+## 9) E13-E19 GA Expansion Program (Seeded)
+
+E13-E19 extends the frontier roadmap from capability demos to production-grade depth:
+real-target benchmark GA, native pluginization, decompiler-native type intelligence,
+dynamic/symbolic/taint evidence fabric, corpus platform GA, zero-trust runtime controls,
+and patch/exploitability workbench operations.
+
+| Epic | Bead ID | Current Status | Program Focus |
+|---|---|---|---|
+| E13 Real-Target Benchmark Program GA | `2400` | `blocked` | Corpus/provenance, calibration, human-time benchmarks, signed release packs |
+| E14 Native Reverend Pluginization | `2500` | `blocked` | Ghidra-native service contracts, cockpit v2, transaction-safe apply/revert |
+| E15 Decompiler-Native Type/Structure Intelligence | `2600` | `blocked` | SSA/alias extraction, struct/vtable inference, propagation and type benchmarks |
+| E16 Dynamic/Symbolic/Taint Evidence Fabric | `2700` | `blocked` | Trace/taint/constraint/coverage ingestion, temporal API, deterministic replay |
+| E17 Corpus Platform GA + Team Scale | `2800` | `blocked` | CAS integrity, sharding, tenancy hardening, load/soak validation |
+| E18 Zero-Trust Agent Runtime | `2900` | `blocked` | OS sandboxing, short-lived creds, DLP, attestation, posture automation |
+| E19 Patching + Exploitability Workbench | `3000` | `blocked` | Rewrite interop, exploitability scoring, PoC replay, remediation decision packets |
+
+Detailed per-story technical requirements, artifact contracts, and dependency spine:
+- `docs/e13-e19-frontier-ga-roadmap.md`

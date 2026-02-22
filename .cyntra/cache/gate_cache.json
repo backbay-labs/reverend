@@ -41,6 +41,1875 @@
         "gate": "lint"
       },
       "created_at": "2026-02-21T09:13:58.210723+00:00"
+    },
+    "9504f3e985e045a815806c144eefa65135d65c66e3bdf27ce051dc4befa81fba": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4280,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2305-20260222T125050Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2305-20260222T125050Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T13:10:26.127291+00:00"
+    },
+    "85f8afe5214be971ac7aeb3ac3cb09204fef243f681d36cd01deea8abf7b1ed3": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1220,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2305-20260222T125050Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2305-20260222T125050Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T13:10:27.348514+00:00"
+    },
+    "7267985272ac9a469751f31bc6faac868fdaf3e290a2ca7db8c002c6e886737c": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1129,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2305-20260222T125050Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2305-20260222T125050Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T13:10:28.478317+00:00"
+    },
+    "4203a52db90107aeafca2f11f7df2e06b339bd942ced3db1c91f2f7755b36f37": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4449,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2302-20260222T125044Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2302-20260222T125044Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T13:18:03.149751+00:00"
+    },
+    "217dbd53f0f5f18fccd14d7540055ff90370cb658b408bdcec8fa40a063c37f3": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1154,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2302-20260222T125044Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2302-20260222T125044Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T13:18:04.304361+00:00"
+    },
+    "bcdcb4140c5309f87dadf786af841e94fb804ebff12f265c55d4869156758558": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1217,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2302-20260222T125044Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2302-20260222T125044Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T13:18:05.522212+00:00"
+    },
+    "d9146db9b2df0135312a6efdc723a13fe3c07e7566f19aae7cdcdcb7d2bf11a7": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4477,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2303-20260222T134219Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2303-20260222T134219Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T13:50:24.449219+00:00"
+    },
+    "37f312d59b40a0c59c334b25c1c75b82fdd79389feecbc85c96a3d5854d2d0c6": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1212,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2303-20260222T134219Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2303-20260222T134219Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T13:50:25.662469+00:00"
+    },
+    "1b50ca79ac76357e6ff140e70b5fae24f4412a18df1c0ef83928124540c75a97": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1156,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2303-20260222T134219Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2303-20260222T134219Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T13:50:26.820135+00:00"
+    },
+    "ef73d2191d65440ecf9b024a15bb59ff6dbad2c89f9ec4fabe07f55ba461a0f5": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4185,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2306-20260222T135337Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2306-20260222T135337Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:00:01.477602+00:00"
+    },
+    "9ed5d666c40fc3e787c7e8abbf90cfe5ae981faa0aa4ecc8291cae01225f5690": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1285,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2306-20260222T135337Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2306-20260222T135337Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:00:02.763673+00:00"
+    },
+    "740104346736e383ceb03e004c71a4ced51b6ead9b38e8c8a53bc990618fb30f": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1181,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2306-20260222T135337Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2306-20260222T135337Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:00:03.945826+00:00"
+    },
+    "f10141558fa125ba67d1422345832c3758696ab1a0a94f37ba1e6b6ed0eca475": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4404,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2307-20260222T135340Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2307-20260222T135340Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:03:20.414693+00:00"
+    },
+    "e5d700f41f468f48b393ce1bfaca23196152f634340ad409ef71f8c478d7136d": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1188,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2307-20260222T135340Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2307-20260222T135340Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:03:21.603444+00:00"
+    },
+    "d6b05641a7b0a2fff92fa1cb279b11a44eb6edd0da0736de3113e0663535e4c2": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1191,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2307-20260222T135340Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2307-20260222T135340Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:03:22.795287+00:00"
+    },
+    "d0f334f11f028a5bae87e82fe065a8d15315c5e74919c75b6c81c85a27918949": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4459,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2308-20260222T140332Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2308-20260222T140332Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:08:19.172295+00:00"
+    },
+    "b1d769a415618fcb7d9decf4cf11610aa2209f221fde89fee2ecb0f9cee4149d": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1278,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2308-20260222T140332Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2308-20260222T140332Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:08:20.451696+00:00"
+    },
+    "0def30efa005d867b3de9e00ec8ed3b9d08ad2c91cfc113ab19f172ea8749fea": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1167,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2308-20260222T140332Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2308-20260222T140332Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:08:21.619974+00:00"
+    },
+    "7c11566b168708095d37a034888c78c737d9c6323127f0941e59c7da494be532": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4324,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2402-20260222T142100Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2402-20260222T142100Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:27:59.101129+00:00"
+    },
+    "c438e9f7bfe70805e53efcb9b4df02285137f97019334a513bacfb946d3b755f": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1345,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2402-20260222T142100Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2402-20260222T142100Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:28:00.447058+00:00"
+    },
+    "77a073e309413266d253226720321902c499c0075036dde93c47d2680e5354cd": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1033,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2402-20260222T142100Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2402-20260222T142100Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:28:01.481535+00:00"
+    },
+    "36044921e0f171006ed7598df949578b666136912b77c47944195bb369562630": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4539,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2801-20260222T142057Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2801-20260222T142057Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:28:08.784170+00:00"
+    },
+    "42dd824c9d14a1dab73421dcb71e6b2ec4467a01ce67250729382b25b055dbe1": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1385,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2801-20260222T142057Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2801-20260222T142057Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:28:10.170477+00:00"
+    },
+    "3a4f7e120fc3040c8192f47b06be521d5819bcee3c8852a4d5212e540bf39c6c": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 921,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2801-20260222T142057Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2801-20260222T142057Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:28:11.092868+00:00"
+    },
+    "cac809e855073eb8afd67ab2cd5c75965fdaba8d708319874f74fbe07046d9ff": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4359,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2405-20260222T143349Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2405-20260222T143349Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:38:30.395792+00:00"
+    },
+    "a921b770f83aa944916f1c1dadeef09101b937c7c26f529451b73f44484df51a": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1280,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2405-20260222T143349Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2405-20260222T143349Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:38:31.677322+00:00"
+    },
+    "c8cf904d4909cdfc6f4c4ad0b0195aaac7b6d944deecd2a0025fa6ed1c7dcebd": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1153,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2405-20260222T143349Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2405-20260222T143349Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:38:32.831786+00:00"
+    },
+    "617ec3144f1135e0e831403244406bd52d9130cd1701e895cd2f2427adb23a2b": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4455,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2403-20260222T143344Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2403-20260222T143344Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:39:29.822577+00:00"
+    },
+    "8cdcdb343e7057f86c42a21c6339e7b5baf509cb4a56ad2361f202bbea9d7e30": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1278,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2403-20260222T143344Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2403-20260222T143344Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:39:31.101977+00:00"
+    },
+    "4b7e28bd81f37d24473d94dd28ec080dbf10062c486735eacd0538d00908df46": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1157,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2403-20260222T143344Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2403-20260222T143344Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:39:32.259996+00:00"
+    },
+    "9542da66153bda5c428f0a2fb33f128f8e79fbc8f181f7071576ab3bf6629dcb": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4305,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2506-20260222T144257Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2506-20260222T144257Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:49:20.423953+00:00"
+    },
+    "ec2a56eafb5f625f35490a114cdeb2b85b364ba28d7e6be8e5a50913e2432845": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1350,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2506-20260222T144257Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2506-20260222T144257Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:49:21.774977+00:00"
+    },
+    "042fbbf061ea7244937c5caf9d9c02f066c29a23e9e25eaf1b961ef9f466c7f3": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1069,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2506-20260222T144257Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2506-20260222T144257Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:49:22.845238+00:00"
+    },
+    "73ab57d0343cac3ee37f128bc9d13c65e44dffa649465b146d9762bfc1a0a120": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4465,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2404-20260222T144252Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2404-20260222T144252Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:50:03.013421+00:00"
+    },
+    "fcf307950817e8c8e850d97eb4b144aca5725c5afdb11978532a89e0b0bfaf34": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1359,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2404-20260222T144252Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2404-20260222T144252Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:50:04.373983+00:00"
+    },
+    "c2b35c4c77c4e6cb5d89acda5dcde30f245dd67f3f4ff572e49c74456846c15c": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 965,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2404-20260222T144252Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2404-20260222T144252Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:50:05.340308+00:00"
+    },
+    "2889118e894e646ee44b2d73fffd8befe6dcd8734d97faf5f1ac3331a6fe632f": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4729,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2802-20260222T145242Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2802-20260222T145242Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:57:01.085538+00:00"
+    },
+    "35fbf9bf9fab8b4930673f0ddd08bf0dd8685db350a0e06b4446954311bfacbb": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1604,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2802-20260222T145242Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2802-20260222T145242Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:57:02.690776+00:00"
+    },
+    "b6a15d31be0cdeb8313d3acddeec67ca26ff01f8e715627a65c6bcef9d85dbb0": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1162,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2802-20260222T145242Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2802-20260222T145242Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:57:03.854305+00:00"
+    },
+    "0eb63431d181da106bb2d41d41ea95bb09e690770bc3ed05ed4b9dfceee879f0": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4443,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2406-20260222T145236Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2406-20260222T145236Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T14:59:24.859388+00:00"
+    },
+    "b096b7b0b691601068f63f1010d653662352853d158ced3f69037f2ea14ba36a": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1271,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2406-20260222T145236Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2406-20260222T145236Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T14:59:26.131570+00:00"
+    },
+    "b2957a53d87455cb9728994cd1aae70b5b2541c6c1bedecafc598834a4b986cd": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1118,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2406-20260222T145236Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2406-20260222T145236Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T14:59:27.250927+00:00"
+    },
+    "3a4e76deaba9f77b86538613fe7c83ef56c162a33e89b0b0fcf75320f357cf22": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4350,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2805-20260222T145239Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2805-20260222T145239Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:01:02.210949+00:00"
+    },
+    "eb838454757b3eabd13ba10d06e1dedf29c087466b145c3bf5c3809adffe007b": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1235,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2805-20260222T145239Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2805-20260222T145239Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:01:03.446840+00:00"
+    },
+    "13e78f1db2768ff909c347f029dadef3e893695336dedcaf329bb47eb7c18e86": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1202,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2805-20260222T145239Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2805-20260222T145239Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:01:04.649602+00:00"
+    },
+    "fb16df7bf65aa1874a99dec5e45d936d0939996c22fa89c05a3403a1c0fdfacc": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4835,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2505-20260222T150117Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2505-20260222T150117Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:08:23.532021+00:00"
+    },
+    "71ac7b013c9c18ca439f8eac3813e6491082120534b08bba26e1bab89a6a1c47": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1587,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2505-20260222T150117Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2505-20260222T150117Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:08:25.120065+00:00"
+    },
+    "57295328c9543e9e92dc04357ccdccf2fde1f69288d652042abe9ac522d92895": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1088,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2505-20260222T150117Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2505-20260222T150117Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:08:26.208868+00:00"
+    },
+    "6b1010d8025bc449e0f26344e10043de424881d0b33b287f5cd17c0c566650a8": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4910,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2803-20260222T150111Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2803-20260222T150111Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:11:38.952421+00:00"
+    },
+    "c4e685b2a89a0945251342e4e1888fc01d8ddc7ebbac54a4149eae39dc80ea7e": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1632,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2803-20260222T150111Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2803-20260222T150111Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:11:40.585804+00:00"
+    },
+    "23a993513ad1ca8ce019269f2e4bd261efde5bb323197823b6ff9023584a4de6": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1158,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2803-20260222T150111Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2803-20260222T150111Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:11:41.744788+00:00"
+    },
+    "366dec73960de7837caa1d24dd71b69cb5ea027c37afc020a06363a613a082ce": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4846,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2601-20260222T151236Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2601-20260222T151236Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:18:48.687604+00:00"
+    },
+    "c7c5b472149d33dd91386b2415ef4a889258a951a28317a57dd63fb7563346ce": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1652,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2601-20260222T151236Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2601-20260222T151236Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:18:50.340515+00:00"
+    },
+    "2bad2d8746d2b2dd35246de34eb205e8f69466f51a38c5699f958e8464a7153b": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1082,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2601-20260222T151236Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2601-20260222T151236Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:18:51.423540+00:00"
+    },
+    "612d7bcac9984c95d8720a3a329f2eec0a0c5d106ed668982460e6796291efa1": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4885,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2804-20260222T151242Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2804-20260222T151242Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:19:57.119026+00:00"
+    },
+    "8be723292a76b9827e009d9c7b10a2d61f46198a18714ae69ae656f5c95897a6": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1653,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2804-20260222T151242Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2804-20260222T151242Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:19:58.773630+00:00"
+    },
+    "13874da163e09b4228da805d963c0f2991b67cca15d59b964e553357636559c3": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1111,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2804-20260222T151242Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2804-20260222T151242Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:19:59.886062+00:00"
+    },
+    "fa8c7d9a962d751c25f3f67fd53b9d28fc4b7a023fe7f2f97e15853ba71eb8c4": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4748,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2901-20260222T151239Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2901-20260222T151239Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:23:32.458834+00:00"
+    },
+    "89d06745dd235e368bbccc629887264b6f613f3a40c3d9826ec6ee5c298bf37b": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1645,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2901-20260222T151239Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2901-20260222T151239Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:23:34.104476+00:00"
+    },
+    "e38ad04bbf57d9d5ee6f5433d7da97bdbf5fc60a11330dba2cf9c88af76f0332": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1109,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2901-20260222T151239Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2901-20260222T151239Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:23:35.214391+00:00"
+    },
+    "460328bceaebabb8a028570c87797a93c822309284425b83c9f4e5ebd6d8e9bf": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4857,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2806-20260222T152350Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2806-20260222T152350Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:30:29.729743+00:00"
+    },
+    "cc9d64dba7fd541eef887a433fa1ecc8a10a3b8f18ff890eeb4c5e2f629882be": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1667,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2806-20260222T152350Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2806-20260222T152350Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:30:31.398007+00:00"
+    },
+    "a19314c1ed3af7443c481b19baa7c8f56e1ea21a622647426956db0e77318dd4": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1107,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2806-20260222T152350Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2806-20260222T152350Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:30:32.506534+00:00"
+    },
+    "54144dc5c215938f8d47a8b2b526c252c3598db2d5ed16a76d1f1c534ed721c8": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4834,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2701-20260222T152344Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2701-20260222T152344Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:31:04.693825+00:00"
+    },
+    "54094ccfe1808b63ab680887db83d748c8b1ba30d8b377c43af28d1a6aee494e": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1675,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2701-20260222T152344Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2701-20260222T152344Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:31:06.370324+00:00"
+    },
+    "03e951626354071bc6e3368b9bb2113c94bdbd17b5115d3210d3a8fc6d413051": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1100,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2701-20260222T152344Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2701-20260222T152344Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:31:07.472016+00:00"
+    },
+    "a537ab5a8e8769de30c07492a45562ad325db69e6048d52802b2c7aaa90ceb67": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4599,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2602-20260222T152347Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2602-20260222T152347Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:35:05.773398+00:00"
+    },
+    "e9edc66e5300b5723c8863bfd6a6b9a60fd05b81507fbe6364f5c9b74332767d": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1611,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2602-20260222T152347Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2602-20260222T152347Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:35:07.386380+00:00"
+    },
+    "d3fc04ee039600b2c45fe40a6ec9d894d68f275c86a7c12f44e73e4e24e070e4": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1168,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2602-20260222T152347Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2602-20260222T152347Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:35:08.555550+00:00"
+    },
+    "90cedaec4f1a1693e4a7487d175a221be731a25a3251a3bbc6b984d9d1aac14d": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 5898,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2702-20260222T153515Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2702-20260222T153515Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:45:53.458658+00:00"
+    },
+    "7bc9c3595b1f4e5251472300ce713bd97295794fb7834c6a8237d1db00aef788": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1835,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2702-20260222T153515Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2702-20260222T153515Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:45:55.294880+00:00"
+    },
+    "3ae87536cddc2c0062f11318cdb2e024c4f7dc75c66b1a8a1de548a97ccb0b89": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 974,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2702-20260222T153515Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2702-20260222T153515Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:45:56.269707+00:00"
+    },
+    "2a339c1630982b28237c3d778381755810f6f42a2991a4ed2c10e678f98116e5": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 4711,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2902-20260222T153518Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2902-20260222T153518Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T15:47:36.848610+00:00"
+    },
+    "9dc5a5fbe9dd48e71e229568849864b538b3532a93aa567f9b6b7f9249770d75": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1595,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2902-20260222T153518Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2902-20260222T153518Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T15:47:38.444384+00:00"
+    },
+    "7da6bb3ba803475ae43ef86c489bf7326bc8e6a0c4f644fd6c90d40aeb04ff86": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1180,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2902-20260222T153518Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-2902-20260222T153518Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T15:47:39.625732+00:00"
+    },
+    "c26e76f218dfbe129a8f4c0818ce65b13e5fa55a4ae6f5a569160b9e72f6ec2e": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 2118,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3104-20260222T165053Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3104-20260222T165053Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T16:51:03.258458+00:00"
+    },
+    "25315d21d78dcc93567777779adb0b951b48ad31bd500bbc053971012919c020": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 3930,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3104-20260222T165315Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3104-20260222T165315Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T16:53:28.005167+00:00"
+    },
+    "2e2387626ac0588a58b188f6de31eb6ce7dc6f6be7016a6bcb58bdc7e3d3ec9d": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 2929,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T174512Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T174512Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T17:48:12.163757+00:00"
+    },
+    "b4b79edcb578c63f77a1f1f2f0dcafd23d088b6472fdc5cc76e9e84eb63b11f0": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 3256,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T174512Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T174512Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T17:48:15.420508+00:00"
+    },
+    "76fbc2d4cb5f5521479b78f1a726ba26b09e06e07b6b456d9c9dda43f2276a5a": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1169,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T174512Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T174512Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T17:48:16.590351+00:00"
+    },
+    "f5d81d907a32066fde76955ee5f4537f08c4bfcd6a26acfdfd509274cf02c667": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 2726,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175111Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175111Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T17:51:31.607706+00:00"
+    },
+    "adfc9c178c1ffbc28f98c73bd2cb9a3dd3e00dfb52ba554fb73ad86ce84962eb": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1678,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175111Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175111Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T17:51:33.286537+00:00"
+    },
+    "b6b6d5dd6d4285efbe1fe62608241b8a47ad191415f75eb0845592d4a93f89ac": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 3199,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175111Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175111Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T17:51:36.486515+00:00"
+    },
+    "2e567adab18850ef367f5ec6a14c00e0756c879b62fcc9cacc8cf7eb2627ca34": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 2743,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175815Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175815Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T18:00:30.906230+00:00"
+    },
+    "92e03fc3e1c9d9c954e3a0759c2c016b4e7158891c6a3df7675ebc158b424d30": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1148,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175815Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175815Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T18:00:32.055367+00:00"
+    },
+    "aea3cb8bb2098a82c356a13144747c0b5e18ab39f04e562bef75aaaa95db4aa2": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1166,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175815Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3105-20260222T175815Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T18:00:33.222280+00:00"
+    },
+    "8f15edb3b17eac53042a2bb9c01fa3835b1edf420ccca8a1859a08a7786ba5f4": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 2540,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3106-20260222T180612Z/logs/test.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3106-20260222T180612Z/logs/test.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "test"
+      },
+      "created_at": "2026-02-22T18:09:22.577869+00:00"
+    },
+    "6019d48594ad4cb3548a1c7529ebb55b3b537968d4636b4705a7771c4241a128": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1100,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3106-20260222T180612Z/logs/typecheck.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3106-20260222T180612Z/logs/typecheck.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "typecheck"
+      },
+      "created_at": "2026-02-22T18:09:23.679216+00:00"
+    },
+    "d16b4b9b43e2fa0821395b241e4aaa126d5a7b01a16cc8e191289b04cf2ad950": {
+      "result": {
+        "passed": true,
+        "skipped": false,
+        "reason": null,
+        "exit_code": 0,
+        "duration_ms": 1311,
+        "output_path": "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3106-20260222T180612Z/logs/lint.log",
+        "log_paths": [
+          "/Users/connor/Medica/backbay/standalone/reverend/.workcells/wc-3106-20260222T180612Z/logs/lint.log"
+        ],
+        "failure_summary": null,
+        "attempt": 1,
+        "flaky_detected": false,
+        "cached": false,
+        "gate_type": "code",
+        "blocking": true,
+        "gate": "lint"
+      },
+      "created_at": "2026-02-22T18:09:24.991475+00:00"
     }
   }
 }

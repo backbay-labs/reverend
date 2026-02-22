@@ -1,6 +1,32 @@
 {
   "schema_version": 1,
+  "kind": "deterministic_eval_dataset_lock",
   "datasets": {
+    "oss-corpus-sample-v1": {
+      "version": "1.0.0",
+      "kind": "oss_binary_corpus",
+      "source": {
+        "type": "local_directory",
+        "path": "datasets/registry/oss-corpus-sample-v1"
+      },
+      "provenance": {
+        "manifest_schema": "1.0.0",
+        "ingested_at": "2026-02-22T14:08:37Z",
+        "command_log": [
+          "corpus_ingest.py ingest --input-dir samples --output manifest.json"
+        ]
+      },
+      "license_policy": {
+        "allowed_classes": ["permissive", "copyleft_weak", "copyleft_strong", "public_domain"],
+        "enforcement": "strict"
+      },
+      "files": {
+        "manifest.json": {
+          "bytes": 3469,
+          "sha256": "458826deaeef09a62f085e3cccb779cbfcb7e6b374bdb32a16ccd2ad5e1a54ac"
+        }
+      }
+    },
     "triage-curated-v2026.02.1": {
       "version": "2026.02.1",
       "source": {

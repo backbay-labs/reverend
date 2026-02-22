@@ -15,9 +15,6 @@
  */
 package ghidra.reverend.query;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -488,53 +485,15 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 	}
 
 	private String buildSimilarFunctionsCacheKey(Function function) {
-		return "similar:" + function.getEntryPoint().toString();
+		return CacheKeyGenerator.forSimilarFunctions(function.getEntryPoint().toString());
 	}
 
 	private String buildSemanticSearchCacheKey(String query, AddressSetView scope) {
-		String canonicalQuery = canonicalizeSemanticQuery(query);
-		String canonicalScope = canonicalizeScope(scope);
-		String payload = buildCanonicalPayload("semantic", canonicalQuery, canonicalScope);
-		return "semantic:" + digest(payload);
+		return CacheKeyGenerator.forSemanticSearch(query, scope);
 	}
 
 	private String buildPatternSearchCacheKey(String pattern, AddressSetView scope) {
-		String canonicalPattern = canonicalizePattern(pattern);
-		String canonicalScope = canonicalizeScope(scope);
-		String payload = buildCanonicalPayload("pattern", canonicalPattern, canonicalScope);
-		return "pattern:" + digest(payload);
-	}
-
-	private String canonicalizeSemanticQuery(String query) {
-		return query.toLowerCase(Locale.ROOT).trim().replaceAll("\\s+", " ");
-	}
-
-	private String canonicalizePattern(String pattern) {
-		return pattern.toLowerCase(Locale.ROOT);
-	}
-
-	private String canonicalizeScope(AddressSetView scope) {
-		return scope != null ? scope.toString() : "all";
-	}
-
-	private String buildCanonicalPayload(String type, String queryOrPattern, String scope) {
-		return "v1|type:" + type.length() + ":" + type +
-			"|query:" + queryOrPattern.length() + ":" + queryOrPattern +
-			"|scope:" + scope.length() + ":" + scope;
-	}
-
-	private String digest(String payload) {
-		try {
-			MessageDigest messageDigest = MessageDigest.getInstance("SHA-256");
-			byte[] digest = messageDigest.digest(payload.getBytes(StandardCharsets.UTF_8));
-			StringBuilder sb = new StringBuilder(digest.length * 2);
-			for (byte b : digest) {
-				sb.append(String.format("%02x", b));
-			}
-			return sb.toString();
-		} catch (NoSuchAlgorithmException e) {
-			throw new IllegalStateException("SHA-256 not available", e);
-		}
+		return CacheKeyGenerator.forPatternSearch(pattern, scope);
 	}
 
 	private double computeFunctionSimilarity(Program program, Function reference,

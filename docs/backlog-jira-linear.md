@@ -19,8 +19,8 @@ Canonical backlog source of truth is `.beads/issues.jsonl` plus `.beads/deps.jso
 | E17 Corpus Platform GA + Team Scale | `2800` | Blocked (story queue seeded) |
 | E18 Zero-Trust Agent Runtime | `2900` | Blocked (story queue seeded) |
 | E19 Patching + Exploitability Workbench | `3000` | Blocked (story queue seeded) |
-| E20 Audit Closure + Delivery Integrity | `3100` | Open (story queue seeded) |
-| E21 SOTA Assistant Operationalization | `3200` | Open (story queue seeded) |
+| E20 Audit Closure + Delivery Integrity | `3100` | Blocked (active remediation queue) |
+| E21 SOTA Assistant Operationalization | `3200` | Blocked (depends on E20 closure) |
 
 ## E9 Story Index
 
@@ -81,13 +81,13 @@ Detailed per-story technical requirements, acceptance contracts, and artifact ex
 
 | Epic | Story Bead IDs | Current Status |
 |---|---|---|
-| E13 | `2401-2406` | `open` |
-| E14 | `2501-2506` | `open` |
-| E15 | `2601-2606` | `open` |
-| E16 | `2701-2706` | `open` |
-| E17 | `2801-2806` | `open` |
-| E18 | `2901-2906` | `open` |
-| E19 | `3001-3006` | `open` |
+| E13 | `2401-2406` | `done` (stories complete; epic blocked) |
+| E14 | `2501-2506` | `done` (stories complete; epic blocked) |
+| E15 | `2601-2606` | `done` (stories complete; epic blocked) |
+| E16 | `2701-2706` | `done` (stories complete; epic blocked) |
+| E17 | `2801-2806` | `done` (stories complete; epic blocked) |
+| E18 | `2901-2906` | `done` (stories complete; epic blocked) |
+| E19 | `3001-3006` | `done` (stories complete; epic blocked) |
 
 ## E20-E21 Story Index
 
@@ -96,7 +96,7 @@ Detailed remediation and operational target definitions are documented in:
 
 | Epic | Story Bead IDs | Current Status |
 |---|---|---|
-| E20 | `3101-3109` | `open` |
+| E20 | `3101-3112` | `open` |
 | E21 | `3201-3208` | `open` |
 
 ## Dependency Edges
@@ -175,7 +175,9 @@ Detailed remediation and operational target definitions are documented in:
 3101,3104,3105 -> 3102
 3101 -> 3103,3106
 3105 -> 3109
-3102 -> 3107,3108
+3102 -> 3107,3108,3112
+3108 -> 3110
+3110 -> 3111,3112
 
 3100 -> 3200
 3103,3105,3106,3109 -> 3201
@@ -183,7 +185,7 @@ Detailed remediation and operational target definitions are documented in:
 3202,3203,3204 -> 3205
 3202,3205,3102 -> 3206
 3205 -> 3207
-3206,3207,3107,3108 -> 3208
+3206,3207,3107,3108,3111,3112 -> 3208
 ```
 
 ## Research References

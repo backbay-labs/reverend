@@ -1,70 +1,67 @@
 # Audit Remediation + SOTA Operationalization Roadmap (E20-E21)
 
 ## Goal
-Close all audit findings from the 2026-02-22 comprehensive review, converge split worktrees, and deliver an operational "SOTA assistant inside Ghidra" with clean builds, deterministic gates, production wiring, and end-to-end validation artifacts.
+Close every finding from the 2026-02-22 audit, then prove Reverend is operational as an in-Ghidra assistant with reproducible build, gate, benchmark, and runtime evidence.
 
 ## Scope
-- Fix hard build breakages and gate blind spots in the active tree (`reverend`).
-- Resolve known compile blockers in the integrated tree (`reverend-main`) before sync.
-- Replace cockpit stub-service fallback with live service wiring.
-- Make gate/runtime behavior deterministic and auditable (including kernel completion integrity).
-- Ship indexed, non-O(N), evidence-backed query flows and end-to-end mission integration.
+- Delivery integrity: compile health, gate/CI coverage, roadmap-source consistency, and kernel completion correctness.
+- Runtime integrity: remove stub fallbacks and require production service wiring in cockpit paths.
+- Performance/quality integrity: replace O(N) query/decompile hot paths with indexed retrieval and measurable lift.
+- Program integrity: keep `master` and integrated `main` convergence paths verifiable.
 
-## Finding-to-Bead Mapping
-| Finding | Bead | Expected Output |
-|---|---|---|
-| `:Reverend` compile break (`Icons.SEARCH_ICON`) | `3101` | `:Reverend:compileJava` + `:Reverend:test` pass |
-| Gate/CI misses plugin/module breakages | `3102` | Expanded local + CI compile/test scope |
-| Cockpit is stubbed by default | `3103` | Production service bootstrap and runtime wiring |
-| Python gate non-self-contained (`pytest`) | `3104` | Deterministic Python gate deps and test runner parity |
-| `reverend-main` compile blockers pending | `3105` | TraceModeling/Semantic cockpit compile fixes landed |
-| Hash-collision-prone cache keys | `3106` | Stable digest-based cache keys and regression tests |
-| Roadmap/docs/CSV drift | `3107` | Single-source reconciliation + CI enforcement |
-| Kernel zero-diff completion integrity gap | `3108` | No-op policy/justification gate + telemetry checks |
-| Worktree divergence (`master` vs `main`) | `3109` | Repeatable sync/convergence playbook and checks |
-| O(N) heuristic query path and TODO embedding gap | `3201-3204` | Indexed retrieval + embedding-backed ranking |
-| Weak Java<->Python mission integration | `3205` | End-to-end cockpit-to-mission operational flow |
-| "Operational" claim not benchmark/gate-backed | `3206-3208` | Benchmark-gated release packet and runbook |
+## Finding-to-Bead Closure Matrix
+| Finding ID | Finding | Bead(s) | Required Proof |
+|---|---|---|---|
+| F1 | `:Reverend` compile break | `3101` | `:Reverend:compileJava` and `:Reverend:test` pass |
+| F2 | Gate/CI misses Reverend/frontier breakage | `3102` | `scripts/cyntra/gates.sh` + `.github/workflows/eval.yaml` module coverage expanded |
+| F3 | Cockpit defaults to stub services | `3103` | `CockpitPlugin` bootstraps live query/evidence/proposal services by default |
+| F4 | Python gate path not self-contained | `3104` | gate Python suites pass without implicit optional deps |
+| F5 | Integrated-branch compile blockers pending | `3105` | reproducible compile checks for integrated path pass |
+| F6 | Hash-collision-prone cache keys | `3106` | canonical serialization + digest cache keys with tests |
+| F7 | Roadmap/docs drift | `3107` | `.beads`/CSV/docs validator parity + CI enforcement |
+| F8 | Zero-diff auto-close integrity gap | `3108`, `3110`, `3111` | no-op close requires explicit justification + telemetry audit + reopen policy |
+| F9 | O(N) query architecture + TODO embedding | `3201-3204` | indexed retrieval + embedding-backed ranking path |
+| F10 | Weak Java/Python/plugin runtime integration | `3205` | query -> proposal -> apply/rollback loop operational in cockpit |
+| F11 | “Operational” claim not benchmark-gated | `3206-3208` | benchmark thresholds enforced and GA packet published |
 
 ## Epic E20: Audit Closure + Delivery Integrity (`3100`)
-Stories: `3101-3109`
+Stories: `3101-3111`
 
-Execution order:
-1. `3101`, `3104`, `3105` start in parallel.
-2. `3102`, `3103`, `3106`, `3109` once blockers close.
-3. `3107`, `3108` after gate stack hardening.
+Dispatch waves:
+1. Wave A (critical unblock): `3103`, `3105`, `3106`, `3109`.
+2. Wave B (gate hardening): `3102`, `3107`, `3108`.
+3. Wave C (kernel integrity controls): `3110`, `3111`.
 
 ## Epic E21: SOTA Assistant Operationalization (`3200`)
 Stories: `3201-3208`
 
-Execution order:
-1. Build indexed and collision-safe query core (`3201-3204`).
-2. Wire cockpit to missions/receipts (`3205`).
-3. Enforce benchmark gates and publish local operator path (`3206-3207`).
-4. Publish GA packet with reproducible evidence (`3208`).
+Dispatch waves:
+1. Query engine hardening: `3201`, `3202`, `3204`.
+2. Plugin/runtime integration: `3203`, `3205`.
+3. Operational validation: `3206`, `3207`, `3208`.
 
-## Required Verification Gates
+## “SOTA Assistant Inside Ghidra” Operational Criteria
+- Search latency and retrieval quality are benchmarked against pinned baselines (`3206`).
+- Cockpit actions use real services and emit evidence/receipt chains (`3203`, `3205`).
+- Query and similarity paths are index-backed, not full-program decompile scans (`3201`, `3202`).
+- End-to-end operator path is reproducible from a local clean setup (`3207`, `3208`).
+
+## Required Verification Commands
 - `./gradlew --no-daemon :Reverend:compileJava :Reverend:test --tests "ghidra.reverend.*"`
 - `./gradlew --no-daemon :Generic:compileJava :Generic:test --tests "ghidra.security.*"`
 - `bash scripts/cyntra/gates.sh --mode=all`
 - `scripts/cyntra/validate-roadmap-completion.sh`
 - `scripts/cyntra/preflight.sh`
 
-## Context Reproducibility
-- Keep every bead `context_files` path committed on branch `main` before dispatch.
-- Do not point beads at uncommitted worktree-only files; workcells are created from committed refs.
-- Treat `preflight` context warnings as blockers unless you intentionally set `CYNTRA_STRICT_CONTEXT_MAIN=0` for emergency recovery.
-
-## Kernel Execution
-- One cycle: `scripts/cyntra/run-once.sh`
-- Continuous: `scripts/cyntra/run-watch.sh`
+## Kernel Control Loop
+- Dispatch one cycle: `scripts/cyntra/run-once.sh`
+- Continuous dispatch: `scripts/cyntra/run-watch.sh`
 - Status: `scripts/cyntra/cyntra.sh status`
 - Live telemetry: `tail -f .cyntra/logs/events.jsonl`
+- Reconcile queue after edits: `scripts/cyntra/sync-backlog-csv.sh`
 
-## Exit Criteria
-- No compile failures in active or integrated merge path for Reverend/Generic/frontier modules in scope.
-- Gate/CI block on relevant module failures (not Generic-only).
-- Cockpit uses live services by default and passes headless/UI parity.
-- Query path is indexed/evidence-backed (no full-program decompile scan per request on hot path).
-- Kernel completion policy prevents silent zero-diff closes without explicit no-op justification.
-- Release packet proves local operational workflow with reproducible commands and artifacts.
+## References
+- `docs/deep-research-report.md`
+- `docs/research/INDEX.md`
+- `docs/e9-frontier-roadmap.md`
+- `docs/e13-e19-frontier-ga-roadmap.md`

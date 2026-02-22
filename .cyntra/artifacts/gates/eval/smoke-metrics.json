@@ -1,5 +1,5 @@
 {
-  "datasets_lock_sha256": "9075989aed4aba6d8291fdf28e38c8dbc3a5c6ab77b162d913ba9b37a6eba350",
+  "datasets_lock_sha256": "f354bd769f8ea659b21d608d5d7e97c8d2d8d30678c5c3a3309c9720c2150449",
   "metrics": {
     "diff": {
       "coverage": 0.666667,
@@ -10,6 +10,14 @@
       "mrr": 1.0,
       "queries": 3,
       "recall@1": 1.0
+    },
+    "spec_review": {
+      "deltas": 4.0,
+      "hypotheses": 4.0,
+      "passed": 1.0,
+      "review_packet_hash_match": 1.0,
+      "spec_packet_hash_match": 1.0,
+      "verdict_open": 1.0
     },
     "type": {
       "accuracy": 1.0,

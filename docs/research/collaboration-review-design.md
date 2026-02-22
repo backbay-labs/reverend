@@ -886,6 +886,109 @@ The collaboration server (outside Ghidra, implemented as a standalone service) w
 
 ---
 
+## 7. Cross-Binary Pullback Governance (E12-S7)
+
+### The Problem
+
+Cross-binary knowledge transfer (pullback) requires governance controls to ensure:
+- Provenance tracking through the full lineage chain
+- Reviewer-gated approval based on confidence and risk scoring
+- Policy-mode enforcement preventing unauthorized transfers
+- Deterministic conflict resolution with attribution
+
+### Pullback Proposal Model
+
+A pullback proposal wraps a transfer suggestion with governance metadata:
+
+```
+PullbackProposal {
+  proposal_id:       UUID
+  target_program_id: UUID
+  target_branch:     String              // Branch receiving the transfer
+  annotation_type:   String              // SYMBOL, DATA_TYPE, COMMENT, etc.
+  annotation_value:  Any
+  lineage:           LineageEntry[]      // Full provenance chain
+  confidence:        float               // Combined confidence score
+  state:             PullbackState       // DRAFT -> PENDING_REVIEW -> APPROVED/REJECTED
+  merge_risk_score:  MergeRiskScore      // Computed from conflicts
+  conflicts:         ConflictRecord[]    // Detected conflicts
+  policy_check:      PolicyCheckResult   // Policy enforcement result
+  decisions:         DecisionAttribution[] // Audit trail
+}
+```
+
+### Policy Modes
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| **OFFLINE** | Block all cross-binary operations | Classified/air-gapped environments |
+| **RESTRICTED** | Only explicitly allowlisted sources | High-security projects |
+| **ALLOWLIST** | Sources must be in program/project allowlist | Controlled sharing |
+| **STANDARD** | Reviewer gates with confidence thresholds | Default team workflow |
+| **PERMISSIVE** | Auto-approve high-confidence transfers | Rapid iteration |
+
+### Deterministic Conflict Classes
+
+| Class | Risk Weight | Resolution Strategy |
+|-------|-------------|---------------------|
+| NONE | 0.0 | No action needed |
+| IDENTICAL_CHANGE | 0.0 | Auto-merge (same value) |
+| COMPATIBLE_MODIFICATION | 0.1 | Auto-merge (complementary) |
+| DISJOINT_REGION | 0.15 | Auto-merge (non-overlapping) |
+| COMMENT_CONFLICT | 0.2 | Auto-merge (concatenate) |
+| XREF_CONFLICT | 0.4 | Review recommended |
+| SYMBOL_CONFLICT | 0.5 | Priority-based resolution |
+| VALUE_CONFLICT | 0.6 | Require review |
+| PROVENANCE_CONFLICT | 0.7 | Require review |
+| TYPE_CONFLICT | 0.8 | Require review |
+
+### Merge Risk Scoring
+
+The merge risk score is computed from conflicts and metadata:
+
+```
+final_score = raw_score + confidence_adjustment + lineage_adjustment
+
+raw_score = Σ(conflict_weight × diminishing_factor)
+confidence_adjustment = (1.0 - source_confidence) × 0.3
+lineage_adjustment = min(0.2, chain_length × 0.02)
+```
+
+Proposals with `final_score > max_merge_risk_threshold` are policy-blocked.
+
+### Decision Attribution
+
+Every pullback decision records:
+
+```
+DecisionAttribution {
+  decision_id:       UUID
+  decision_type:     AUTO_APPROVED | AUTO_REJECTED | REVIEWER_APPROVED |
+                     REVIEWER_REJECTED | CONFLICT_RESOLVED | POLICY_BLOCKED
+  actor_id:          String              // "user:alice" or "policy_engine"
+  actor_type:        String              // "human", "ml_agent", "policy_engine"
+  rationale:         String
+  evidence_ids:      UUID[]              // Supporting evidence
+  policy_mode:       PolicyMode
+  merge_risk_score:  float?
+  decided_at_utc:    Timestamp
+}
+```
+
+### Implementation
+
+The pullback governance system is implemented in:
+- `scripts/collaboration/pullback_governance.py` - Core models and enforcement
+- `scripts/ml/transfer_engine.py` - Transfer suggestion generation with lineage
+
+Key components:
+- `PolicyEnforcementEngine` - Validates transfers against policy constraints
+- `ConflictDetector` - Classifies conflicts deterministically
+- `MergeRiskScore` - Computes risk from conflicts and metadata
+- `PullbackGovernanceService` - Orchestrates the full workflow
+
+---
+
 ## Key Takeaways
 
 1. **RE collaboration is where software development was before Git.** Current tools (Ghidra Server, BN Enterprise) provide multi-user access but lack the review, branching, and attribution primitives that make modern software collaboration productive. The gap is not in concurrent access but in structured review and provenance.

@@ -39,6 +39,26 @@ public enum SecurityAuditEventType {
 	TOKEN_EXPIRED("TOKEN_EXPIRED", Severity.WARNING,
 		"Agent continued operating with expired token"),
 
+	/** A capability token was revoked */
+	TOKEN_REVOKED("TOKEN_REVOKED", Severity.WARNING,
+		"Capability token was revoked"),
+
+	/** An attempt was made to use a revoked token */
+	TOKEN_REVOKED_ATTEMPT("TOKEN_REVOKED_ATTEMPT", Severity.WARNING,
+		"Attempt to use revoked token"),
+
+	/** An attempt was made to replay a one-time use token */
+	TOKEN_REPLAYED("TOKEN_REPLAYED", Severity.CRITICAL,
+		"Attempt to replay a one-time use token"),
+
+	/** A key rotation was performed */
+	KEY_ROTATED("KEY_ROTATED", Severity.INFO,
+		"Cryptographic key was rotated"),
+
+	/** A key rotation failed */
+	KEY_ROTATION_FAILED("KEY_ROTATION_FAILED", Severity.CRITICAL,
+		"Key rotation failed"),
+
 	// === Scope and limit events ===
 
 	/** Operation target is outside the token's allowed scope */
