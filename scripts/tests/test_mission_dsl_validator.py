@@ -56,6 +56,20 @@ class MissionDslValidatorTest(unittest.TestCase):
         with self.assertRaises(MODULE.MissionDslValidationError):
             MODULE.validate_mission_dsl(payload, schema=self.schema)
 
+    def test_compile_mission_spec_returns_typed_stage_order(self) -> None:
+        payload = self._load_example("triage-mission.json")
+        spec = MODULE.compile_mission_spec(payload, schema=self.schema)
+
+        self.assertEqual(spec.schema_version, 1)
+        self.assertEqual(spec.mission_id, "triage.core.v1")
+        self.assertEqual(
+            spec.stage_order,
+            ("ingest_records", "score_triage", "render_report"),
+        )
+        self.assertEqual(spec.retry_defaults.jitter, "none")
+        self.assertEqual(spec.stages[0].stage_id, "ingest_records")
+        self.assertEqual(spec.stages[-1].stage_id, "render_report")
+
 
 if __name__ == "__main__":
     unittest.main()

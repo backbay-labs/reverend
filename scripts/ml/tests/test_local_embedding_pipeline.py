@@ -2580,8 +2580,6 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         report_a = mission.run(records).to_json()
         report_b = mission.run(list(reversed(records))).to_json()
 
-        report_a.pop("generated_at_utc", None)
-        report_b.pop("generated_at_utc", None)
         self.assertEqual(report_a, report_b)
 
     def test_triage_panel_payload_includes_triage_map_and_ranked_hotspots(self) -> None:
@@ -2683,6 +2681,45 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertGreater(manifest["artifact_bytes"]["summary"], 0)
             self.assertGreater(manifest["artifact_bytes"]["panel"], 0)
             self.assertGreater(manifest["artifact_bytes"]["markdown"], 0)
+            self.assertEqual(manifest["artifact_pack"]["schema_version"], 1)
+            self.assertEqual(
+                manifest["artifact_pack"]["signature"]["scheme"],
+                MODULE.TRIAGE_ARTIFACT_PACK_SIGNATURE_SCHEME,
+            )
+            self.assertEqual(len(manifest["artifact_pack"]["payload_sha256"]), 64)
+            self.assertEqual(len(manifest["artifact_pack"]["signature"]["value"]), 64)
+            self.assertTrue(MODULE.verify_triage_artifact_pack_signature(manifest))
+
+            tampered_manifest = json.loads(json.dumps(manifest))
+            tampered_manifest["artifact_checksums"]["summary"] = "0" * 64
+            self.assertFalse(MODULE.verify_triage_artifact_pack_signature(tampered_manifest))
+
+            output_path_2 = tmp / "triage_summary_second.json"
+            report_dir_2 = tmp / "triage_artifacts_second"
+            exit_code_2 = MODULE.main(
+                [
+                    "triage-mission",
+                    "--corpus",
+                    str(corpus_path),
+                    "--output",
+                    str(output_path_2),
+                    "--mission-id",
+                    "triage:test",
+                    "--report-dir",
+                    str(report_dir_2),
+                ]
+            )
+            self.assertEqual(exit_code_2, 0)
+            manifest_2 = json.loads((report_dir_2 / "triage-artifacts.json").read_text(encoding="utf-8"))
+            self.assertTrue(MODULE.verify_triage_artifact_pack_signature(manifest_2))
+            self.assertEqual(manifest["artifact_checksums"], manifest_2["artifact_checksums"])
+            self.assertEqual(manifest["artifact_bytes"], manifest_2["artifact_bytes"])
+            self.assertEqual(manifest["artifact_pack"]["payload_sha256"], manifest_2["artifact_pack"]["payload_sha256"])
+            self.assertEqual(
+                manifest["artifact_pack"]["signature"]["value"],
+                manifest_2["artifact_pack"]["signature"]["value"],
+            )
+            self.assertEqual(output_path.read_text(encoding="utf-8"), output_path_2.read_text(encoding="utf-8"))
 
     def test_triage_panel_cli_emits_ui_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

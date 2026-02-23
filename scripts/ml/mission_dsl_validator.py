@@ -4,8 +4,9 @@ import argparse
 import json
 import sys
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -16,6 +17,163 @@ DEFAULT_SCHEMA_PATH = ROOT / "docs" / "schemas" / "mission-dsl.schema.json"
 
 class MissionDslValidationError(ValueError):
     """Raised when mission DSL payload fails schema or determinism checks."""
+
+
+@dataclass(frozen=True)
+class MissionRetryPolicy:
+    max_attempts: int
+    backoff_strategy: str
+    initial_delay_ms: int
+    jitter: str
+
+
+@dataclass(frozen=True)
+class MissionStageInputSource:
+    kind: str
+    mission_input: str | None = None
+    stage_id: str | None = None
+    output: str | None = None
+
+
+@dataclass(frozen=True)
+class MissionStageInput:
+    name: str
+    source: MissionStageInputSource
+
+
+@dataclass(frozen=True)
+class MissionIoBinding:
+    name: str
+    value_type: str
+    description: str
+
+
+@dataclass(frozen=True)
+class MissionStageSpec:
+    stage_id: str
+    order: int
+    kind: str
+    description: str
+    depends_on: tuple[str, ...]
+    inputs: tuple[MissionStageInput, ...]
+    outputs: tuple[MissionIoBinding, ...]
+    retry: MissionRetryPolicy | None
+
+
+@dataclass(frozen=True)
+class MissionSpec:
+    schema_version: int
+    mission_id: str
+    mission_kind: str
+    description: str
+    stage_order: tuple[str, ...]
+    retry_defaults: MissionRetryPolicy
+    stages: tuple[MissionStageSpec, ...]
+    outputs: tuple[MissionIoBinding, ...]
+
+
+def _parse_retry_policy(payload: Mapping[str, Any]) -> MissionRetryPolicy:
+    return MissionRetryPolicy(
+        max_attempts=int(payload.get("max_attempts") or 1),
+        backoff_strategy=str(payload.get("backoff_strategy") or ""),
+        initial_delay_ms=int(payload.get("initial_delay_ms") or 0),
+        jitter=str(payload.get("jitter") or ""),
+    )
+
+
+def _parse_io_binding(payload: Mapping[str, Any]) -> MissionIoBinding:
+    return MissionIoBinding(
+        name=str(payload.get("name") or ""),
+        value_type=str(payload.get("type") or ""),
+        description=str(payload.get("description") or ""),
+    )
+
+
+def _parse_stage_input_source(payload: Mapping[str, Any]) -> MissionStageInputSource:
+    kind = str(payload.get("kind") or "")
+    return MissionStageInputSource(
+        kind=kind,
+        mission_input=str(payload.get("input") or "") if kind == "mission_input" else None,
+        stage_id=str(payload.get("stage_id") or "") if kind == "stage_output" else None,
+        output=str(payload.get("output") or "") if kind == "stage_output" else None,
+    )
+
+
+def compile_mission_spec(payload: dict[str, Any], *, schema: dict[str, Any]) -> MissionSpec:
+    validate_mission_dsl(payload, schema=schema)
+
+    stages_raw = payload.get("stages")
+    stages_list = stages_raw if isinstance(stages_raw, list) else []
+    ordered_stage_docs = sorted(
+        [item for item in stages_list if isinstance(item, dict)],
+        key=lambda item: int(item.get("order") or 0),
+    )
+
+    stages: list[MissionStageSpec] = []
+    for stage_doc in ordered_stage_docs:
+        inputs_raw = stage_doc.get("inputs")
+        outputs_raw = stage_doc.get("outputs")
+        retry_raw = stage_doc.get("retry")
+        stage_inputs = []
+        if isinstance(inputs_raw, list):
+            for input_doc in inputs_raw:
+                if not isinstance(input_doc, dict):
+                    continue
+                source_raw = input_doc.get("source")
+                if not isinstance(source_raw, dict):
+                    continue
+                stage_inputs.append(
+                    MissionStageInput(
+                        name=str(input_doc.get("name") or ""),
+                        source=_parse_stage_input_source(source_raw),
+                    )
+                )
+        stage_outputs = []
+        if isinstance(outputs_raw, list):
+            for output_doc in outputs_raw:
+                if isinstance(output_doc, dict):
+                    stage_outputs.append(_parse_io_binding(output_doc))
+
+        stages.append(
+            MissionStageSpec(
+                stage_id=str(stage_doc.get("id") or ""),
+                order=int(stage_doc.get("order") or 0),
+                kind=str(stage_doc.get("kind") or ""),
+                description=str(stage_doc.get("description") or ""),
+                depends_on=tuple(str(dep) for dep in stage_doc.get("depends_on") or []),
+                inputs=tuple(stage_inputs),
+                outputs=tuple(stage_outputs),
+                retry=_parse_retry_policy(retry_raw) if isinstance(retry_raw, dict) else None,
+            )
+        )
+
+    outputs: list[MissionIoBinding] = []
+    mission_outputs_raw = payload.get("outputs")
+    if isinstance(mission_outputs_raw, list):
+        for output_doc in mission_outputs_raw:
+            if isinstance(output_doc, dict):
+                outputs.append(
+                    MissionIoBinding(
+                        name=str(output_doc.get("name") or ""),
+                        value_type="stage_output",
+                        description=str(output_doc.get("description") or ""),
+                    )
+                )
+
+    retry_defaults_raw = payload.get("policies", {}).get("retry_defaults", {})
+    if not isinstance(retry_defaults_raw, dict):
+        retry_defaults_raw = {}
+
+    return MissionSpec(
+        schema_version=int(payload.get("schema_version") or 0),
+        mission_id=str(payload.get("mission_id") or ""),
+        mission_kind=str(payload.get("mission_kind") or ""),
+        description=str(payload.get("description") or ""),
+        stage_order=tuple(stage.stage_id for stage in stages),
+        retry_defaults=_parse_retry_policy(retry_defaults_raw),
+        stages=tuple(stages),
+        outputs=tuple(outputs),
+    )
 
 
 

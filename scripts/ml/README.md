@@ -155,6 +155,7 @@ Mission artifacts include:
 - Triage map nodes and explicit ranked hotspot rows for UI consumers
 - `entrypoints`, `hotspots`, and `unknowns` rows
 - Evidence links with source-context URIs on all emitted triage findings
+- Deterministic `generated_at_utc` derived from mission content for replay-stable outputs
 
 Default triage thresholds are calibrated from the curated benchmark fixture:
 - `entrypoint_threshold=0.30`
@@ -167,6 +168,14 @@ Default triage thresholds are calibrated from the curated benchmark fixture:
 - `triage-report.md` (versionable report with navigable evidence/source links)
 - `triage-artifacts.json` (artifact manifest)
   - includes relative artifact paths plus SHA-256 and byte-size metadata for versionable tracking
+  - includes `artifact_pack` with canonical payload hash + HMAC-SHA256 signature for signed/replayable pack verification
+
+Optional artifact-pack signing key overrides:
+
+```bash
+export CYNTRA_ARTIFACT_PACK_SIGNING_KEY_ID="team-key-v1"
+export CYNTRA_ARTIFACT_PACK_SIGNING_KEY="<shared-secret>"
+```
 
 Render only the UI panel payload:
 
