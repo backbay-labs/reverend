@@ -1,119 +1,128 @@
-# Go/No-Go Decision — Alien-Tech MVP (v0.1.0-rc1)
+# Go/No-Go Decision — E21 GA Readiness Packet
 
-**Date:** 2026-02-21
-**Decision Type:** MVP Release Candidate Approval
-**Epic:** E8-S4 (Issue 1704)
-**Supporting Evidence:** `docs/exit-gate-report.md`
+**Date:** 2026-02-23
+**Decision Type:** GA Readiness Determination
+**Issue:** 3208 (`E21-S8`)
+**Epic:** E21 (`3201-3208`)
+**Primary Evidence:** `docs/exit-gate-report.md`
 
 ---
 
-## 1. Decision
+## 1. Final Determination
 
-| | |
+| Field | Determination |
 |---|---|
-| **Decision** | **GO** |
-| **Release** | v0.1.0-rc1 |
-| **Scope** | Release candidate for internal evaluation and operator feedback |
-| **GA status** | **NO-GO** (until conditions `C1-C11` are closed) |
-| **Conditions** | Security implementation items (C1–C8) must be resolved before production deployment |
+| Technical operational status ("SOTA assistant inside Ghidra") | **GO** |
+| Compile/gate/benchmark evidence status | **PASS** (see `docs/exit-gate-report.md`) |
+| Production GA promotion status | **NO-GO (conditional hold)** |
+| Blocking reason for production promotion | Pending governance/security closure in Section 4 |
+
+This decision separates technical operational readiness from production governance authorization. The assistant path is operational and benchmark-gated, but production promotion is held until all required owner signoffs/conditions are closed.
 
 ---
 
-## 2. Rationale
+## 2. Decision Basis
 
-### 2.1 Gate Summary
+### 2.1 Compile and Gate Evidence
 
-All seven MVP exit gates pass:
+- `bash scripts/cyntra/gates.sh --mode=all` (blocking suite) — PASS
+- `bash scripts/cyntra/gates.sh --mode=context` (type/context) — PASS
+- `bash scripts/cyntra/gates.sh --mode=diff` (lint/diff sanity) — PASS
+- `max-diff-size` diff-check — PASS
+- `secret-detection` diff-check — PASS
 
-| Gate | Result |
-|------|--------|
-| Receipt completeness (100 %) | PASS |
-| Rollback success (100 %) | PASS |
-| Search latency (p95 < 300 ms) | PASS |
-| Search quality (Recall@10 >= baseline + 10 %) | PASS |
-| Triage quality (recall >= 85 %) | PASS |
-| Security (no direct agent write) | PASS |
-| CI stability (7-day green) | PASS |
+Evidence paths:
+- `.cyntra/artifacts/gates/blocking-gate-summary.json`
+- `.cyntra/artifacts/gates/eval/`
+- `docs/exit-gate-report.md`
+- `docs/evidence/rc-functional-validation/01-generic-compile.txt`
+- `docs/evidence/rc-functional-validation/10-build-ghidra.txt`
 
-### 2.2 Risk Posture
+### 2.2 Benchmark Evidence and Lift
 
-- **Critical/High risks:** 0
-- **Medium residual risks:** 4 (prompt injection, cloud exfiltration, compromised weights, hallucination) — all inherent to LLM-based systems with defense-in-depth applied. Formally accepted.
-- **Low residual risks:** 9 — all with effective mitigations in place.
-- **Kill criteria:** All four execution risks from the 12-week board have been mitigated or scoped.
+Operational-claim gates (`real_target`, `spec_review`) pass against `eval/snapshots/operational_claim_baseline.json`:
 
-### 2.3 Scope Delivered
+- `.cyntra/artifacts/gates/eval/operational-claim-regression.json`
+- `.cyntra/artifacts/gates/eval/operational-claim-delta.json`
+- `.cyntra/artifacts/gates/eval/operational-claim-manifest.json`
 
-All eight epics (E1–E8) complete. The vertical slice delivers the target outcome:
+Benchmark lift vs stock baseline remains positive on non-toy triage slice:
 
-1. Analyst imports a binary.
-2. System generates a triage map + ranked hotspots.
-3. System proposes rename/type/comment changes with receipts.
-4. Reviewer accepts/rejects proposals in a PR-like flow.
-5. Approved changes apply via reversible transactions.
-6. Accepted artifacts can sync to a corpus knowledge base.
+- Entrypoint recall delta: `+0.333333`
+- Hotspot recall delta: `+0.200000`
+- Macro F1 delta: `+0.121020`
+- Unknown precision delta: `+0.250000`
 
-### 2.4 Factors Supporting GO
+Evidence:
+- `docs/evidence/rc-functional-validation/09-soak-report.json`
+- `docs/soak-test-report-1701.md`
 
-- End-to-end workflow operational and tested.
-- Receipt and rollback guarantees verified at 100 %.
-- Security architecture reviewed with no critical or high findings.
-- Operator runbook and known-limitations catalog published.
-- 27 known limitations documented with workarounds; none are release-blockers.
+### 2.3 Operational Criteria Coverage
 
-### 2.5 Factors Considered for NO-GO (Accepted)
-
-- Security implementation conditions (C1–C8) remain open — acceptable for RC1 (architectural signoff obtained; implementation verification required before production).
-- Search quality measured on curated eval set only — acceptable for MVP scope.
-- Type recovery scoped to high-confidence primitives — by design (kill criterion mitigation).
-- Corpus sync is pilot-grade — appropriate for initial deployment with <= 10 analysts.
-- Legal compliance playbook not yet reviewed by counsel (L-27) — does not block RC1 release for internal use.
+Operational criteria are declared and cross-linked in:
+- `docs/audit-remediation-sota-operational-roadmap.md`
+- `docs/exit-gate-report.md` (Section 2)
+- `docs/operator-reviewer-runbook.md` (local operational workflow)
 
 ---
 
-## 3. Conditions for Production (Post-RC1)
+## 3. Risk Register Disposition with Owner Signoff
 
-The following must be completed before promoting RC1 to general availability (v0.1.0):
+| Risk ID / Group | Owner | Disposition | Signoff Date | Signoff Status | Evidence |
+|---|---|---|---|---|---|
+| `T1`, `T3`, `T5`, `T9`, `T10` (medium residual security risks) | Security review owner | Accepted with compensating controls and implementation conditions | 2026-02-21 | **Signed (conditional)** | `docs/security/security-signoff-checklist.md` |
+| `T2`, `T4`, `T6`, `T7`, `T8`, `T11`, `T12`, `T13` (low residual risks) | Security review owner | Accepted | 2026-02-21 | **Signed (conditional)** | `docs/security/security-signoff-checklist.md` |
+| Production governance risk (cross-functional approval pending) | Release owner (`Issue 3208`) | Hold production promotion until approvals are recorded | 2026-02-23 | **Open** | This decision record + Section 4 |
 
-| # | Condition | Owner | Target |
-|---|-----------|-------|--------|
-| C1 | CapabilityGuard implementation verified | Security | Before agent runtime deployment |
-| C2 | Receipt hash-chain implementation verified | Backend | Before agent runtime deployment |
-| C3 | Egress allow-list enforced | Security | Before cloud mode usage |
-| C4 | OS keychain integration | Security | Before API key provisioning |
-| C5 | Process-level sandboxing | Security | Before MCP server deployment |
-| C6 | Plugin manifest/signing | Security | Before third-party plugins |
-| C7 | Periodic benchmark evaluation established | Eval/DevOps | Before GA |
-| C8 | Penetration testing completed | Security | Before GA |
-| C9 | Architecture review signoff | Architecture | Before GA |
-| C10 | Legal review signoff | Legal | Before GA |
-| C11 | CISO/Security lead signoff | CISO | Before GA |
+Residual-risk posture summary:
+- Critical: `0`
+- High: `0`
+- Medium: `5` (accepted, conditional)
+- Low: `8` (accepted)
 
 ---
 
-## 4. Next Steps
+## 4. Blocking Conditions for Production GA Promotion
 
-1. **Distribute RC1** for internal evaluation by operators and reviewers.
-2. **Collect feedback** during RC1 evaluation period (target: 2 weeks).
-3. **Address P0 issues** discovered during evaluation.
-4. **Complete conditions C1–C11** for production readiness.
-5. **Cut v0.1.0 GA** after all conditions met and RC1 feedback addressed.
+The following conditions remain mandatory before lifting the production hold:
 
----
-
-## 5. Approvers
-
-| Role | Approver | Date | Decision | Status |
-|------|----------|------|----------|--------|
-| Project Lead | Designated release owner (Issue 1704) | Pending | GO (recommended) | Pending signature |
-| Security Lead | Security review owner (`docs/security/security-signoff-checklist.md`) | 2026-02-20 | GO (conditional) | Approved with conditions C1-C8 |
-| Architecture Lead | Designated architecture reviewer | Pending | GO (recommended) | Pending signature |
-| Eval/DevOps Lead | Designated eval/devops reviewer | Pending | GO (recommended) | Pending signature |
-| Legal Lead | Designated legal reviewer | Pending | GO (internal RC1 scope only) | Pending signature |
-| CISO/Security Sponsor | Designated executive approver | Pending | GO / NO-GO | Pending signature |
+| Condition | Owner | Status |
+|---|---|---|
+| CapabilityGuard implementation verification | Security/Runtime | Pending |
+| Receipt hash-chain implementation verification | Backend/Security | Pending |
+| Egress allow-list implementation verification | Security | Pending |
+| OS keychain integration verification | Security | Pending |
+| Process-level sandboxing verification | Security/Platform | Pending |
+| Plugin manifest/signing control verification | Security/Platform | Pending |
+| Periodic benchmark governance (`C7`) | Eval/DevOps | Pending |
+| Penetration testing closure (`C8`) | Security | Pending |
+| Architecture approval signoff | Architecture | Pending |
+| Legal approval signoff | Legal | Pending |
+| Executive security sponsor signoff | CISO/Security Sponsor | Pending |
 
 ---
 
-> **Document version:** 1.0
+## 5. Approver Record
+
+| Role | Decision | Date | Status | Evidence Basis |
+|---|---|---|---|---|
+| Release owner (`Issue 3208`) | GO (technical readiness), NO-GO (production hold) | 2026-02-23 | Recorded | `docs/exit-gate-report.md` |
+| Security review owner | GO (conditional) | 2026-02-21 | Signed (conditional) | `docs/security/security-signoff-checklist.md` |
+| Eval/DevOps review owner | GO (metrics/gates conformant) | 2026-02-23 | Recorded | `.cyntra/artifacts/gates/eval/` |
+| Architecture review owner | GO/NO-GO (production gate) | Pending | Pending signature | Section 4 |
+| Legal review owner | GO/NO-GO (production gate) | Pending | Pending signature | Section 4 |
+| CISO/Security sponsor | GO/NO-GO (production gate) | Pending | Pending signature | Section 4 |
+
+---
+
+## 6. Decision Statement
+
+1. The E21 assistant path is operational with reproducible compile/gate/benchmark evidence.
+2. Risk disposition is explicitly documented with owner assignment and available signoff provenance.
+3. Production GA promotion remains a **NO-GO** until the blocking conditions in Section 4 are closed and pending owner signatures are recorded.
+
+---
+
+> **Document version:** 2.0
 > **Classification:** Internal — Release Decision
-> **Supersedes:** N/A (initial version)
+> **Supersedes:** RC-era decision record (2026-02-21)
