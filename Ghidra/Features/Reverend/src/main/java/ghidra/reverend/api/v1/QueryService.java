@@ -15,6 +15,7 @@
  */
 package ghidra.reverend.api.v1;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -105,6 +106,40 @@ public interface QueryService {
 	Optional<QueryContext> getContext(Program program, Address address) throws QueryException;
 
 	/**
+	 * Queries temporal evidence events in a bounded window before or after an anchor.
+	 *
+	 * @param program the program to query within
+	 * @param request temporal window request
+	 * @return deterministic list of temporal events
+	 * @throws QueryException if the query fails
+	 */
+	List<TemporalEvent> queryTemporalWindow(Program program, TemporalWindowRequest request)
+			throws QueryException;
+
+	/**
+	 * Computes interval joins between temporal evidence events inside the requested bounds.
+	 *
+	 * @param program the program to query within
+	 * @param request temporal interval join request
+	 * @return deterministic list of interval join matches
+	 * @throws QueryException if the query fails
+	 */
+	List<TemporalIntervalJoinResult> queryTemporalIntervalJoin(Program program,
+			TemporalIntervalJoinRequest request) throws QueryException;
+
+	/**
+	 * Returns temporal lineage for an event ID.
+	 *
+	 * @param program the program to query within
+	 * @param eventId root event ID
+	 * @param maxDepth maximum predecessor traversal depth
+	 * @return deterministic lineage ordered by depth then time
+	 * @throws QueryException if the query fails
+	 */
+	List<TemporalEvent> queryTemporalLineage(Program program, String eventId, int maxDepth)
+			throws QueryException;
+
+	/**
 	 * Represents a single query result with scoring and evidence.
 	 */
 	interface QueryResult {
@@ -186,6 +221,116 @@ public interface QueryService {
 		 * @return list of referencing addresses
 		 */
 		List<Address> getReferences();
+	}
+
+	/**
+	 * Window direction for temporal event queries.
+	 */
+	enum TemporalDirection {
+		BEFORE,
+		AFTER
+	}
+
+	/**
+	 * Request for bounded-window temporal queries.
+	 */
+	final class TemporalWindowRequest {
+		private final Instant anchor;
+		private final long windowMillis;
+		private final TemporalDirection direction;
+		private final int maxResults;
+
+		public TemporalWindowRequest(Instant anchor, long windowMillis,
+				TemporalDirection direction, int maxResults) {
+			this.anchor = anchor;
+			this.windowMillis = Math.max(0L, windowMillis);
+			this.direction = direction != null ? direction : TemporalDirection.BEFORE;
+			this.maxResults = Math.max(0, maxResults);
+		}
+
+		public Instant getAnchor() {
+			return anchor;
+		}
+
+		public long getWindowMillis() {
+			return windowMillis;
+		}
+
+		public TemporalDirection getDirection() {
+			return direction;
+		}
+
+		public int getMaxResults() {
+			return maxResults;
+		}
+	}
+
+	/**
+	 * Request for bounded temporal interval joins.
+	 */
+	final class TemporalIntervalJoinRequest {
+		private final Instant intervalStart;
+		private final Instant intervalEnd;
+		private final long maxGapMillis;
+		private final int maxResults;
+
+		public TemporalIntervalJoinRequest(Instant intervalStart, Instant intervalEnd,
+				long maxGapMillis, int maxResults) {
+			this.intervalStart = intervalStart;
+			this.intervalEnd = intervalEnd;
+			this.maxGapMillis = Math.max(0L, maxGapMillis);
+			this.maxResults = Math.max(0, maxResults);
+		}
+
+		public Instant getIntervalStart() {
+			return intervalStart;
+		}
+
+		public Instant getIntervalEnd() {
+			return intervalEnd;
+		}
+
+		public long getMaxGapMillis() {
+			return maxGapMillis;
+		}
+
+		public int getMaxResults() {
+			return maxResults;
+		}
+	}
+
+	/**
+	 * Temporal event emitted from the unified evidence graph.
+	 */
+	interface TemporalEvent {
+		String getEventId();
+
+		String getProgramId();
+
+		Optional<Address> getAddress();
+
+		String getOperation();
+
+		Instant getStartTime();
+
+		Instant getEndTime();
+
+		List<String> getPredecessorEventIds();
+
+		Map<String, String> getMetadata();
+	}
+
+	/**
+	 * Interval join result between two temporal events.
+	 */
+	interface TemporalIntervalJoinResult {
+		TemporalEvent getLeft();
+
+		TemporalEvent getRight();
+
+		long getStartGapMillis();
+
+		long getOverlapMillis();
 	}
 
 	/**
