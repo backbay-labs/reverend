@@ -370,6 +370,16 @@ CREATE TABLE evidence (
                                                    -- 'string_match', 'trace_observation'
     source_type      TEXT NOT NULL,                -- entity type of the source
     source_id        UUID NOT NULL,                -- FK to the source entity
+    entity_type      TEXT,                         -- canonical entity type: static|dynamic|symbolic|taint|proposal|receipt
+    entity_id        TEXT,                         -- canonical stable ID: ev[sdytpr]_<stable-token>
+    entity_schema_version SMALLINT,                -- canonical entity schema version (v1 = 1)
+    edge_type        TEXT,                         -- supports|derived_from|corroborates|supersedes
+    edge_target_entity_type TEXT,                  -- canonical target type for edge
+    edge_target_entity_id   TEXT,                  -- canonical target ID for edge
+    edge_target_entity_schema_version SMALLINT,    -- canonical target schema version (v1 = 1)
+    min_snap         BIGINT,                       -- inclusive temporal lower bound (NULL for non-temporal evidence)
+    max_snap         BIGINT,                       -- inclusive temporal upper bound (NULL for non-temporal evidence)
+    reproducibility_manifest_hash TEXT,            -- pinned run/config digest for replayable queries
     relevance        REAL,                         -- 0.0-1.0 relevance score
     description      TEXT,                         -- human-readable explanation
     metadata         JSONB DEFAULT '{}'::jsonb     -- additional structured evidence data
@@ -602,7 +612,7 @@ WHERE e.warp_guid = :guid;
 -- Get the full provenance chain for an annotation
 SELECT r.receipt_id, r.timestamp, r.actor, r.action,
        r.old_value, r.new_value, r.confidence,
-       e.evidence_type, e.source_type, e.source_id, e.description
+       ev.evidence_type, ev.source_type, ev.source_id, ev.description
 FROM annotation a
 JOIN receipt r ON a.receipt_id = r.receipt_id
 JOIN evidence ev ON r.receipt_id = ev.receipt_id
@@ -875,6 +885,22 @@ Every canonical entity and edge carries `*_schema_version = 1`. Cross-source edg
 
 `scripts/ml/receipt_store.py` validates canonical IDs, schema versions, and edge contracts whenever canonical evidence fields are present. Legacy `source_type/source_id` evidence continues to validate for backward compatibility during migration.
 
+Canonical ID invariants for E24:
+
+- `entity_id = prefix(entity_type) + sha256(entity_type + "|" + program_id + "|" + canonical_source_tuple)`
+- `entity_id` is immutable and collision-resistant within one `schema_version`
+- `evr_` is reserved for canonical `receipt` entities only
+
+### 3.2.2 Temporal and Provenance Contract (E24)
+
+Canonical graph rows are first-class temporal/provenance records. Every canonical evidence write must persist:
+
+- temporal bounds: `min_snap`, `max_snap` (or null for non-temporal entities)
+- provenance bounds: introducing/mutating receipt linkages
+- reproducibility hash: `reproducibility_manifest_hash` pinning toolchain/model/config inputs
+
+This ensures "as-of" replay and provenance audits are deterministic across re-runs.
+
 ### 3.3 Type Assertion Lifecycle Schema
 
 Type assertions are persisted in a dedicated table so the system can enforce lifecycle semantics without requiring JSON payload parsing in write paths.
@@ -1008,6 +1034,29 @@ JOIN evidence ev ON r.receipt_id = ev.receipt_id
 WHERE a.annotation_id = :annotation_id;
 ```
 
+**"What evidence chain should cockpit render from raw signal to applied change?"**
+
+```sql
+-- Deterministic chain order: receipt sequence -> timestamp -> canonical entity ID
+SELECT r.chain_sequence,
+       r.timestamp,
+       r.receipt_id,
+       r.action,
+       ev.entity_type,
+       ev.entity_id,
+       ev.edge_type,
+       ev.edge_target_entity_type,
+       ev.edge_target_entity_id,
+       ev.min_snap,
+       ev.max_snap,
+       ev.reproducibility_manifest_hash
+FROM receipt r
+JOIN evidence ev ON ev.receipt_id = r.receipt_id
+WHERE r.receipt_id IN (:proposal_receipt_id, :apply_receipt_id, :rollback_receipt_id)
+  AND ev.entity_type IN ('static', 'dynamic', 'symbolic', 'taint', 'proposal', 'receipt')
+ORDER BY r.chain_sequence ASC, r.timestamp ASC, ev.entity_id ASC;
+```
+
 ---
 
 ## 4. Indexing Strategy
@@ -1052,6 +1101,9 @@ CREATE INDEX idx_receipt_action ON receipt(program_id, action);
 
 CREATE INDEX idx_evidence_receipt ON evidence(receipt_id);
 CREATE INDEX idx_evidence_source ON evidence(source_type, source_id);
+CREATE INDEX idx_evidence_entity ON evidence(entity_type, entity_id);
+CREATE INDEX idx_evidence_lifespan ON evidence(min_snap, max_snap);
+CREATE INDEX idx_evidence_repro_manifest ON evidence(reproducibility_manifest_hash);
 
 CREATE INDEX idx_annotation_target ON annotation(target_id);
 CREATE INDEX idx_annotation_program ON annotation(program_id);
