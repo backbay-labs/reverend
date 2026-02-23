@@ -203,14 +203,20 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			if (referenceFeatures == null) {
 				throw new QueryException("Failed to index function features: " + function.getName());
 			}
+			String[] referenceTerms = referenceFeatures.getLexicalTokens().stream()
+				.sorted()
+				.toArray(String[]::new);
 			if (monitor != null) {
 				monitor.setProgress(20);
 			}
 
 			// Find similar functions by comparing indexed function features.
-			List<QueryResult> results = new ArrayList<>();
+			boolean embeddingBackendAvailable = EMBEDDING_STAGE_ENABLED && isEmbeddingBackendAvailable();
+			QueryDecompileBudget queryBudget = decompileBudgetManager.startQuery();
+			List<FunctionScore> scoredCandidates = new ArrayList<>();
 			int totalFunctions = candidates.size();
 			int processed = 0;
+			int decompileCandidates = 0;
 
 			for (Function candidate : candidates) {
 				if (monitor != null && monitor.isCancelled()) {
@@ -223,14 +229,18 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					continue;
 				}
 
-				double similarity = computeFunctionSimilarity(referenceFeatures, candidateFeatures);
-				if (similarity > 0.3) { // Threshold for relevance
-					results.add(new QueryResultImpl(
-						candidate.getEntryPoint(),
-						similarity,
-						buildFunctionSummary(candidateFeatures, similarity),
-						null
-					));
+				double indexedSimilarity = computeFunctionSimilarity(referenceFeatures, candidateFeatures);
+				double finalSimilarity = indexedSimilarity;
+				if (embeddingBackendAvailable) {
+					EmbeddingScoreResult embeddingResult = computeEmbeddingScoreWithBudget(
+						program, candidate, referenceTerms, monitor, queryBudget);
+					if (embeddingResult.usedEmbeddingScore) {
+						finalSimilarity = Math.min(1.0, (0.6 * indexedSimilarity) + (0.4 * embeddingResult.score));
+						decompileCandidates++;
+					}
+				}
+				if (finalSimilarity > 0.3) { // Threshold for relevance
+					scoredCandidates.add(new FunctionScore(candidate, finalSimilarity));
 				}
 
 				processed++;
@@ -239,8 +249,30 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 				}
 			}
 
+			List<QueryResult> results = new ArrayList<>(scoredCandidates.size());
+			String similarityMode = embeddingBackendAvailable
+					? "embedding_rerank"
+					: "deterministic_index_fallback";
+			for (FunctionScore candidate : scoredCandidates) {
+				QueryCacheManager.IndexedFunctionFeatures candidateFeatures =
+					featureBatch.get(candidate.function.getEntryPoint());
+				results.add(new QueryResultImpl(
+					candidate.function.getEntryPoint(),
+					candidate.score,
+					buildFunctionSummary(candidateFeatures != null
+						? candidateFeatures
+						: QueryCacheManager.IndexedFunctionFeatures.fromFunction(candidate.function),
+						candidate.score),
+					buildEvidenceId("similarity", candidate.function.getEntryPoint()),
+					buildEvidenceRefs("similarity", candidate.function.getEntryPoint()),
+					buildProvenance("similarity", similarityMode, embeddingBackendAvailable,
+						candidate.function.getEntryPoint())
+				));
+			}
+
 			// Sort by similarity descending
-			results.sort((a, b) -> Double.compare(b.getScore(), a.getScore()));
+			results.sort((a, b) -> compareResultsDescending(a.getScore(), b.getScore(),
+				a.getAddress(), b.getAddress()));
 
 			// Trim to max results
 			if (results.size() > maxResults) {
@@ -253,7 +285,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 				totalFunctions,
 				featureBatch.getIndexedCount(),
 				featureBatch.getReusedCount(),
-				0));
+				decompileCandidates));
 
 			// Cache the results
 			cacheManager.cacheSimilarFunctions(program, cacheKey, results);
@@ -450,17 +482,24 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 
 			// Build result set
 			List<QueryResult> results = new ArrayList<>();
+			String semanticMode = embeddingBackendAvailable
+					? "embedding_rerank"
+					: "deterministic_index_fallback";
 			for (FunctionScore scored : scoredCandidates) {
 				results.add(new QueryResultImpl(
 					scored.function.getEntryPoint(),
 					scored.score,
 					buildSemanticSummary(scored.function, query),
-					null
+					buildEvidenceId("semantic", scored.function.getEntryPoint()),
+					buildEvidenceRefs("semantic", scored.function.getEntryPoint()),
+					buildProvenance("semantic", semanticMode, embeddingBackendAvailable,
+						scored.function.getEntryPoint())
 				));
 			}
 
 			// Sort by score descending
-			results.sort((a, b) -> Double.compare(b.getScore(), a.getScore()));
+			results.sort((a, b) -> compareResultsDescending(a.getScore(), b.getScore(),
+				a.getAddress(), b.getAddress()));
 
 			// Trim to max results
 			if (results.size() > maxResults) {
@@ -742,6 +781,46 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 	private String buildSemanticSummary(Function function, String query) {
 		return String.format("Match in %s: function with %d parameters",
 			function.getName(), function.getParameterCount());
+	}
+
+	private int compareResultsDescending(double leftScore, double rightScore,
+			Address leftAddress, Address rightAddress) {
+		int scoreCmp = Double.compare(rightScore, leftScore);
+		if (scoreCmp != 0) {
+			return scoreCmp;
+		}
+		String leftKey = leftAddress != null ? leftAddress.toString() : "";
+		String rightKey = rightAddress != null ? rightAddress.toString() : "";
+		return leftKey.compareTo(rightKey);
+	}
+
+	private String buildEvidenceId(String operation, Address address) {
+		return "evidence:" + operation + ":" + normalizeAddressKey(address);
+	}
+
+	private List<String> buildEvidenceRefs(String operation, Address address) {
+		String normalizedAddress = normalizeAddressKey(address);
+		return List.of(
+			"evidence_ref:" + operation + ":" + normalizedAddress,
+			"provenance_ref:" + operation + ":" + normalizedAddress
+		);
+	}
+
+	private Map<String, String> buildProvenance(String operation, String mode,
+			boolean embeddingBackendAvailable, Address address) {
+		Map<String, String> provenance = new LinkedHashMap<>();
+		provenance.put("operation", operation);
+		provenance.put("ranking_mode", mode);
+		provenance.put("embedding_backend_status",
+			embeddingBackendAvailable ? "available" : "unavailable");
+		provenance.put("embedding_fallback_applied", String.valueOf(!embeddingBackendAvailable));
+		provenance.put("address", normalizeAddressKey(address));
+		provenance.put("ranker", "indexed-features+embedding");
+		return Collections.unmodifiableMap(provenance);
+	}
+
+	private String normalizeAddressKey(Address address) {
+		return address != null ? address.toString() : "none";
 	}
 
 	private double computeIndexedSemanticScore(QueryCacheManager.IndexedFunctionFeatures feature,
@@ -1137,12 +1216,21 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		private final double score;
 		private final String summary;
 		private final String evidenceId;
+		private final List<String> evidenceRefs;
+		private final Map<String, String> provenance;
 
-		QueryResultImpl(Address address, double score, String summary, String evidenceId) {
+		QueryResultImpl(Address address, double score, String summary, String evidenceId,
+				List<String> evidenceRefs, Map<String, String> provenance) {
 			this.address = address;
 			this.score = score;
 			this.summary = summary;
 			this.evidenceId = evidenceId;
+			this.evidenceRefs = evidenceRefs != null
+					? Collections.unmodifiableList(new ArrayList<>(evidenceRefs))
+					: Collections.emptyList();
+			this.provenance = provenance != null
+					? Collections.unmodifiableMap(new LinkedHashMap<>(provenance))
+					: Collections.emptyMap();
 		}
 
 		@Override
@@ -1163,6 +1251,16 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		@Override
 		public Optional<String> getEvidenceId() {
 			return Optional.ofNullable(evidenceId);
+		}
+
+		@Override
+		public List<String> getEvidenceRefs() {
+			return evidenceRefs;
+		}
+
+		@Override
+		public Map<String, String> getProvenance() {
+			return provenance;
 		}
 	}
 
