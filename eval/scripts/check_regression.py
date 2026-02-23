@@ -210,6 +210,21 @@ def check_metrics(
     return results, all_passed
 
 
+def validate_required_areas(
+    results: list[MetricResult],
+    required_areas: list[str] | None,
+) -> tuple[bool, list[str]]:
+    normalized_required = sorted(
+        {str(area).strip() for area in (required_areas or []) if str(area).strip()}
+    )
+    if not normalized_required:
+        return True, []
+
+    available = {result.area for result in results}
+    missing = [area for area in normalized_required if area not in available]
+    return len(missing) == 0, missing
+
+
 def format_results(results: list[MetricResult], verbose: bool = False) -> str:
     lines: list[str] = []
 
@@ -260,6 +275,12 @@ def main(argv: list[str] | None = None) -> int:
         "-v",
         action="store_true",
         help="Show detailed output",
+    )
+    parser.add_argument(
+        "--require-area",
+        action="append",
+        default=None,
+        help="Require that an evaluation area exists in baseline/results (repeatable)",
     )
     parser.add_argument(
         "--promote-baseline",
@@ -318,6 +339,14 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"[regression] ERROR: {exc}", file=sys.stderr)
         return 2
+    required_ok, missing_areas = validate_required_areas(results, args.require_area)
+    if not required_ok:
+        joined = ", ".join(missing_areas)
+        print(
+            f"[regression] ERROR: required area(s) missing from regression baseline/results: {joined}",
+            file=sys.stderr,
+        )
+        return 2
 
     print("[regression] Smoke metrics regression check")
     print(format_results(results, verbose=args.verbose))
@@ -342,6 +371,9 @@ def main(argv: list[str] | None = None) -> int:
         output_data = {
             "schema_version": 1,
             "passed": all_passed,
+            "required_areas": sorted(
+                {str(area).strip() for area in (args.require_area or []) if str(area).strip()}
+            ),
             "results": [
                 {
                     "area": r.area,

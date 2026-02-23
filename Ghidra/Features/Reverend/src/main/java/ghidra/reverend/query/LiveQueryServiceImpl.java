@@ -57,6 +57,10 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 	private static final double EMBEDDING_MIN_SCORE = getDoubleConfig("embedding.minScore", 0.10d);
 	private static final int EMBEDDING_STAGE_MULTIPLIER =
 		Math.max(1, getIntConfig("embedding.candidateMultiplier", 3));
+	private static final int SIMILARITY_CANDIDATE_BUDGET =
+		Math.max(32, getIntConfig("similarity.candidateBudget", 512));
+	private static final int SEMANTIC_CANDIDATE_BUDGET =
+		Math.max(32, getIntConfig("semantic.candidateBudget", 1024));
 	private static final int DECOMPILE_BUDGET_PER_QUERY =
 		Math.max(0, getIntConfig("decompile.budgetPerQuery", 64));
 	private static final int DECOMPILE_BUDGET_PER_SESSION =
@@ -133,7 +137,15 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		programBindings.computeIfAbsent(program, p -> {
 			p.addListener(this);
 			cacheManager.initializeForProgram(p);
+			QueryCacheManager.FunctionFeatureBatch bootstrapBatch =
+				cacheManager.ensureProgramFunctionFeatures(p);
 			decompilerProvider.initializeForProgram(p);
+			Msg.info(this, String.format(
+				"query-index-bootstrap program=%s indexedFresh=%d indexedReused=%d totalIndexed=%d",
+				programId(p),
+				bootstrapBatch.getIndexedCount(),
+				bootstrapBatch.getReusedCount(),
+				bootstrapBatch.getFeatureCount()));
 			return new ProgramBindingState(p);
 		});
 
@@ -210,24 +222,23 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			}
 
 			telemetry.recordCacheMiss(operationId);
-			List<Function> candidates = new ArrayList<>();
-			FunctionIterator functions = program.getFunctionManager().getFunctions(true);
-			while (functions.hasNext()) {
-				Function candidate = functions.next();
-				if (!candidate.equals(function)) {
-					candidates.add(candidate);
-				}
-			}
-			List<Function> indexedFunctions = new ArrayList<>(candidates.size() + 1);
-			indexedFunctions.add(function);
-			indexedFunctions.addAll(candidates);
-			QueryCacheManager.FunctionFeatureBatch featureBatch =
-				cacheManager.ensureFunctionFeatures(program, indexedFunctions);
+			QueryCacheManager.FunctionFeatureBatch featureBatch = cacheManager.ensureFunctionFeatures(
+				program, List.of(function));
 			QueryCacheManager.IndexedFunctionFeatures referenceFeatures =
 				featureBatch.get(function.getEntryPoint());
 			if (referenceFeatures == null) {
 				throw new QueryException("Failed to index function features: " + function.getName());
 			}
+
+			int candidateBudget = Math.max(maxResults, SIMILARITY_CANDIDATE_BUDGET);
+			List<QueryCacheManager.IndexedFunctionCandidate> indexedCandidates =
+				cacheManager.queryIndexedFunctionCandidates(
+					program, referenceFeatures.getLexicalTokens(), candidateBudget + 1);
+			if (indexedCandidates.isEmpty()) {
+				indexedCandidates = cacheManager.queryIndexedFunctionCandidates(
+					program, Collections.emptySet(), candidateBudget + 1);
+			}
+
 			String[] referenceTerms = referenceFeatures.getLexicalTokens().stream()
 				.sorted()
 				.toArray(String[]::new);
@@ -239,20 +250,24 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			boolean embeddingBackendAvailable = EMBEDDING_STAGE_ENABLED && isEmbeddingBackendAvailable();
 			QueryDecompileBudget queryBudget = decompileBudgetManager.startQuery();
 			List<FunctionScore> scoredCandidates = new ArrayList<>();
-			int totalFunctions = candidates.size();
+			int totalFunctions = indexedCandidates.size();
 			int processed = 0;
+			int consideredCandidates = 0;
 			int decompileCandidates = 0;
 
-			for (Function candidate : candidates) {
+			for (QueryCacheManager.IndexedFunctionCandidate indexedCandidate : indexedCandidates) {
 				if (monitor != null && monitor.isCancelled()) {
 					break;
 				}
 
-				QueryCacheManager.IndexedFunctionFeatures candidateFeatures =
-					featureBatch.get(candidate.getEntryPoint());
-				if (candidateFeatures == null) {
+				Function candidate = program.getFunctionManager().getFunctionAt(
+					indexedCandidate.getEntryAddress());
+				if (candidate == null || candidate.equals(function)) {
 					continue;
 				}
+				consideredCandidates++;
+				QueryCacheManager.IndexedFunctionFeatures candidateFeatures =
+					indexedCandidate.getFeatures();
 
 				double indexedSimilarity = computeFunctionSimilarity(referenceFeatures, candidateFeatures);
 				double finalSimilarity = indexedSimilarity;
@@ -269,7 +284,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 				}
 				if (finalSimilarity > 0.3) { // Threshold for relevance
 					scoredCandidates.add(new FunctionScore(candidate, finalSimilarity,
-						dynamicSignalApplied));
+						dynamicSignalApplied, candidateFeatures));
 				}
 
 				processed++;
@@ -283,8 +298,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					? "embedding_rerank"
 					: "deterministic_index_fallback";
 			for (FunctionScore candidate : scoredCandidates) {
-				QueryCacheManager.IndexedFunctionFeatures candidateFeatures =
-					featureBatch.get(candidate.function.getEntryPoint());
+				QueryCacheManager.IndexedFunctionFeatures candidateFeatures = candidate.indexedFeatures;
 				results.add(new QueryResultImpl(
 					candidate.function.getEntryPoint(),
 					candidate.score,
@@ -310,11 +324,13 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			}
 
 			Msg.info(this, String.format(
-				"similarity-index-profile op=%s candidates=%d indexedFresh=%d indexedReused=%d decompileCandidates=%d",
+				"similarity-index-profile op=%s candidates=%d indexedFresh=%d indexedReused=%d indexedCandidateCount=%d candidateBudget=%d decompileCandidates=%d",
 				operationId,
-				totalFunctions,
+				consideredCandidates,
 				featureBatch.getIndexedCount(),
 				featureBatch.getReusedCount(),
+				totalFunctions,
+				candidateBudget,
 				decompileCandidates));
 
 			// Cache the results
@@ -369,52 +385,55 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			String[] queryTerms = normalizedQuery.split("\\s+");
 			SymbolicQueryConstraints symbolicConstraints = SymbolicQueryConstraints.parse(normalizedQuery);
 
-			// Stage 1: symbolic candidate generation
-			List<Function> symbolicCandidates = new ArrayList<>();
-			FunctionIterator functions = program.getFunctionManager().getFunctions(
-				scope != null ? scope : program.getMemory(), true);
+			int candidateBudget = Math.max(maxResults, SEMANTIC_CANDIDATE_BUDGET);
+			List<QueryCacheManager.IndexedFunctionCandidate> indexedCandidates =
+				cacheManager.queryIndexedFunctionCandidates(program, Arrays.asList(queryTerms),
+					candidateBudget);
+			if (indexedCandidates.isEmpty()) {
+				indexedCandidates = cacheManager.queryIndexedFunctionCandidates(
+					program, Collections.emptySet(), candidateBudget);
+			}
+
+			// Stage 1: symbolic candidate generation over indexed shortlist
+			List<CandidateFunction> symbolicCandidates = new ArrayList<>();
 			int symbolicInputCount = 0;
-			for (Function func : functions) {
+			for (QueryCacheManager.IndexedFunctionCandidate indexedCandidate : indexedCandidates) {
 				if (monitor != null && monitor.isCancelled()) {
 					break;
 				}
+				Function func = program.getFunctionManager().getFunctionAt(
+					indexedCandidate.getEntryAddress());
+				if (func == null) {
+					continue;
+				}
+				if (scope != null && func.getBody() != null && !scope.intersects(func.getBody())) {
+					continue;
+				}
 				symbolicInputCount++;
 				if (!SYMBOLIC_STAGE_ENABLED || symbolicConstraints.matches(func)) {
-					symbolicCandidates.add(func);
+					symbolicCandidates.add(new CandidateFunction(func, indexedCandidate.getFeatures()));
 				}
 			}
 			symbolicCandidates.sort(Comparator
-				.comparing((Function functionCandidate) -> functionCandidate.getEntryPoint().toString())
-				.thenComparing(Function::getName));
+				.comparing((CandidateFunction functionCandidate) ->
+					functionCandidate.function.getEntryPoint().toString())
+				.thenComparing(candidate -> candidate.function.getName()));
 			logCandidateStageMetrics(operationId, normalizedQuery, "symbolic",
 				symbolicInputCount, symbolicCandidates.size(),
-				Map.of(
-					"enabled", SYMBOLIC_STAGE_ENABLED,
-					"constraintCount", symbolicConstraints.getConstraintCount()
+				Map.ofEntries(
+					Map.entry("enabled", SYMBOLIC_STAGE_ENABLED),
+					Map.entry("constraintCount", symbolicConstraints.getConstraintCount()),
+					Map.entry("candidateBudget", candidateBudget),
+					Map.entry("indexedCandidateCount", indexedCandidates.size())
 				));
-
-			QueryCacheManager.FunctionFeatureBatch featureBatch =
-				cacheManager.ensureFunctionFeatures(program, symbolicCandidates);
-			Map<Function, QueryCacheManager.IndexedFunctionFeatures> indexedFeatures =
-				new IdentityHashMap<>();
-			for (Function candidate : symbolicCandidates) {
-				QueryCacheManager.IndexedFunctionFeatures feature =
-					featureBatch.get(candidate.getEntryPoint());
-				if (feature != null) {
-					indexedFeatures.put(candidate, feature);
-				}
-			}
 
 			// Stage 2: lexical filtering
 			Map<Function, Double> lexicalScores = new HashMap<>();
-			List<Function> lexicalCandidates = new ArrayList<>();
-			for (Function candidate : symbolicCandidates) {
-				QueryCacheManager.IndexedFunctionFeatures feature = indexedFeatures.get(candidate);
-				if (feature == null) {
-					continue;
-				}
+			List<CandidateFunction> lexicalCandidates = new ArrayList<>();
+			for (CandidateFunction candidate : symbolicCandidates) {
+				QueryCacheManager.IndexedFunctionFeatures feature = candidate.indexedFeatures;
 				double lexicalScore = computeLexicalScore(feature, queryTerms);
-				lexicalScores.put(candidate, lexicalScore);
+				lexicalScores.put(candidate.function, lexicalScore);
 				if (!LEXICAL_STAGE_ENABLED || lexicalScore >= LEXICAL_MIN_SCORE) {
 					lexicalCandidates.add(candidate);
 				}
@@ -424,9 +443,10 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			}
 			logCandidateStageMetrics(operationId, normalizedQuery, "lexical",
 				symbolicCandidates.size(), lexicalCandidates.size(),
-				Map.of(
-					"enabled", LEXICAL_STAGE_ENABLED,
-					"minScore", LEXICAL_MIN_SCORE
+				Map.ofEntries(
+					Map.entry("enabled", LEXICAL_STAGE_ENABLED),
+					Map.entry("minScore", LEXICAL_MIN_SCORE),
+					Map.entry("candidateBudget", candidateBudget)
 				));
 
 			// Stage 3: index-backed primary ranking
@@ -436,14 +456,11 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			int embeddingWindow = Math.min(
 				Math.max(maxResults, maxResults * EMBEDDING_STAGE_MULTIPLIER),
 				lexicalCandidates.size());
-			for (Function candidate : lexicalCandidates) {
-				QueryCacheManager.IndexedFunctionFeatures feature = indexedFeatures.get(candidate);
-				if (feature == null) {
-					continue;
-				}
-				double lexicalScore = lexicalScores.getOrDefault(candidate, 0.0);
+			for (CandidateFunction candidate : lexicalCandidates) {
+				QueryCacheManager.IndexedFunctionFeatures feature = candidate.indexedFeatures;
+				double lexicalScore = lexicalScores.getOrDefault(candidate.function, 0.0);
 				double indexedScore = computeIndexedSemanticScore(feature, queryTerms, lexicalScore);
-				scoredCandidates.add(new FunctionScore(candidate, indexedScore, false));
+				scoredCandidates.add(new FunctionScore(candidate.function, indexedScore, false, feature));
 			}
 			scoredCandidates.sort((a, b) -> {
 				int scoreCmp = Double.compare(b.score, a.score);
@@ -486,7 +503,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					boolean dynamicSignalApplied = embeddingResult.usedEmbeddingScore &&
 						SEMANTIC_RANKING_POLICY.getDynamicWeight() > 0.0d;
 					refinedCandidates.add(new FunctionScore(candidateScore.function, finalScore,
-						dynamicSignalApplied));
+						dynamicSignalApplied, candidateScore.indexedFeatures));
 				}
 				scoredCandidates = refinedCandidates;
 			}
@@ -497,15 +514,17 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					Map.entry("backendAvailable", embeddingBackendAvailable),
 					Map.entry("fallbackApplied", !embeddingBackendAvailable),
 					Map.entry("primaryRanker", "indexed-features"),
-					Map.entry("indexedFresh", featureBatch.getIndexedCount()),
-					Map.entry("indexedReused", featureBatch.getReusedCount()),
+					Map.entry("indexedFresh", 0),
+					Map.entry("indexedReused", symbolicInputCount),
 					Map.entry("refineCandidateCount", refineCandidateCount),
 					Map.entry("queryBudgetExhausted", queryBudgetExhausted),
 					Map.entry("sessionBudgetExhausted", sessionBudgetExhausted),
 					Map.entry("queryBudgetRemaining", queryBudget.remaining()),
 					Map.entry("sessionBudgetRemaining", decompileBudgetManager.remainingSessionBudget()),
 					Map.entry("minScore", EMBEDDING_MIN_SCORE),
-					Map.entry("candidateMultiplier", EMBEDDING_STAGE_MULTIPLIER)
+					Map.entry("candidateMultiplier", EMBEDDING_STAGE_MULTIPLIER),
+					Map.entry("candidateBudget", candidateBudget),
+					Map.entry("indexedCandidateCount", indexedCandidates.size())
 				));
 			if (sessionBudgetExhausted || queryBudgetExhausted) {
 				String reason = sessionBudgetExhausted ? "session" : "query";
@@ -771,6 +790,18 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 				telemetry.recordCacheInvalidation("FUNCTION_BODY_CHANGED", changedProgram);
 			});
 			cacheManager.invalidateFunctionCaches(changedProgram, changedFunctionEntries);
+			if (!changedFunctionEntries.isEmpty()) {
+				List<Function> refreshedFunctions = new ArrayList<>();
+				for (Address entryPoint : changedFunctionEntries) {
+					Function function = changedProgram.getFunctionManager().getFunctionAt(entryPoint);
+					if (function != null) {
+						refreshedFunctions.add(function);
+					}
+				}
+				if (!refreshedFunctions.isEmpty()) {
+					cacheManager.ensureFunctionFeatures(changedProgram, refreshedFunctions);
+				}
+			}
 		}
 
 		if (ev.contains(ProgramEvent.SYMBOL_ADDED, ProgramEvent.SYMBOL_REMOVED,
@@ -792,6 +823,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 				ProgramEvent.MEMORY_BYTES_CHANGED)) {
 			// Invalidate all caches for major memory changes
 			cacheManager.invalidateAllCaches(changedProgram);
+			cacheManager.ensureProgramFunctionFeatures(changedProgram);
 			decompilerProvider.invalidateAllCaches(changedProgram);
 			telemetry.recordCacheInvalidation("MEMORY_CHANGED", changedProgram);
 		}
@@ -1224,15 +1256,28 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		}
 	}
 
+	private static class CandidateFunction {
+		private final Function function;
+		private final QueryCacheManager.IndexedFunctionFeatures indexedFeatures;
+
+		CandidateFunction(Function function, QueryCacheManager.IndexedFunctionFeatures indexedFeatures) {
+			this.function = function;
+			this.indexedFeatures = indexedFeatures;
+		}
+	}
+
 	private static class FunctionScore {
 		private final Function function;
 		private final double score;
 		private final boolean dynamicSignalApplied;
+		private final QueryCacheManager.IndexedFunctionFeatures indexedFeatures;
 
-		FunctionScore(Function function, double score, boolean dynamicSignalApplied) {
+		FunctionScore(Function function, double score, boolean dynamicSignalApplied,
+				QueryCacheManager.IndexedFunctionFeatures indexedFeatures) {
 			this.function = function;
 			this.score = score;
 			this.dynamicSignalApplied = dynamicSignalApplied;
+			this.indexedFeatures = indexedFeatures;
 		}
 	}
 

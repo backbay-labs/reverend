@@ -416,6 +416,37 @@ public class QueryCacheManager {
 		return cache != null ? cache.getIndexedFunctionFeatureCount() : 0;
 	}
 
+	/**
+	 * Ensures indexed features exist for every function in the program.
+	 *
+	 * @param program the program
+	 * @return feature batch with indexed/reused counters
+	 */
+	public FunctionFeatureBatch ensureProgramFunctionFeatures(Program program) {
+		ProgramQueryCache cache = programCaches.get(program);
+		if (cache == null) {
+			return FunctionFeatureBatch.empty();
+		}
+		return cache.ensureProgramFunctionFeatures();
+	}
+
+	/**
+	 * Queries indexed function candidates using lexical token postings.
+	 *
+	 * @param program the program
+	 * @param lexicalTerms normalized or raw lexical terms
+	 * @param maxCandidates maximum number of candidates to return
+	 * @return deterministic ranked candidate list
+	 */
+	public List<IndexedFunctionCandidate> queryIndexedFunctionCandidates(Program program,
+			Collection<String> lexicalTerms, int maxCandidates) {
+		ProgramQueryCache cache = programCaches.get(program);
+		if (cache == null) {
+			return Collections.emptyList();
+		}
+		return cache.queryIndexedCandidates(lexicalTerms, maxCandidates);
+	}
+
 	// --- Configuration ---
 
 	/**
@@ -464,6 +495,7 @@ public class QueryCacheManager {
 			new ConcurrentHashMap<>();
 		private final Map<String, IndexedFunctionFeatures> functionFeatureIndex =
 			new ConcurrentHashMap<>();
+		private final Map<String, Set<String>> functionEntriesByLexicalToken = new ConcurrentHashMap<>();
 		private final Set<String> similarFeatureKeys = ConcurrentHashMap.newKeySet();
 		private final Set<String> semanticFeatureKeys = ConcurrentHashMap.newKeySet();
 		private final Set<String> patternFeatureKeys = ConcurrentHashMap.newKeySet();
@@ -561,6 +593,7 @@ public class QueryCacheManager {
 				}
 				IndexedFunctionFeatures created = IndexedFunctionFeatures.fromFunction(function);
 				functionFeatureIndex.put(entryKey, created);
+				indexFeatureTokens(entryKey, created);
 				features.put(entryKey, created);
 				indexedCount++;
 			}
@@ -580,6 +613,86 @@ public class QueryCacheManager {
 			return functionFeatureIndex.size();
 		}
 
+		FunctionFeatureBatch ensureProgramFunctionFeatures() {
+			List<Function> allFunctions = new ArrayList<>();
+			for (Function function : program.getFunctionManager().getFunctions(true)) {
+				allFunctions.add(function);
+			}
+			return ensureFunctionFeatures(allFunctions);
+		}
+
+		List<IndexedFunctionCandidate> queryIndexedCandidates(Collection<String> lexicalTerms,
+				int maxCandidates) {
+			if (maxCandidates <= 0 || functionFeatureIndex.isEmpty()) {
+				return Collections.emptyList();
+			}
+
+			if (functionEntriesByLexicalToken.isEmpty() && !functionFeatureIndex.isEmpty()) {
+				rebuildLexicalTokenIndex();
+			}
+
+			Set<String> normalizedTerms = new TreeSet<>();
+			if (lexicalTerms != null) {
+				for (String term : lexicalTerms) {
+					normalizedTerms.addAll(tokenize(term));
+				}
+			}
+
+			Map<String, Integer> hitCounts = new HashMap<>();
+			for (String term : normalizedTerms) {
+				Set<String> entryKeys = functionEntriesByLexicalToken.get(term);
+				if (entryKeys == null) {
+					continue;
+				}
+				for (String entryKey : entryKeys) {
+					hitCounts.merge(entryKey, 1, Integer::sum);
+				}
+			}
+
+			List<String> rankedEntryKeys = new ArrayList<>();
+			if (!hitCounts.isEmpty()) {
+				rankedEntryKeys.addAll(hitCounts.entrySet()
+					.stream()
+					.sorted((left, right) -> {
+						int hitCmp = Integer.compare(right.getValue(), left.getValue());
+						if (hitCmp != 0) {
+							return hitCmp;
+						}
+						return left.getKey().compareTo(right.getKey());
+					})
+					.map(Map.Entry::getKey)
+					.toList());
+			}
+
+			if (rankedEntryKeys.size() < maxCandidates) {
+				for (String entryKey : functionFeatureIndex.keySet().stream().sorted().toList()) {
+					if (!hitCounts.containsKey(entryKey)) {
+						rankedEntryKeys.add(entryKey);
+					}
+					if (rankedEntryKeys.size() >= maxCandidates) {
+						break;
+					}
+				}
+			}
+
+			List<IndexedFunctionCandidate> candidates = new ArrayList<>();
+			for (String entryKey : rankedEntryKeys) {
+				if (candidates.size() >= maxCandidates) {
+					break;
+				}
+				IndexedFunctionFeatures features = functionFeatureIndex.get(entryKey);
+				if (features == null) {
+					continue;
+				}
+				Address entryAddress = resolveAddress(program, entryKey);
+				if (entryAddress == null) {
+					continue;
+				}
+				candidates.add(new IndexedFunctionCandidate(entryAddress, features));
+			}
+			return candidates;
+		}
+
 		// Invalidation methods
 		int invalidateFunctionCaches() {
 			int count = similarFunctionsCache.size();
@@ -592,6 +705,7 @@ public class QueryCacheManager {
 			functionEntriesBySemanticKey.clear();
 			count += functionFeatureIndex.size();
 			functionFeatureIndex.clear();
+			functionEntriesByLexicalToken.clear();
 			touchProgramVersion();
 			persistFeatureIndex();
 			return count;
@@ -632,7 +746,9 @@ public class QueryCacheManager {
 					similarFeatureKeys.clear();
 				}
 
-				if (functionFeatureIndex.remove(functionKey) != null) {
+				IndexedFunctionFeatures removedFeature = functionFeatureIndex.remove(functionKey);
+				if (removedFeature != null) {
+					removeFeatureTokens(functionKey, removedFeature);
 					count++;
 				}
 				Set<String> semanticKeys = semanticKeysByFunctionEntry.remove(functionKey);
@@ -690,6 +806,7 @@ public class QueryCacheManager {
 			functionEntriesBySemanticKey.clear();
 			count += functionFeatureIndex.size();
 			functionFeatureIndex.clear();
+			functionEntriesByLexicalToken.clear();
 			touchProgramVersion();
 			persistFeatureIndex();
 			return count;
@@ -774,6 +891,7 @@ public class QueryCacheManager {
 			patternSearchCache.clear();
 			contextCache.clear();
 			functionFeatureIndex.clear();
+			functionEntriesByLexicalToken.clear();
 			similarFeatureKeys.clear();
 			semanticFeatureKeys.clear();
 			patternFeatureKeys.clear();
@@ -860,6 +978,13 @@ public class QueryCacheManager {
 				repaired = true;
 			}
 
+			Map<String, Set<String>> rebuiltLexicalIndex = rebuildLexicalTokenIndexSnapshot();
+			if (!mapsEqual(functionEntriesByLexicalToken, rebuiltLexicalIndex)) {
+				functionEntriesByLexicalToken.clear();
+				functionEntriesByLexicalToken.putAll(rebuiltLexicalIndex);
+				repaired = true;
+			}
+
 			if (repaired) {
 				persistFeatureIndex();
 			}
@@ -902,6 +1027,7 @@ public class QueryCacheManager {
 				contextFeatureAddresses.addAll(persisted.contextFeatureAddresses);
 				functionFeatureIndex.clear();
 				functionFeatureIndex.putAll(copyFeatureMap(persisted.functionFeatureIndex));
+				rebuildLexicalTokenIndex();
 				functionEntriesBySemanticKey.clear();
 				functionEntriesBySemanticKey.putAll(copyMap(persisted.functionEntriesBySemanticKey));
 				addressesByPatternKey.clear();
@@ -1016,6 +1142,59 @@ public class QueryCacheManager {
 				patternKeys.remove(patternKey);
 				if (patternKeys.isEmpty()) {
 					patternKeysByAddress.remove(addressKey);
+				}
+			}
+		}
+
+		private void rebuildLexicalTokenIndex() {
+			functionEntriesByLexicalToken.clear();
+			functionEntriesByLexicalToken.putAll(rebuildLexicalTokenIndexSnapshot());
+		}
+
+		private Map<String, Set<String>> rebuildLexicalTokenIndexSnapshot() {
+			Map<String, Set<String>> rebuilt = new HashMap<>();
+			for (Map.Entry<String, IndexedFunctionFeatures> entry : functionFeatureIndex.entrySet()) {
+				String entryKey = entry.getKey();
+				IndexedFunctionFeatures feature = entry.getValue();
+				if (entryKey == null || feature == null) {
+					continue;
+				}
+				for (String token : feature.getLexicalTokens()) {
+					if (token == null || token.isBlank()) {
+						continue;
+					}
+					rebuilt.computeIfAbsent(token, ignored -> new HashSet<>()).add(entryKey);
+				}
+			}
+			return rebuilt;
+		}
+
+		private void indexFeatureTokens(String entryKey, IndexedFunctionFeatures feature) {
+			if (entryKey == null || feature == null) {
+				return;
+			}
+			for (String token : feature.getLexicalTokens()) {
+				if (token == null || token.isBlank()) {
+					continue;
+				}
+				functionEntriesByLexicalToken
+					.computeIfAbsent(token, ignored -> ConcurrentHashMap.newKeySet())
+					.add(entryKey);
+			}
+		}
+
+		private void removeFeatureTokens(String entryKey, IndexedFunctionFeatures feature) {
+			if (entryKey == null || feature == null) {
+				return;
+			}
+			for (String token : feature.getLexicalTokens()) {
+				Set<String> entries = functionEntriesByLexicalToken.get(token);
+				if (entries == null) {
+					continue;
+				}
+				entries.remove(entryKey);
+				if (entries.isEmpty()) {
+					functionEntriesByLexicalToken.remove(token);
 				}
 			}
 		}
@@ -1242,6 +1421,24 @@ public class QueryCacheManager {
 
 		public Map<String, IndexedFunctionFeatures> asMap() {
 			return featuresByEntryKey;
+		}
+	}
+
+	public static final class IndexedFunctionCandidate {
+		private final Address entryAddress;
+		private final IndexedFunctionFeatures features;
+
+		private IndexedFunctionCandidate(Address entryAddress, IndexedFunctionFeatures features) {
+			this.entryAddress = entryAddress;
+			this.features = features;
+		}
+
+		public Address getEntryAddress() {
+			return entryAddress;
+		}
+
+		public IndexedFunctionFeatures getFeatures() {
+			return features;
 		}
 	}
 
