@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import tarfile
 import sys
 import tempfile
 import unittest
@@ -310,6 +311,152 @@ class ReceiptStoreTest(unittest.TestCase):
             self.assertTrue(passing_payload["ok"])
             self.assertEqual(passing_payload["issue_count"], 0)
             self.assertEqual(len(passing_payload["explainability_packet"]["applied_proposals"]), 1)
+
+    def test_pack_and_verify_bundle_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "receipts.json"
+            store = ReceiptStore(store_path)
+            store.append(self._base_receipt(receipt_id="r-1", target_id="func-1"))
+
+            artifact_path = root / "artifact.json"
+            artifact_path.write_text(json.dumps({"kind": "artifact", "ok": True}) + "\n", encoding="utf-8")
+
+            bundle_path = root / "mission-bundle.tar.gz"
+            pack_exit = main(
+                [
+                    "pack-bundle",
+                    "--store",
+                    str(store_path),
+                    "--artifact",
+                    str(artifact_path),
+                    "--mission-id",
+                    "mission-e25-s3",
+                    "--output",
+                    str(bundle_path),
+                    "--signing-key",
+                    "test-signing-key",
+                    "--key-id",
+                    "unit-test",
+                ]
+            )
+            self.assertEqual(pack_exit, 0)
+            self.assertTrue(bundle_path.exists())
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                verify_exit = main(
+                    [
+                        "verify-bundle",
+                        "--bundle",
+                        str(bundle_path),
+                        "--signing-key",
+                        "test-signing-key",
+                    ]
+                )
+            self.assertEqual(verify_exit, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["issue_count"], 0)
+            self.assertEqual(payload["manifest"]["mission_id"], "mission-e25-s3")
+            self.assertEqual(payload["manifest"]["signature"]["algorithm"], "hmac-sha256")
+
+    def test_verify_bundle_detects_artifact_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "receipts.json"
+            store = ReceiptStore(store_path)
+            store.append(self._base_receipt(receipt_id="r-1", target_id="func-1"))
+
+            artifact_path = root / "artifact.txt"
+            artifact_path.write_text("stable artifact\n", encoding="utf-8")
+            bundle_path = root / "bundle.tar.gz"
+            main(
+                [
+                    "pack-bundle",
+                    "--store",
+                    str(store_path),
+                    "--artifact",
+                    str(artifact_path),
+                    "--mission-id",
+                    "tamper-test",
+                    "--output",
+                    str(bundle_path),
+                    "--signing-key",
+                    "test-signing-key",
+                ]
+            )
+
+            with tempfile.TemporaryDirectory() as rewrite_tmp:
+                rewrite_root = Path(rewrite_tmp)
+                source_entries: dict[str, bytes] = {}
+                with tarfile.open(bundle_path, mode="r:gz") as reader:
+                    for member in reader.getmembers():
+                        if not member.isfile():
+                            continue
+                        handle = reader.extractfile(member)
+                        self.assertIsNotNone(handle)
+                        source_entries[member.name] = handle.read()
+                source_entries["artifacts/artifact.txt"] = b"tampered artifact\n"
+
+                tampered_path = rewrite_root / "tampered.tar.gz"
+                with tarfile.open(tampered_path, mode="w:gz") as writer:
+                    for name in sorted(source_entries):
+                        payload = source_entries[name]
+                        info = tarfile.TarInfo(name=name)
+                        info.size = len(payload)
+                        writer.addfile(info, io.BytesIO(payload))
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    verify_exit = main(
+                        [
+                            "verify-bundle",
+                            "--bundle",
+                            str(tampered_path),
+                            "--signing-key",
+                            "test-signing-key",
+                        ]
+                    )
+                self.assertEqual(verify_exit, 1)
+                payload = json.loads(stdout.getvalue())
+                self.assertFalse(payload["ok"])
+                reasons = [item["reason"] for item in payload["issues"]]
+                self.assertTrue(any("artifact checksum mismatch" in reason for reason in reasons))
+
+    def test_pack_bundle_is_reproducible_for_identical_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "receipts.json"
+            store = ReceiptStore(store_path)
+            store.append(self._base_receipt(receipt_id="r-1", target_id="func-1"))
+            store.append(self._base_receipt(receipt_id="r-2", target_id="func-2"))
+
+            artifact_a = root / "a.json"
+            artifact_b = root / "b.json"
+            artifact_a.write_text("{\"name\":\"a\"}\n", encoding="utf-8")
+            artifact_b.write_text("{\"name\":\"b\"}\n", encoding="utf-8")
+
+            bundle_one = root / "bundle-1.tar.gz"
+            bundle_two = root / "bundle-2.tar.gz"
+            args = [
+                "pack-bundle",
+                "--store",
+                str(store_path),
+                "--artifact",
+                str(artifact_b),
+                "--artifact",
+                str(artifact_a),
+                "--mission-id",
+                "repro-mission",
+                "--signing-key",
+                "test-signing-key",
+            ]
+            exit_one = main(args + ["--output", str(bundle_one)])
+            exit_two = main(args + ["--output", str(bundle_two)])
+            self.assertEqual(exit_one, 0)
+            self.assertEqual(exit_two, 0)
+            self.assertEqual(bundle_one.read_bytes(), bundle_two.read_bytes())
 
 
 if __name__ == "__main__":

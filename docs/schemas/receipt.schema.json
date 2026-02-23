@@ -661,6 +661,125 @@
       "pattern": "^[0-9a-f]{64}$"
     }
   },
+  "$defs": {
+    "mission_artifact_bundle_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "mission_id",
+        "receipt_store",
+        "provenance_report",
+        "artifacts",
+        "signature"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "kind": {
+          "type": "string",
+          "const": "mission_artifact_bundle_manifest"
+        },
+        "mission_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "receipt_store": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "sha256",
+            "receipt_count"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "const": "receipts.json"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "receipt_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "provenance_report": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "const": "provenance-verification-report.json"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "sha256",
+              "size_bytes"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^artifacts/.+"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "algorithm",
+            "key_id",
+            "digest"
+          ],
+          "properties": {
+            "algorithm": {
+              "type": "string",
+              "const": "hmac-sha256"
+            },
+            "key_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    }
+  },
   "allOf": [
     {
       "if": {

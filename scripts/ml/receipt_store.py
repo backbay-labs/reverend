@@ -4,9 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
+import hmac
+import io
 import json
+import os
 import re
+import tarfile
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -56,6 +61,10 @@ def _utc_now() -> str:
 
 def _json_copy(value: Any) -> Any:
     return json.loads(json.dumps(value))
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
 
 def _required_string(value: Any, *, field: str) -> str:
@@ -172,8 +181,34 @@ def _validate_receipt_linkage(receipt: Mapping[str, Any]) -> None:
 def compute_receipt_hash(receipt: Mapping[str, Any]) -> str:
     payload = dict(receipt)
     payload.pop("hash", None)
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    canonical = _canonical_json_bytes(payload)
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _resolve_signing_key(*, key_inline: str | None, key_env: str) -> bytes:
+    if key_inline:
+        return key_inline.encode("utf-8")
+    key = os.environ.get(key_env, "")
+    if key:
+        return key.encode("utf-8")
+    raise ValueError(f"missing signing key: provide --signing-key or set ${key_env}")
+
+
+def _sign_manifest_payload(manifest_payload: Mapping[str, Any], *, key: bytes) -> str:
+    canonical = _canonical_json_bytes(manifest_payload)
+    return hmac.new(key, canonical, digestmod=hashlib.sha256).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -228,12 +263,147 @@ class ProvenanceChainReport:
         }
 
 
+@dataclass(frozen=True)
+class BundleVerificationIssue:
+    reason: str
+
+
+@dataclass(frozen=True)
+class BundleVerificationReport:
+    ok: bool
+    issues: tuple[BundleVerificationIssue, ...]
+    manifest: Mapping[str, Any] | None
+    provenance_report: Mapping[str, Any] | None
+
+    @property
+    def issue_count(self) -> int:
+        return len(self.issues)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "kind": "mission_artifact_bundle_verification_report",
+            "ok": self.ok,
+            "issue_count": self.issue_count,
+            "issues": [{"reason": issue.reason} for issue in self.issues],
+            "manifest": _json_copy(self.manifest) if self.manifest is not None else None,
+            "provenance_report": _json_copy(self.provenance_report) if self.provenance_report is not None else None,
+        }
+
+
 class ReceiptStoreIntegrityError(ValueError):
     """Raised when receipt history fails integrity verification."""
 
 
 class AppendOnlyViolationError(ValueError):
     """Raised when an append operation would mutate existing history."""
+
+
+def _safe_tar_read_member(reader: tarfile.TarFile, *, member_name: str) -> bytes:
+    member = reader.getmember(member_name)
+    if not member.isfile():
+        raise ValueError(f"tar member '{member_name}' is not a regular file")
+    handle = reader.extractfile(member)
+    if handle is None:
+        raise ValueError(f"tar member '{member_name}' cannot be read")
+    return handle.read()
+
+
+def _normalize_bundle_artifact_paths(paths: Sequence[Path]) -> list[tuple[Path, str]]:
+    if not paths:
+        raise ValueError("bundle requires at least one --artifact path")
+    resolved: list[tuple[Path, str]] = []
+    seen: set[str] = set()
+    for raw in paths:
+        source = raw.resolve()
+        if not source.exists() or not source.is_file():
+            raise ValueError(f"artifact path '{raw}' must exist and be a file")
+        arcname = source.name
+        if arcname in seen:
+            raise ValueError(f"artifact filename collision for '{arcname}'")
+        seen.add(arcname)
+        resolved.append((source, f"artifacts/{arcname}"))
+    resolved.sort(key=lambda item: item[1])
+    return resolved
+
+
+def _build_bundle_manifest_payload(
+    *,
+    mission_id: str,
+    receipt_store_name: str,
+    receipt_store_sha256: str,
+    receipt_count: int,
+    provenance_report_name: str,
+    provenance_report_sha256: str,
+    artifacts: Sequence[tuple[str, str, int]],
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "kind": "mission_artifact_bundle_manifest",
+        "mission_id": mission_id,
+        "receipt_store": {
+            "path": receipt_store_name,
+            "sha256": receipt_store_sha256,
+            "receipt_count": receipt_count,
+        },
+        "provenance_report": {
+            "path": provenance_report_name,
+            "sha256": provenance_report_sha256,
+        },
+        "artifacts": [
+            {
+                "path": path,
+                "sha256": checksum,
+                "size_bytes": size_bytes,
+            }
+            for path, checksum, size_bytes in artifacts
+        ],
+    }
+
+
+def _write_manifest_json(*, payload: Mapping[str, Any], signature: Mapping[str, Any]) -> bytes:
+    manifest = dict(payload)
+    manifest["signature"] = dict(signature)
+    return json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True).encode("utf-8") + b"\n"
+
+
+def _normalize_provenance_payload_for_bundle(payload: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = _json_copy(payload)
+    explainability = normalized.get("explainability_packet")
+    if isinstance(explainability, dict):
+        # Keep report content deterministic for identical receipt histories.
+        explainability["generated_at_utc"] = "1970-01-01T00:00:00+00:00"
+    return normalized
+
+
+def _write_deterministic_bundle(
+    *,
+    output_path: Path,
+    manifest_bytes: bytes,
+    receipt_store_bytes: bytes,
+    provenance_report_bytes: bytes,
+    artifacts: Sequence[tuple[str, bytes]],
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("wb") as raw_handle:
+        with gzip.GzipFile(fileobj=raw_handle, mode="wb", mtime=0, filename="") as gz_handle:
+            with tarfile.open(fileobj=gz_handle, mode="w") as tar:
+                entries: list[tuple[str, bytes]] = [
+                    ("manifest.json", manifest_bytes),
+                    ("receipts.json", receipt_store_bytes),
+                    ("provenance-verification-report.json", provenance_report_bytes),
+                ]
+                entries.extend((path, payload) for path, payload in artifacts)
+                for name, payload in sorted(entries, key=lambda item: item[0]):
+                    info = tarfile.TarInfo(name=name)
+                    info.size = len(payload)
+                    info.mtime = 0
+                    info.uid = 0
+                    info.gid = 0
+                    info.uname = ""
+                    info.gname = ""
+                    info.mode = 0o644
+                    tar.addfile(info, io.BytesIO(payload))
 
 
 def verify_receipt_history(receipts: Sequence[Mapping[str, Any]]) -> ReceiptIntegrityReport:
@@ -834,6 +1004,241 @@ def _verify_provenance_command(args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
+def _pack_bundle_command(args: argparse.Namespace) -> int:
+    mission_id = _required_string(args.mission_id, field="mission_id")
+    signing_key = _resolve_signing_key(key_inline=args.signing_key, key_env=args.signing_key_env)
+    artifact_paths = _normalize_bundle_artifact_paths(args.artifact)
+
+    store = ReceiptStore(args.store)
+    receipts = list(store.list_receipts())
+    provenance_report = store.verify_provenance()
+    if not provenance_report.ok:
+        payload = provenance_report.as_dict()
+        if args.report is not None:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        return 1
+
+    receipt_store_bytes = args.store.read_bytes()
+    provenance_payload = _normalize_provenance_payload_for_bundle(provenance_report.as_dict())
+    provenance_report_bytes = json.dumps(
+        provenance_payload, indent=2, sort_keys=True, ensure_ascii=True
+    ).encode("utf-8") + b"\n"
+
+    artifact_payloads: list[tuple[str, bytes]] = []
+    artifact_manifest_entries: list[tuple[str, str, int]] = []
+    for source, arcname in artifact_paths:
+        payload = source.read_bytes()
+        artifact_payloads.append((arcname, payload))
+        artifact_manifest_entries.append((arcname, _sha256_bytes(payload), len(payload)))
+
+    manifest_payload = _build_bundle_manifest_payload(
+        mission_id=mission_id,
+        receipt_store_name="receipts.json",
+        receipt_store_sha256=_sha256_bytes(receipt_store_bytes),
+        receipt_count=len(receipts),
+        provenance_report_name="provenance-verification-report.json",
+        provenance_report_sha256=_sha256_bytes(provenance_report_bytes),
+        artifacts=artifact_manifest_entries,
+    )
+    signature = {
+        "algorithm": "hmac-sha256",
+        "key_id": _required_string(args.key_id, field="key_id"),
+        "digest": _sign_manifest_payload(manifest_payload, key=signing_key),
+    }
+    manifest_bytes = _write_manifest_json(payload=manifest_payload, signature=signature)
+
+    _write_deterministic_bundle(
+        output_path=args.output,
+        manifest_bytes=manifest_bytes,
+        receipt_store_bytes=receipt_store_bytes,
+        provenance_report_bytes=provenance_report_bytes,
+        artifacts=artifact_payloads,
+    )
+
+    output_payload = {
+        "schema_version": 1,
+        "kind": "mission_artifact_bundle_pack_result",
+        "ok": True,
+        "bundle_path": str(args.output),
+        "bundle_sha256": _sha256_file(args.output),
+        "manifest_digest": signature["digest"],
+        "artifact_count": len(artifact_manifest_entries),
+    }
+    if args.report is not None:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(output_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    else:
+        print(json.dumps(output_payload, indent=2, sort_keys=True))
+    return 0
+
+
+def verify_bundle(*, bundle_path: Path, signing_key: bytes) -> BundleVerificationReport:
+    issues: list[BundleVerificationIssue] = []
+    manifest: Mapping[str, Any] | None = None
+    provenance_report: Mapping[str, Any] | None = None
+    bundle_receipts: list[Mapping[str, Any]] = []
+    receipts_bytes = b""
+    provenance_bytes = b""
+    manifest_raw: Mapping[str, Any] = {}
+
+    with tarfile.open(bundle_path, mode="r:gz") as tar:
+        required_members = {
+            "manifest.json",
+            "receipts.json",
+            "provenance-verification-report.json",
+        }
+        member_names = {member.name for member in tar.getmembers()}
+        for required in sorted(required_members):
+            if required not in member_names:
+                issues.append(BundleVerificationIssue(reason=f"bundle missing '{required}'"))
+
+        for member_name in sorted(member_names):
+            if member_name.startswith("/") or ".." in Path(member_name).parts:
+                issues.append(BundleVerificationIssue(reason=f"bundle has unsafe member path '{member_name}'"))
+
+        try:
+            manifest_bytes = _safe_tar_read_member(tar, member_name="manifest.json")
+            manifest_raw = json.loads(manifest_bytes.decode("utf-8"))
+            if not isinstance(manifest_raw, Mapping):
+                issues.append(BundleVerificationIssue(reason="manifest.json must decode to a JSON object"))
+                manifest_raw = {}
+            manifest = manifest_raw
+        except Exception as exc:  # pragma: no cover - defensive parse guard
+            issues.append(BundleVerificationIssue(reason=f"failed to parse manifest.json: {exc}"))
+            manifest_raw = {}
+
+        try:
+            receipts_bytes = _safe_tar_read_member(tar, member_name="receipts.json")
+            store_raw = json.loads(receipts_bytes.decode("utf-8"))
+            receipts_raw = store_raw.get("receipts") if isinstance(store_raw, Mapping) else None
+            if isinstance(receipts_raw, list):
+                bundle_receipts = [item for item in receipts_raw if isinstance(item, Mapping)]
+            else:
+                issues.append(BundleVerificationIssue(reason="receipts.json missing receipts array"))
+        except Exception as exc:  # pragma: no cover - defensive parse guard
+            issues.append(BundleVerificationIssue(reason=f"failed to parse receipts.json: {exc}"))
+            receipts_bytes = b""
+
+        try:
+            provenance_bytes = _safe_tar_read_member(tar, member_name="provenance-verification-report.json")
+            provenance_raw = json.loads(provenance_bytes.decode("utf-8"))
+            if isinstance(provenance_raw, Mapping):
+                provenance_report = provenance_raw
+            else:
+                issues.append(
+                    BundleVerificationIssue(reason="provenance-verification-report.json must decode to object")
+                )
+        except Exception as exc:  # pragma: no cover - defensive parse guard
+            issues.append(BundleVerificationIssue(reason=f"failed to parse provenance-verification-report.json: {exc}"))
+            provenance_bytes = b""
+
+        if isinstance(manifest_raw, Mapping):
+            signature_raw = manifest_raw.get("signature")
+            if not isinstance(signature_raw, Mapping):
+                issues.append(BundleVerificationIssue(reason="manifest missing signature object"))
+            else:
+                algorithm = str(signature_raw.get("algorithm") or "").strip()
+                digest = str(signature_raw.get("digest") or "").strip()
+                if algorithm != "hmac-sha256":
+                    issues.append(BundleVerificationIssue(reason=f"unsupported signature algorithm '{algorithm}'"))
+                if not HEX64_RE.match(digest):
+                    issues.append(BundleVerificationIssue(reason="manifest signature digest must be hex64"))
+                unsigned_manifest = dict(manifest_raw)
+                unsigned_manifest.pop("signature", None)
+                expected_digest = _sign_manifest_payload(unsigned_manifest, key=signing_key)
+                if digest and digest != expected_digest:
+                    issues.append(BundleVerificationIssue(reason="manifest signature verification failed"))
+
+            receipt_spec = manifest_raw.get("receipt_store")
+            if isinstance(receipt_spec, Mapping):
+                path = str(receipt_spec.get("path") or "").strip()
+                expected_sha = str(receipt_spec.get("sha256") or "").strip()
+                if path != "receipts.json":
+                    issues.append(BundleVerificationIssue(reason="manifest receipt_store.path must be 'receipts.json'"))
+                if expected_sha and expected_sha != _sha256_bytes(receipts_bytes):
+                    issues.append(BundleVerificationIssue(reason="receipts.json checksum mismatch"))
+            else:
+                issues.append(BundleVerificationIssue(reason="manifest missing receipt_store section"))
+
+            prov_spec = manifest_raw.get("provenance_report")
+            if isinstance(prov_spec, Mapping):
+                path = str(prov_spec.get("path") or "").strip()
+                expected_sha = str(prov_spec.get("sha256") or "").strip()
+                if path != "provenance-verification-report.json":
+                    issues.append(
+                        BundleVerificationIssue(
+                            reason="manifest provenance_report.path must be 'provenance-verification-report.json'"
+                        )
+                    )
+                if expected_sha and expected_sha != _sha256_bytes(provenance_bytes):
+                    issues.append(BundleVerificationIssue(reason="provenance-verification-report.json checksum mismatch"))
+            else:
+                issues.append(BundleVerificationIssue(reason="manifest missing provenance_report section"))
+
+            artifacts_raw = manifest_raw.get("artifacts")
+            if isinstance(artifacts_raw, list):
+                for idx, item in enumerate(artifacts_raw):
+                    if not isinstance(item, Mapping):
+                        issues.append(BundleVerificationIssue(reason=f"manifest artifacts[{idx}] must be object"))
+                        continue
+                    artifact_path = str(item.get("path") or "").strip()
+                    expected_sha = str(item.get("sha256") or "").strip()
+                    if not artifact_path.startswith("artifacts/"):
+                        issues.append(
+                            BundleVerificationIssue(
+                                reason=f"manifest artifacts[{idx}].path must be under artifacts/"
+                            )
+                        )
+                        continue
+                    if artifact_path not in member_names:
+                        issues.append(BundleVerificationIssue(reason=f"bundle missing artifact '{artifact_path}'"))
+                        continue
+                    payload = _safe_tar_read_member(tar, member_name=artifact_path)
+                    if expected_sha and expected_sha != _sha256_bytes(payload):
+                        issues.append(BundleVerificationIssue(reason=f"artifact checksum mismatch: '{artifact_path}'"))
+            else:
+                issues.append(BundleVerificationIssue(reason="manifest missing artifacts array"))
+
+    if bundle_receipts:
+        provenance_runtime = verify_provenance_chain(bundle_receipts)
+        if not provenance_runtime.ok:
+            for issue in provenance_runtime.issues:
+                issues.append(
+                    BundleVerificationIssue(
+                        reason=(
+                            "provenance verification failed: "
+                            f"{issue.reason}"
+                        )
+                    )
+                )
+        if isinstance(provenance_report, Mapping):
+            expected = _normalize_provenance_payload_for_bundle(provenance_runtime.as_dict())
+            if _canonical_json_bytes(provenance_report) != _canonical_json_bytes(expected):
+                issues.append(BundleVerificationIssue(reason="embedded provenance report does not match receipts"))
+
+    return BundleVerificationReport(
+        ok=not issues,
+        issues=tuple(issues),
+        manifest=manifest,
+        provenance_report=provenance_report,
+    )
+
+
+def _verify_bundle_command(args: argparse.Namespace) -> int:
+    signing_key = _resolve_signing_key(key_inline=args.signing_key, key_env=args.signing_key_env)
+    report = verify_bundle(bundle_path=args.bundle, signing_key=signing_key)
+    payload = report.as_dict()
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    else:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0 if report.ok else 1
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Receipt-store provenance utilities")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -855,6 +1260,71 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional path to write machine-readable verifier report JSON",
     )
     verify_parser.set_defaults(func=_verify_provenance_command)
+
+    pack_parser = subparsers.add_parser(
+        "pack-bundle",
+        help="Build a deterministic signed mission artifact bundle from receipt/provenance data",
+    )
+    pack_parser.add_argument("--store", type=Path, required=True, help="Path to receipt store JSON file")
+    pack_parser.add_argument(
+        "--artifact",
+        type=Path,
+        action="append",
+        required=True,
+        help="Artifact file path to include (repeatable)",
+    )
+    pack_parser.add_argument("--mission-id", type=str, required=True, help="Stable mission identifier")
+    pack_parser.add_argument("--output", type=Path, required=True, help="Output bundle path (.tar.gz)")
+    pack_parser.add_argument(
+        "--key-id",
+        type=str,
+        default="default",
+        help="Signing key identifier embedded in the manifest",
+    )
+    pack_parser.add_argument(
+        "--signing-key",
+        type=str,
+        default=None,
+        help="Inline HMAC signing key; prefer --signing-key-env in production",
+    )
+    pack_parser.add_argument(
+        "--signing-key-env",
+        type=str,
+        default="MISSION_BUNDLE_SIGNING_KEY",
+        help="Environment variable name containing the HMAC signing key",
+    )
+    pack_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Optional path for pack result JSON",
+    )
+    pack_parser.set_defaults(func=_pack_bundle_command)
+
+    verify_bundle_parser = subparsers.add_parser(
+        "verify-bundle",
+        help="Verify mission artifact bundle checksums, signature, and provenance chain",
+    )
+    verify_bundle_parser.add_argument("--bundle", type=Path, required=True, help="Path to bundle (.tar.gz)")
+    verify_bundle_parser.add_argument(
+        "--signing-key",
+        type=str,
+        default=None,
+        help="Inline HMAC signing key; prefer --signing-key-env in production",
+    )
+    verify_bundle_parser.add_argument(
+        "--signing-key-env",
+        type=str,
+        default="MISSION_BUNDLE_SIGNING_KEY",
+        help="Environment variable name containing the HMAC signing key",
+    )
+    verify_bundle_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write machine-readable verification report JSON",
+    )
+    verify_bundle_parser.set_defaults(func=_verify_bundle_command)
     return parser
 
 
