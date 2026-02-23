@@ -1,0 +1,59 @@
+{
+  "proof": {
+    "status": "completed",
+    "issue_id": "3112",
+    "workcell_id": "wc-3112-fixture-skip-blocked",
+    "metadata": {},
+    "verification": {
+      "gate_summary": {
+        "diff_files": 3,
+        "diff_lines": 31,
+        "blocking_gate_skips": [
+          {
+            "gate": "Reverend",
+            "reason": "manual override requested",
+            "status": "skipped"
+          }
+        ]
+      }
+    }
+  },
+  "expect_exit_code": 1,
+  "expected_failure_code": "policy.completion_blocked",
+  "expect_cyntra_calls": 1,
+  "expected_gate_summary": {
+    "completion_classification": "code_change",
+    "noop_reason": "",
+    "noop_reason_source": "",
+    "noop_justification_source": "",
+    "explicit_noop_justification_present": false,
+    "blocking_gate_skipped_count": 1,
+    "blocking_gate_skip_budget": 0,
+    "blocking_gate_budget_exceeded": true,
+    "blocking_gate_skip_reasons": [
+      "manual override requested"
+    ],
+    "blocking_gate_skip_reasons_allowlisted": false,
+    "blocking_gate_skip_evidence_present": true,
+    "policy_result": "blocked",
+    "policy_blocked": true,
+    "policy_block_reason": "blocking_gate_skip_reason_not_allowlisted"
+  },
+  "expected_event": {
+    "event": "completion_policy_gate_summary",
+    "gate_summary": {
+      "completion_classification": "code_change",
+      "blocking_gate_skipped_count": 1,
+      "blocking_gate_skip_budget": 0,
+      "blocking_gate_budget_exceeded": true,
+      "blocking_gate_skip_reasons": [
+        "manual override requested"
+      ],
+      "blocking_gate_skip_reasons_allowlisted": false,
+      "blocking_gate_skip_evidence_present": true,
+      "policy_result": "blocked",
+      "policy_blocked": true,
+      "policy_block_reason": "blocking_gate_skip_reason_not_allowlisted"
+    }
+  }
+}

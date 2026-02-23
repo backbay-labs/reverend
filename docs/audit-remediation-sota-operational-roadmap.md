@@ -19,13 +19,13 @@ Close every finding from the 2026-02-22 audit, then prove Reverend is operationa
 | F5 | Integrated-branch compile blockers pending | `3105` | `:Framework-TraceModeling:compileJava` and `:Reverend:compileJava :Reverend:test --tests "ghidra.reverend.cockpit.*"` pass in active + integrated worktrees |
 | F6 | Hash-collision-prone cache keys | `3106` | canonical serialization + digest cache keys with tests |
 | F7 | Roadmap/docs drift | `3107` | `.beads`/CSV/docs validator parity + CI enforcement |
-| F8 | Zero-diff auto-close integrity gap | `3108`, `3110`, `3111` | no-op close requires explicit manifest `noop_justification` (`manifest.issue.noop_justification` or `manifest.noop_justification`) + completion gate-summary telemetry (`completion_policy_gate_summary`) + reopen policy |
+| F8 | Zero-diff auto-close integrity gap | `3108`, `3110`, `3111`, `3112` | no-op close requires explicit manifest `noop_justification` (`manifest.issue.noop_justification` or `manifest.noop_justification`) + completion gate-summary telemetry (`completion_policy_gate_summary`) + blocking-gate skip-budget enforcement (allowlisted reasons + skip counts/reasons evidence) + reopen policy |
 | F9 | O(N) query architecture + TODO embedding | `3201-3204` | indexed retrieval + embedding-backed ranking path |
 | F10 | Weak Java/Python/plugin runtime integration | `3205` | query -> proposal -> apply/rollback loop operational in cockpit |
 | F11 | “Operational” claim not benchmark-gated | `3206-3208` | benchmark thresholds enforced and GA packet published |
 
 ## Epic E20: Audit Closure + Delivery Integrity (`3100`)
-Stories: `3101-3111`
+Stories: `3101-3112`
 
 Dispatch waves:
 1. Wave A (critical unblock): `3103`, `3105`, `3106`, `3109`.
