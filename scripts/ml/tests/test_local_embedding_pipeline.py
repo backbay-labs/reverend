@@ -1232,6 +1232,10 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(approve_report["kind"], "proposal_review_report")
             self.assertEqual(approve_report["metrics"]["reviewed_total"], 1)
             self.assertFalse(approve_report["bulk"])
+            self.assertEqual(len(approve_report["review_receipt_ids"]), 1)
+            self.assertEqual(approve_report["receipt_links"][0]["proposal_id"], "p-1")
+            self.assertEqual(approve_report["receipt_links"][0]["receipt_id"], "receipt:p-1")
+            self.assertEqual(approve_report["receipt_links"][0]["link_type"], "REVIEWS_PROPOSAL")
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -1251,6 +1255,10 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(reject_report["metrics"]["reviewed_total"], 2)
             self.assertEqual(reject_report["metrics"]["skipped_total"], 1)
             self.assertTrue(reject_report["bulk"])
+            self.assertEqual(len(reject_report["review_receipt_ids"]), 2)
+            self.assertTrue(
+                all(item["link_type"] == "REVIEWS_PROPOSAL" for item in reject_report["receipt_links"])
+            )
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -1284,6 +1292,10 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(by_id["p-2"]["state"], "REJECTED")
             self.assertEqual(by_id["p-3"]["state"], "REJECTED")
             self.assertTrue(all(len(item["lifecycle_transitions"]) >= 2 for item in by_id.values()))
+            self.assertTrue(all(len(item["provenance_chain"]) >= 2 for item in by_id.values()))
+            self.assertEqual(by_id["p-1"]["last_receipt_id"], approve_report["review_receipt_ids"][0])
+            self.assertTrue(by_id["p-2"]["last_receipt_id"].startswith("receipt:review:"))
+            self.assertTrue(by_id["p-3"]["last_receipt_id"].startswith("receipt:review:"))
             self.assertEqual(by_id["p-2"]["evidence_link_ids"], p2["evidence_link_ids"])
             self.assertEqual(by_id["p-2"]["artifact"]["evidence_refs"][0]["evidence_ref_id"], p2["evidence_link_ids"][0])
 
@@ -1362,6 +1374,11 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(tx["receipt_links"][0]["link_type"], "APPLIES_PROPOSAL")
             self.assertEqual(tx["state_before"]["p-approved"]["state"], "APPROVED")
             self.assertEqual(tx["state_after"]["p-approved"]["state"], "APPLIED")
+            self.assertEqual(by_id["p-approved"]["provenance_chain"][-1]["receipt_id"], apply_report["apply_receipt_id"])
+            self.assertEqual(
+                by_id["p-approved"]["provenance_chain"][-1]["previous_receipt_id"],
+                "receipt:p-approved",
+            )
 
     def test_proposal_rollback_restores_pre_apply_state_for_single_change(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1455,6 +1472,12 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(proposal["evidence_link_ids"], ["evr_p1_xref"])
             self.assertEqual(proposal["evidence_refs"][0]["evidence_ref_id"], "evr_p1_xref")
             self.assertEqual(proposal["artifact"]["evidence_refs"][0]["evidence_ref_id"], "evr_p1_xref")
+            self.assertEqual(proposal["provenance_chain"][-2]["receipt_id"], apply_receipt_id)
+            self.assertEqual(
+                proposal["provenance_chain"][-1]["receipt_id"],
+                rollback_report["rollback_receipt_ids"][0],
+            )
+            self.assertEqual(proposal["provenance_chain"][-1]["previous_receipt_id"], apply_receipt_id)
             rollback_events = [event for event in proposal["apply_events"] if event["action"] == "ROLLBACK"]
             self.assertEqual(len(rollback_events), 1)
             rollback_event = rollback_events[0]
@@ -1550,6 +1573,219 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
             self.assertEqual(by_id["p-1"]["state"], "APPROVED")
             self.assertEqual(by_id["p-2"]["state"], "APPROVED")
             self.assertEqual(by_id["p-3"]["state"], "PROPOSED")
+
+    def test_end_to_end_cockpit_loop_is_reproducible_with_linked_receipts(self) -> None:
+        records = [
+            FunctionRecord.from_json(
+                {
+                    "id": "fn.local.parse_imports",
+                    "name": "parse_pe_imports",
+                    "text": "parse pe import table and resolve imported function names",
+                }
+            )
+        ]
+        index = self.pipeline.build_index(records)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            index_dir = tmp / "index"
+            backend_store = tmp / "shared_backend.json"
+            local_store = tmp / "local_store.json"
+            index.save(index_dir)
+            backend_store.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "shared_corpus_backend",
+                        "artifacts": {
+                            "remote-approved": {
+                                "proposal_id": "remote-approved",
+                                "state": "APPROVED",
+                                "receipt_id": "receipt:remote:approved",
+                                "program_id": "program:remote",
+                                "artifact": {
+                                    "function_name": "parse_pe_imports",
+                                    "function_text": "parse pe import table and resolve imported symbol names",
+                                    "reusable_artifacts": [
+                                        {
+                                            "kind": "NAME",
+                                            "target_scope": "FUNCTION",
+                                            "value": "resolve_import_thunks",
+                                        }
+                                    ],
+                                },
+                            }
+                        },
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            def run_once():
+                local_store.unlink(missing_ok=True)
+                original_new_receipt_id = MODULE._new_receipt_id
+                original_new_transaction_id = MODULE._new_transaction_id
+                original_utc_now = MODULE._utc_now
+                counters = {"receipt": 0, "tx": 0, "now": 0}
+
+                def deterministic_receipt_id(*, action: str) -> str:
+                    counters["receipt"] += 1
+                    return f"receipt:{action.lower()}:det-{counters['receipt']:04d}"
+
+                def deterministic_transaction_id() -> str:
+                    counters["tx"] += 1
+                    return f"tx-det-{counters['tx']:04d}"
+
+                def deterministic_utc_now() -> str:
+                    counters["now"] += 1
+                    return f"2026-02-23T00:00:{counters['now']:02d}+00:00"
+
+                MODULE._new_receipt_id = deterministic_receipt_id
+                MODULE._new_transaction_id = deterministic_transaction_id
+                MODULE._utc_now = deterministic_utc_now
+                try:
+                    stdout = io.StringIO()
+                    with redirect_stdout(stdout):
+                        query_exit = MODULE.main(
+                            [
+                                "search",
+                                "--index-dir",
+                                str(index_dir),
+                                "--mode",
+                                "intent",
+                                "--query",
+                                "parse import table",
+                                "--top-k",
+                                "1",
+                            ]
+                        )
+                    self.assertEqual(query_exit, 0)
+                    query_report = json.loads(stdout.getvalue())
+                    query_report.pop("metrics", None)
+
+                    stdout = io.StringIO()
+                    with redirect_stdout(stdout):
+                        proposal_exit = MODULE.main(
+                            [
+                                "pullback-reuse",
+                                "--index-dir",
+                                str(index_dir),
+                                "--backend-store",
+                                str(backend_store),
+                                "--local-store",
+                                str(local_store),
+                                "--function-id",
+                                "fn.local.parse_imports",
+                                "--top-k",
+                                "1",
+                                "--program-id",
+                                "program:local",
+                            ]
+                        )
+                    self.assertEqual(proposal_exit, 0)
+                    proposal_report = json.loads(stdout.getvalue())
+
+                    stdout = io.StringIO()
+                    with redirect_stdout(stdout):
+                        review_query_exit = MODULE.main(
+                            [
+                                "proposal-query",
+                                "--local-store",
+                                str(local_store),
+                                "--state",
+                                "PROPOSED",
+                            ]
+                        )
+                    self.assertEqual(review_query_exit, 0)
+                    review_query_report = json.loads(stdout.getvalue())
+                    proposal_id = str(review_query_report["proposals"][0]["proposal_id"])
+
+                    stdout = io.StringIO()
+                    with redirect_stdout(stdout):
+                        review_exit = MODULE.main(
+                            [
+                                "proposal-review",
+                                "--local-store",
+                                str(local_store),
+                                "--action",
+                                "approve",
+                                "--proposal-id",
+                                proposal_id,
+                                "--reviewer-id",
+                                "user:reviewer",
+                            ]
+                        )
+                    self.assertEqual(review_exit, 0)
+                    review_report = json.loads(stdout.getvalue())
+
+                    stdout = io.StringIO()
+                    with redirect_stdout(stdout):
+                        apply_exit = MODULE.main(
+                            [
+                                "proposal-apply",
+                                "--local-store",
+                                str(local_store),
+                                "--proposal-id",
+                                proposal_id,
+                                "--actor-id",
+                                "worker:apply",
+                            ]
+                        )
+                    self.assertEqual(apply_exit, 0)
+                    apply_report = json.loads(stdout.getvalue())
+
+                    stdout = io.StringIO()
+                    with redirect_stdout(stdout):
+                        rollback_exit = MODULE.main(
+                            [
+                                "proposal-rollback",
+                                "--local-store",
+                                str(local_store),
+                                "--apply-receipt-id",
+                                str(apply_report["apply_receipt_id"]),
+                                "--actor-id",
+                                "worker:rollback",
+                            ]
+                        )
+                    self.assertEqual(rollback_exit, 0)
+                    rollback_report = json.loads(stdout.getvalue())
+                finally:
+                    MODULE._new_receipt_id = original_new_receipt_id
+                    MODULE._new_transaction_id = original_new_transaction_id
+                    MODULE._utc_now = original_utc_now
+
+                local_doc = json.loads(local_store.read_text(encoding="utf-8"))
+                return (
+                    query_report,
+                    proposal_report,
+                    review_query_report,
+                    review_report,
+                    apply_report,
+                    rollback_report,
+                    local_doc,
+                )
+
+            first = run_once()
+            second = run_once()
+            self.assertEqual(first, second)
+
+            review_report = first[3]
+            apply_report = first[4]
+            rollback_report = first[5]
+            local_doc = first[6]
+            self.assertEqual(review_report["metrics"]["reviewed_total"], 1)
+            self.assertEqual(review_report["receipt_links"][0]["link_type"], "REVIEWS_PROPOSAL")
+            self.assertEqual(apply_report["receipt_links"][0]["link_type"], "APPLIES_PROPOSAL")
+            self.assertEqual(rollback_report["metrics"]["rolled_back_total"], 1)
+            proposal = local_doc["proposals"][0]
+            self.assertEqual(proposal["state"], "APPROVED")
+            self.assertEqual(proposal["provenance_chain"][-1]["link_type"], "ROLLS_BACK_APPLY")
+            self.assertEqual(
+                proposal["provenance_chain"][-1]["receipt_id"],
+                rollback_report["rollback_receipt_ids"][0],
+            )
 
     def test_type_pr_list_and_detail_views_emit_panel_payloads(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

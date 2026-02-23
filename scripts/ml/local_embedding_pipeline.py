@@ -46,6 +46,7 @@ PROPOSAL_ACTION_APPLY = "APPLY"
 PROPOSAL_ACTION_ROLLBACK = "ROLLBACK"
 PROPOSAL_LINK_APPLIES_PROPOSAL = "APPLIES_PROPOSAL"
 PROPOSAL_LINK_ROLLS_BACK_APPLY = "ROLLS_BACK_APPLY"
+PROPOSAL_LINK_REVIEWS_PROPOSAL = "REVIEWS_PROPOSAL"
 PROPOSAL_REVIEW_ACTION_APPROVE = "APPROVE"
 PROPOSAL_REVIEW_ACTION_REJECT = "REJECT"
 PROPOSAL_ALLOWED_STATES = (
@@ -1465,6 +1466,10 @@ def _normalize_local_proposal(raw: Mapping[str, Any]) -> dict[str, Any]:
     proposal["state"] = _normalize_proposal_state(
         proposal.get("state") or proposal.get("status"),
     )
+    receipt_id = str(proposal.get("receipt_id") or f"receipt:{proposal_id}").strip()
+    if not receipt_id:
+        receipt_id = f"receipt:{proposal_id}"
+    proposal["receipt_id"] = receipt_id
 
     updated_at_utc = str(proposal.get("updated_at_utc") or proposal.get("updated_at") or "").strip()
     if not updated_at_utc:
@@ -1483,6 +1488,11 @@ def _normalize_local_proposal(raw: Mapping[str, Any]) -> dict[str, Any]:
             )
         ]
     proposal["lifecycle_transitions"] = transitions
+    provenance_chain = _normalize_proposal_provenance_chain(proposal)
+    proposal["provenance_chain"] = [dict(item) for item in provenance_chain]
+    proposal["last_receipt_id"] = (
+        str(provenance_chain[-1].get("receipt_id") or "").strip() if provenance_chain else receipt_id
+    )
 
     evidence_refs = _collect_proposal_evidence_refs(proposal, proposal_id=proposal_id)
     proposal["evidence_refs"] = [dict(item) for item in evidence_refs]
@@ -2134,6 +2144,85 @@ def _capture_proposal_snapshot(proposal: Mapping[str, Any]) -> dict[str, Any]:
         "evidence_link_ids": _proposal_evidence_link_ids(proposal),
         "evidence_refs": evidence_refs,
     }
+
+
+def _normalize_proposal_provenance_chain(proposal: Mapping[str, Any]) -> list[dict[str, str]]:
+    chain_raw = proposal.get("provenance_chain")
+    normalized: list[dict[str, str]] = []
+    seen_receipt_ids: set[str] = set()
+    if isinstance(chain_raw, list):
+        for item in chain_raw:
+            if not isinstance(item, Mapping):
+                continue
+            receipt_id = str(item.get("receipt_id") or "").strip()
+            if not receipt_id or receipt_id in seen_receipt_ids:
+                continue
+            entry: dict[str, str] = {"receipt_id": receipt_id}
+            previous_receipt_id = str(item.get("previous_receipt_id") or "").strip()
+            if previous_receipt_id:
+                entry["previous_receipt_id"] = previous_receipt_id
+            link_type = str(item.get("link_type") or "").strip()
+            if link_type:
+                entry["link_type"] = link_type
+            normalized.append(entry)
+            seen_receipt_ids.add(receipt_id)
+
+    proposal_receipt_id = str(proposal.get("receipt_id") or "").strip()
+    if proposal_receipt_id and proposal_receipt_id not in seen_receipt_ids:
+        fallback_entry: dict[str, str] = {"receipt_id": proposal_receipt_id}
+        if normalized:
+            fallback_entry["previous_receipt_id"] = normalized[-1]["receipt_id"]
+        normalized.append(fallback_entry)
+    return normalized
+
+
+def _proposal_latest_receipt_id(proposal: Mapping[str, Any]) -> str:
+    chain = _normalize_proposal_provenance_chain(proposal)
+    if chain:
+        latest_receipt_id = str(chain[-1].get("receipt_id") or "").strip()
+        if latest_receipt_id:
+            return latest_receipt_id
+    receipt_id = str(proposal.get("receipt_id") or "").strip()
+    if receipt_id:
+        return receipt_id
+    proposal_id = _proposal_id_from_doc(proposal) or "proposal"
+    return f"receipt:{proposal_id}"
+
+
+def _append_proposal_provenance_link(
+    proposal: dict[str, Any],
+    *,
+    receipt_id: str,
+    link_type: str,
+    previous_receipt_id: str | None = None,
+) -> dict[str, str]:
+    normalized_receipt_id = str(receipt_id).strip()
+    if not normalized_receipt_id:
+        raise ValueError("receipt_id is required")
+
+    chain = _normalize_proposal_provenance_chain(proposal)
+    existing_last = chain[-1] if chain else None
+    if existing_last is not None and str(existing_last.get("receipt_id") or "").strip() == normalized_receipt_id:
+        entry = dict(existing_last)
+        if link_type and "link_type" not in entry:
+            entry["link_type"] = link_type
+        chain[-1] = entry
+        proposal["provenance_chain"] = [dict(item) for item in chain]
+        proposal["last_receipt_id"] = normalized_receipt_id
+        return entry
+
+    if previous_receipt_id is None:
+        previous = str(chain[-1].get("receipt_id") or "").strip() if chain else ""
+    else:
+        previous = str(previous_receipt_id).strip()
+
+    entry = {"receipt_id": normalized_receipt_id, "link_type": link_type}
+    if previous and previous != normalized_receipt_id:
+        entry["previous_receipt_id"] = previous
+    chain.append(entry)
+    proposal["provenance_chain"] = [dict(item) for item in chain]
+    proposal["last_receipt_id"] = normalized_receipt_id
+    return dict(entry)
 
 
 def _ensure_apply_transactions(store_doc: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3630,6 +3719,8 @@ def review_local_proposals(
     )
 
     reviewed_ids: list[str] = []
+    review_receipt_ids: list[str] = []
+    receipt_links: list[dict[str, str]] = []
     skipped: list[dict[str, str]] = []
     for proposal_id in target_ids:
         proposal = by_id.get(proposal_id)
@@ -3645,6 +3736,8 @@ def review_local_proposals(
                 }
             )
             continue
+        proposal_receipt_id = _proposal_latest_receipt_id(proposal)
+        review_receipt_id = _new_receipt_id(action="review")
         _set_proposal_state(
             proposal,
             to_state=target_state,
@@ -3652,7 +3745,37 @@ def review_local_proposals(
             actor_id=normalized_reviewer,
             reason=normalized_rationale,
         )
+        _append_proposal_provenance_link(
+            proposal,
+            receipt_id=review_receipt_id,
+            previous_receipt_id=proposal_receipt_id,
+            link_type=PROPOSAL_LINK_REVIEWS_PROPOSAL,
+        )
+        review_decisions_raw = proposal.get("review_decisions")
+        review_decisions = (
+            [dict(item) for item in review_decisions_raw if isinstance(item, Mapping)]
+            if isinstance(review_decisions_raw, list)
+            else []
+        )
+        if review_decisions:
+            review_decisions[-1]["receipt_id"] = review_receipt_id
+            review_decisions[-1]["receipt_links"] = [
+                {
+                    "receipt_id": proposal_receipt_id,
+                    "link_type": PROPOSAL_LINK_REVIEWS_PROPOSAL,
+                }
+            ]
+            proposal["review_decisions"] = review_decisions
         reviewed_ids.append(proposal_id)
+        review_receipt_ids.append(review_receipt_id)
+        receipt_links.append(
+            {
+                "proposal_id": proposal_id,
+                "review_receipt_id": review_receipt_id,
+                "receipt_id": proposal_receipt_id,
+                "link_type": PROPOSAL_LINK_REVIEWS_PROPOSAL,
+            }
+        )
 
     store_doc["proposals"] = proposals
     _write_local_proposal_store(local_store, store_doc)
@@ -3676,6 +3799,8 @@ def review_local_proposals(
             "state_counts": _proposal_state_counts(proposals),
         },
         "reviewed_proposal_ids": reviewed_ids,
+        "review_receipt_ids": review_receipt_ids,
+        "receipt_links": receipt_links,
         "skipped": skipped,
         "missing_proposal_ids": missing,
         "local_store": str(local_store),
@@ -3730,6 +3855,7 @@ def apply_local_proposals(
     transaction_doc: dict[str, Any] | None = None
     applied_evidence_link_ids: set[str] = set()
     evidence_link_ids_by_proposal: dict[str, list[str]] = {}
+    applied_receipt_targets_by_proposal: dict[str, str] = {}
     if candidate_ids:
         scope = "single" if len(candidate_ids) == 1 else "batch"
         apply_receipt_id = _new_receipt_id(action="apply")
@@ -3745,9 +3871,7 @@ def apply_local_proposals(
 
         for proposal_id in candidate_ids:
             proposal = by_id[proposal_id]
-            proposal_receipt_id = str(proposal.get("receipt_id") or f"receipt:{proposal_id}").strip()
-            if not proposal_receipt_id:
-                proposal_receipt_id = f"receipt:{proposal_id}"
+            proposal_receipt_id = _proposal_latest_receipt_id(proposal)
             _set_proposal_state(
                 proposal,
                 to_state=PROPOSAL_STATE_APPLIED,
@@ -3776,6 +3900,13 @@ def apply_local_proposals(
                 events[-1]["evidence_link_ids"] = list(proposal_evidence_link_ids)
                 events[-1]["evidence_links"] = _proposal_evidence_links(proposal)
                 proposal["apply_events"] = events
+            _append_proposal_provenance_link(
+                proposal,
+                receipt_id=apply_receipt_id,
+                previous_receipt_id=proposal_receipt_id,
+                link_type=PROPOSAL_LINK_APPLIES_PROPOSAL,
+            )
+            applied_receipt_targets_by_proposal[proposal_id] = proposal_receipt_id
             applied_ids.append(proposal_id)
 
         state_after = {
@@ -3786,8 +3917,10 @@ def apply_local_proposals(
         state_after_hash = _digest_json(state_after)
         receipt_links = [
             {
-                "receipt_id": str(by_id[proposal_id].get("receipt_id") or f"receipt:{proposal_id}").strip()
-                or f"receipt:{proposal_id}",
+                "receipt_id": applied_receipt_targets_by_proposal.get(
+                    proposal_id,
+                    _proposal_latest_receipt_id(by_id[proposal_id]),
+                ),
                 "link_type": PROPOSAL_LINK_APPLIES_PROPOSAL,
             }
             for proposal_id in candidate_ids
@@ -3974,6 +4107,7 @@ def rollback_local_proposals(
 
         for proposal_id in restore_order:
             proposal = by_id[proposal_id]
+            latest_receipt_id = _proposal_latest_receipt_id(proposal)
             snapshot_raw = state_before_raw.get(proposal_id)
             if not isinstance(snapshot_raw, Mapping):
                 continue
@@ -4049,6 +4183,12 @@ def rollback_local_proposals(
                 event["actor_id"] = normalized_actor
             events.append(event)
             proposal["apply_events"] = events
+            _append_proposal_provenance_link(
+                proposal,
+                receipt_id=rollback_receipt_id,
+                previous_receipt_id=apply_receipt_id or latest_receipt_id,
+                link_type=PROPOSAL_LINK_ROLLS_BACK_APPLY,
+            )
             restored_proposal_ids.append(proposal_id)
 
         transaction["status"] = "rolled_back"
