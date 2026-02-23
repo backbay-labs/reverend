@@ -74,6 +74,16 @@ Dispatch waves:
 - Benchmark lift evidence: `docs/evidence/rc-functional-validation/09-soak-report.json` and `docs/soak-test-report-1701.md`
 - Risk/signoff evidence: `docs/security/security-signoff-checklist.md` and `docs/security/evidence/abuse-scenario-suite-1806/README.md`
 
+## E22 Kernel Reliability GA Controls (2026-02-23)
+- Supervised deadlock guard: `scripts/cyntra/run-once.sh` applies inactivity timeout controls (`CYNTRA_SUPERVISED_STALL_TIMEOUT_SECONDS`, `CYNTRA_SUPERVISED_STALL_POLL_SECONDS`, `CYNTRA_SUPERVISED_ACTIVITY_PATHS`) to eliminate silent `prompt_sent` stalls.
+- Deterministic failure telemetry: supervised stalls emit `failure_code_classified` with canonical `failure_code=runtime.prompt_stall_no_output` and `reason_code=supervision.inactivity_timeout` in `.cyntra/logs/events.jsonl`.
+- Deterministic fallback routing: supervised stall classification now routes fallback even when no fresh `proof.json` exists for the stalled cycle.
+- Reliability SLO artifacts (reproducible + threshold-enforced):
+  - soak artifact: `.cyntra/artifacts/gates/eval/soak-report.json`
+  - machine report: `.cyntra/artifacts/gates/eval/reliability-slo-report.json`
+  - markdown report: `.cyntra/artifacts/gates/eval/reliability-slo-report.md`
+  - reproduction command: `bash scripts/cyntra/gates.sh --mode=all`
+
 ## Required Verification Commands
 - `./gradlew --no-daemon :Framework-TraceModeling:compileJava`
 - `./gradlew --no-daemon :Reverend:compileJava :Reverend:test --tests "ghidra.reverend.cockpit.*"`

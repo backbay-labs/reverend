@@ -9,8 +9,265 @@ watchdog_state_path="${CYNTRA_WATCHDOG_STATE_PATH:-$repo_root/.cyntra/state/watc
 watchdog_events_path="${CYNTRA_WATCHDOG_EVENTS_PATH:-$repo_root/.cyntra/logs/events.jsonl}"
 deterministic_failure_codes="${CYNTRA_DETERMINISTIC_FAILURE_CODES:-${CYNTRA_DETERMINISTIC_FAILURE_CLASSES:-runtime.prompt_stall_no_output}}"
 enable_failure_fallback="${CYNTRA_ENABLE_FAILURE_FALLBACK:-1}"
+supervised_stall_timeout_seconds="${CYNTRA_SUPERVISED_STALL_TIMEOUT_SECONDS:-300}"
+supervised_stall_poll_seconds="${CYNTRA_SUPERVISED_STALL_POLL_SECONDS:-1}"
+supervised_activity_paths="${CYNTRA_SUPERVISED_ACTIVITY_PATHS:-$repo_root/.cyntra/logs/events.jsonl,$repo_root/telemetry.jsonl}"
 watchdog_registered=0
 watchdog_runner="run-once"
+primary_failure_code=""
+primary_supervision_reason=""
+primary_supervision_inactivity_seconds=""
+primary_issue_id=""
+primary_workcell_id=""
+
+read_workcell_field() {
+  local field_name="${1:-}"
+  local workcell_path="$repo_root/.workcell"
+  [[ -n "$field_name" && -f "$workcell_path" ]] || return 1
+  python3 - "$workcell_path" "$field_name" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+field = str(sys.argv[2])
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+value = payload.get(field)
+if value is None:
+    raise SystemExit(1)
+print(str(value))
+PY
+}
+
+emit_supervision_failure_telemetry() {
+  local failure_code="${1:-}"
+  local reason_code="${2:-}"
+  local inactivity_seconds="${3:-}"
+  local timeout_seconds="${4:-}"
+  local issue_id="${5:-}"
+  local workcell_id="${6:-}"
+  [[ -n "$failure_code" ]] || return 0
+
+  python3 - "$repo_root" "$failure_code" "$reason_code" "$inactivity_seconds" "$timeout_seconds" "$issue_id" "$workcell_id" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+failure_code = str(sys.argv[2])
+reason_code = str(sys.argv[3])
+inactivity_seconds_raw = str(sys.argv[4]).strip()
+timeout_seconds_raw = str(sys.argv[5]).strip()
+issue_id = str(sys.argv[6])
+workcell_id = str(sys.argv[7])
+
+
+def _to_float(raw: str) -> float | None:
+    try:
+        return round(float(raw), 3)
+    except Exception:
+        return None
+
+
+event = {
+    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    "event": "failure_code_classified",
+    "failure_code": failure_code,
+    "reason_code": reason_code,
+    "classification_source": "supervision",
+    "issue_id": issue_id,
+    "workcell_id": workcell_id,
+    "proof_path": "",
+}
+inactivity_seconds = _to_float(inactivity_seconds_raw)
+timeout_seconds = _to_float(timeout_seconds_raw)
+if inactivity_seconds is not None:
+    event["inactivity_seconds"] = inactivity_seconds
+if timeout_seconds is not None:
+    event["stall_timeout_seconds"] = timeout_seconds
+
+events_path = repo_root / ".cyntra" / "logs" / "events.jsonl"
+events_path.parent.mkdir(parents=True, exist_ok=True)
+with events_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+if workcell_id:
+    workcell_telemetry_path = repo_root / ".workcells" / workcell_id / "telemetry.jsonl"
+    workcell_telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+    with workcell_telemetry_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+PY
+}
+
+run_primary_once_supervised() {
+  local supervision_path=""
+  local supervision_json=""
+  supervision_path="$(mktemp "${TMPDIR:-/tmp}/cyntra-run-once-supervision.XXXXXX.json")"
+  python3 - "$repo_root" "$supervised_stall_timeout_seconds" "$supervised_stall_poll_seconds" "$supervised_activity_paths" "$supervision_path" scripts/cyntra/cyntra.sh run --once "$@" <<'PY'
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+try:
+    timeout_seconds = float(sys.argv[2])
+except Exception:
+    timeout_seconds = 0.0
+try:
+    poll_seconds = float(sys.argv[3])
+except Exception:
+    poll_seconds = 1.0
+activity_paths_raw = str(sys.argv[4])
+result_path = Path(sys.argv[5])
+command = sys.argv[6:]
+if not command:
+    result_path.write_text(
+        json.dumps({"status": "invalid", "exit_code": 2, "error": "missing command"}),
+        encoding="utf-8",
+    )
+    raise SystemExit(0)
+
+activity_paths = []
+for token in activity_paths_raw.replace(";", ",").split(","):
+    text = token.strip()
+    if text:
+        activity_paths.append(Path(text))
+poll_seconds = max(0.1, min(poll_seconds, 5.0))
+stall_guard_enabled = timeout_seconds > 0
+
+
+def stat_mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except Exception:
+        return None
+
+
+mtimes = {str(path): stat_mtime(path) for path in activity_paths}
+started = time.monotonic()
+last_activity = started
+
+proc = subprocess.Popen(command, cwd=repo_root, preexec_fn=os.setsid)
+while True:
+    now = time.monotonic()
+    changed = False
+    for path in activity_paths:
+        key = str(path)
+        current = stat_mtime(path)
+        previous = mtimes.get(key)
+        if current is not None and (previous is None or current > previous):
+            mtimes[key] = current
+            changed = True
+        elif previous is None and current is None:
+            mtimes[key] = None
+    if changed:
+        last_activity = now
+
+    code = proc.poll()
+    inactivity_seconds = max(0.0, now - last_activity)
+    if code is not None:
+        result_path.write_text(
+            json.dumps(
+                {
+                    "status": "completed",
+                    "exit_code": int(code),
+                    "elapsed_seconds": round(now - started, 3),
+                    "inactivity_seconds": round(inactivity_seconds, 3),
+                }
+            ),
+            encoding="utf-8",
+        )
+        raise SystemExit(0)
+
+    if stall_guard_enabled and inactivity_seconds >= timeout_seconds:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        stop_deadline = time.monotonic() + 5.0
+        while proc.poll() is None and time.monotonic() < stop_deadline:
+            time.sleep(0.1)
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        code = proc.wait()
+        result_path.write_text(
+            json.dumps(
+                {
+                    "status": "stalled",
+                    "exit_code": int(code),
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
+                    "inactivity_seconds": round(inactivity_seconds, 3),
+                    "stall_timeout_seconds": round(timeout_seconds, 3),
+                }
+            ),
+            encoding="utf-8",
+        )
+        raise SystemExit(0)
+
+    time.sleep(poll_seconds)
+PY
+  supervision_json="$(cat "$supervision_path")"
+  rm -f "$supervision_path"
+
+  local supervision_status
+  supervision_status="$(python3 - "$supervision_json" <<'PY'
+import json
+import sys
+payload = json.loads(sys.argv[1])
+print(str(payload.get("status") or "invalid"))
+PY
+)"
+  primary_status="$(python3 - "$supervision_json" <<'PY'
+import json
+import sys
+payload = json.loads(sys.argv[1])
+value = payload.get("exit_code")
+if isinstance(value, bool):
+    print(1 if value else 0)
+else:
+    try:
+        print(int(value))
+    except Exception:
+        print(1)
+PY
+)"
+
+  if [[ "$supervision_status" == "stalled" ]]; then
+    primary_failure_code="runtime.prompt_stall_no_output"
+    primary_supervision_reason="supervision.inactivity_timeout"
+    primary_supervision_inactivity_seconds="$(python3 - "$supervision_json" <<'PY'
+import json
+import sys
+payload = json.loads(sys.argv[1])
+value = payload.get("inactivity_seconds")
+try:
+    print(f"{float(value):.3f}")
+except Exception:
+    print("")
+PY
+)"
+    echo "[cyntra] supervision timeout: classified runtime.prompt_stall_no_output (inactivity=${primary_supervision_inactivity_seconds:-unknown}s timeout=${supervised_stall_timeout_seconds}s)"
+    emit_supervision_failure_telemetry \
+      "$primary_failure_code" \
+      "$primary_supervision_reason" \
+      "$primary_supervision_inactivity_seconds" \
+      "$supervised_stall_timeout_seconds" \
+      "$primary_issue_id" \
+      "$primary_workcell_id"
+    primary_status=124
+  fi
+}
 
 watchdog_reconcile_and_register() {
   python3 - "$repo_root" "$watchdog_state_path" "$watchdog_events_path" "$watchdog_runner" "$$" <<'PY'
@@ -255,12 +512,10 @@ else
 fi
 
 scripts/cyntra/preflight.sh
+primary_issue_id="$(read_workcell_field issue_id || true)"
+primary_workcell_id="$(read_workcell_field id || true)"
 run_started_epoch="$(date +%s)"
-if scripts/cyntra/cyntra.sh run --once "$@"; then
-  primary_status=0
-else
-  primary_status=$?
-fi
+run_primary_once_supervised "$@"
 
 if [[ "$enable_failure_fallback" != "1" ]]; then
   exit "$primary_status"
@@ -751,6 +1006,9 @@ if detected_code:
     }
     with telemetry_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(telemetry, ensure_ascii=False) + "\n")
+    global_events_path.parent.mkdir(parents=True, exist_ok=True)
+    with global_events_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(telemetry, ensure_ascii=False) + "\n")
 
 if proof_changed:
     latest.write_text(json.dumps(proof, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -780,6 +1038,24 @@ if [[ -n "${CYNTRA_FAILURE_CODE:-${CYNTRA_FAILURE_CLASS:-}}" ]]; then
 fi
 
 classification_json="$(classify_latest_deterministic_failure || true)"
+if [[ -z "$classification_json" && -n "$primary_failure_code" ]]; then
+  classification_json="$(python3 - "$primary_failure_code" "$primary_issue_id" "$primary_workcell_id" <<'PY'
+import json
+import sys
+payload = {
+    "failure_code": str(sys.argv[1]),
+    "issue_id": str(sys.argv[2]),
+    "workcell_id": str(sys.argv[3]),
+    "proof_path": "",
+    "completion_classification": "",
+    "noop_reason": "",
+    "policy_result": "",
+    "policy_block_reason": "",
+}
+print(json.dumps(payload))
+PY
+)"
+fi
 if [[ -z "$classification_json" ]]; then
   exit "$primary_status"
 fi

@@ -154,6 +154,16 @@ class CyntraCompletionIntegrityPolicyTest(unittest.TestCase):
                             and str(e.get("failure_code") or "") == expected_failure_code
                         ]
                         self.assertTrue(failure_events, f"{fixture_path.name} missing failure classification telemetry")
+                        global_failure_events = [
+                            e
+                            for e in global_events
+                            if e.get("event") == "failure_code_classified"
+                            and str(e.get("failure_code") or "") == expected_failure_code
+                        ]
+                        self.assertTrue(
+                            global_failure_events,
+                            f"{fixture_path.name} missing global failure classification telemetry",
+                        )
 
                     call_log = tmp / ".cyntra" / "logs" / "cyntra-calls.log"
                     call_count = len(call_log.read_text(encoding="utf-8").splitlines()) if call_log.exists() else 0
