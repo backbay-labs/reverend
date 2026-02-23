@@ -50,9 +50,11 @@ Dispatch waves:
 
 ## “SOTA Assistant Inside Ghidra” Operational Criteria
 - Search latency and retrieval quality are benchmarked against pinned baselines (`3206`).
+- Benchmark slices include ranking quality (`real_target`) and operator workflow completion (`spec_review`) metrics, both enforced by blocking thresholds (`3206`).
 - Cockpit actions use real services and emit evidence/receipt chains (`3203`, `3205`).
 - Query and similarity paths are index-backed, not full-program decompile scans (`3201`, `3202`).
 - End-to-end operator path is reproducible from a local clean setup (`3207`, `3208`).
+- Gate artifacts publish baseline-vs-current deltas and reproducible manifests at `.cyntra/artifacts/gates/eval/operational-claim-delta.json` and `.cyntra/artifacts/gates/eval/operational-claim-manifest.json`.
 
 ## E21-3201 Profiling Artifacts
 - `semantic-search-stage ... stage=embedding ... details={primaryRanker=indexed-features, indexedFresh=..., indexedReused=..., refineCandidateCount=...}` documents that semantic ranking is index-first and only decompile-refines a bounded shortlist.

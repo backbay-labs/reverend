@@ -864,6 +864,197 @@ run_query_slo_gate() {
   echo "[gates] query SLO OK (artifacts: $query_slo_json, $query_slo_md)"
 }
 
+run_operational_claim_gate() {
+  local smoke_runner="eval/run_smoke.sh"
+  local regression_checker="eval/scripts/check_regression.py"
+  local operational_baseline="${CYNTRA_OPERATIONAL_CLAIM_BASELINE:-eval/snapshots/operational_claim_baseline.json}"
+  local eval_gate_out="${artifact_root}/eval"
+  local metrics_out="${eval_gate_out}/smoke-metrics.json"
+  local regression_out="${eval_gate_out}/operational-claim-regression.json"
+  local delta_out="${eval_gate_out}/operational-claim-delta.json"
+  local manifest_out="${eval_gate_out}/operational-claim-manifest.json"
+  local regression_status=0
+
+  if [[ ! -f "$smoke_runner" ]]; then
+    echo "[gates] ERROR: missing smoke runner: $smoke_runner" >&2
+    exit 1
+  fi
+  if [[ ! -f "$regression_checker" ]]; then
+    echo "[gates] ERROR: missing regression checker: $regression_checker" >&2
+    exit 1
+  fi
+  if [[ ! -f "$operational_baseline" ]]; then
+    echo "[gates] ERROR: missing operational claim baseline: $operational_baseline" >&2
+    exit 1
+  fi
+
+  mkdir -p "$eval_gate_out"
+  if [[ ! -f "$metrics_out" ]]; then
+    bash "$smoke_runner" --output "$metrics_out"
+  fi
+
+  set +e
+  python3 "$regression_checker" \
+    --current "$metrics_out" \
+    --baseline "$operational_baseline" \
+    --output "$regression_out"
+  regression_status=$?
+  set -e
+
+  python3 - "$metrics_out" "$operational_baseline" "$regression_out" "$delta_out" "$manifest_out" <<'PY'
+import hashlib
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def fail(message: str) -> None:
+    print(f"[gates] ERROR: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def load_doc(path: Path, label: str) -> dict:
+    if not path.exists():
+        fail(f"{label} missing: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        fail(f"failed to parse {label} {path}: {exc}")
+    if not isinstance(payload, dict):
+        fail(f"{label} must be a JSON object: {path}")
+    return payload
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+metrics_path = Path(sys.argv[1])
+baseline_path = Path(sys.argv[2])
+regression_path = Path(sys.argv[3])
+delta_path = Path(sys.argv[4])
+manifest_path = Path(sys.argv[5])
+
+metrics_doc = load_doc(metrics_path, "smoke metrics")
+baseline_doc = load_doc(baseline_path, "operational baseline")
+regression_doc = load_doc(regression_path, "operational regression")
+
+results = regression_doc.get("results")
+if not isinstance(results, list):
+    fail("operational regression artifact missing 'results' list")
+
+operational_areas = {"real_target", "spec_review"}
+operational_results = []
+for row in results:
+    if not isinstance(row, dict):
+        continue
+    if str(row.get("area", "")).strip() in operational_areas:
+        operational_results.append(row)
+
+if not operational_results:
+    fail("operational regression artifact did not evaluate real_target/spec_review metrics")
+
+failures = [row for row in operational_results if not bool(row.get("passed"))]
+benchmark_slices = metrics_doc.get("benchmark_slices")
+if not isinstance(benchmark_slices, list):
+    benchmark_slices = []
+selected_slices = []
+for slice_row in benchmark_slices:
+    if not isinstance(slice_row, dict):
+        continue
+    kind = str(slice_row.get("kind", "")).strip()
+    slice_id = str(slice_row.get("slice_id", "")).strip()
+    if kind in {"real_target", "fixture", "operator_workflow"} or slice_id == "spec-review-v1":
+        selected_slices.append(slice_row)
+
+if not selected_slices:
+    selected_slices = benchmark_slices
+
+per_area: dict[str, list[dict]] = {}
+for row in sorted(
+    operational_results,
+    key=lambda item: (str(item.get("area", "")), str(item.get("name", ""))),
+):
+    area = str(row.get("area", "")).strip() or "unknown"
+    per_area.setdefault(area, []).append(
+        {
+            "metric": row.get("name"),
+            "baseline": row.get("baseline"),
+            "current": row.get("current"),
+            "delta": row.get("delta"),
+            "operator": row.get("operator"),
+            "threshold": row.get("threshold"),
+            "passed": bool(row.get("passed")),
+        }
+    )
+
+delta_payload = {
+    "schema_version": 1,
+    "kind": "operational_claim_baseline_vs_current",
+    "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+    "source": {
+        "metrics_path": str(metrics_path),
+        "metrics_sha256": file_sha256(metrics_path),
+        "baseline_path": str(baseline_path),
+        "baseline_sha256": file_sha256(baseline_path),
+        "regression_path": str(regression_path),
+        "regression_sha256": file_sha256(regression_path),
+    },
+    "reproducibility": {
+        "seed": metrics_doc.get("seed"),
+        "datasets_lock_sha256": metrics_doc.get("datasets_lock_sha256"),
+        "real_target_harness": metrics_doc.get("real_target_harness", {}),
+        "benchmark_slice_count": len(selected_slices),
+    },
+    "benchmark_slices": selected_slices,
+    "evaluation": {
+        "passed": len(failures) == 0,
+        "total_metrics": len(operational_results),
+        "failed_metrics": len(failures),
+    },
+    "threshold_band_breaches": [
+        f"{row.get('area')}/{row.get('name')}" for row in failures
+    ],
+    "areas": per_area,
+}
+
+delta_path.write_text(
+    json.dumps(delta_payload, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+
+manifest_payload = {
+    "schema_version": 1,
+    "kind": "operational_claim_reproducible_manifest",
+    "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+    "inputs": [
+        {"path": str(metrics_path), "sha256": file_sha256(metrics_path)},
+        {"path": str(baseline_path), "sha256": file_sha256(baseline_path)},
+        {"path": str(regression_path), "sha256": file_sha256(regression_path)},
+    ],
+    "outputs": [
+        {"path": str(delta_path), "sha256": file_sha256(delta_path)},
+    ],
+    "baseline_contract": {
+        "schema_version": baseline_doc.get("schema_version"),
+        "kind": baseline_doc.get("kind"),
+    },
+}
+manifest_path.write_text(
+    json.dumps(manifest_payload, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+PY
+
+  if (( regression_status != 0 )); then
+    echo "[gates] ERROR: operational claim regression breached (artifacts: $regression_out, $delta_out, $manifest_out)" >&2
+    exit "$regression_status"
+  fi
+
+  echo "[gates] operational claim gate OK (artifacts: $regression_out, $delta_out, $manifest_out)"
+}
+
 run_reliability_soak_slo() {
   local soak_runner="eval/run_soak.sh"
   local slo_reporter="eval/scripts/reliability_slo_report.py"
@@ -987,6 +1178,7 @@ case "$mode" in
     run_frontier_compile_regression
     run_eval_regression
     run_query_slo_gate
+    run_operational_claim_gate
     run_reliability_soak_slo
     run_security_evidence_integrity
     run_roadmap_consistency_validation

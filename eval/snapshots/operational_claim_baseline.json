@@ -1,0 +1,65 @@
+{
+  "schema_version": 3,
+  "kind": "deterministic_eval_baseline_snapshot",
+  "description": "Operational claim baseline thresholds for ranking quality, latency, and operator workflow completion.",
+  "source": {
+    "real_target_manifest": "eval/reports/e23/real_target_manifest.json",
+    "spec_review_fixture": "eval/fixtures/spec-review-v1/expected.json"
+  },
+  "metrics": {
+    "real_target": {
+      "mrr": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 0.95
+      },
+      "recall@1": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 0.95
+      },
+      "recall@5": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 0.95
+      },
+      "latency_p95_ms": {
+        "value": 0.007208,
+        "operator": "<=",
+        "max_threshold": 0.00865
+      }
+    },
+    "spec_review": {
+      "passed": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 1.0
+      },
+      "spec_packet_hash_match": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 1.0
+      },
+      "review_packet_hash_match": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 1.0
+      },
+      "verdict_open": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 1.0
+      },
+      "hypotheses": {
+        "value": 4.0,
+        "operator": ">=",
+        "min_threshold": 3.95
+      },
+      "deltas": {
+        "value": 4.0,
+        "operator": ">=",
+        "min_threshold": 3.95
+      }
+    }
+  }
+}
