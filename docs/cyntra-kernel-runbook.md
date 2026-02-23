@@ -35,6 +35,7 @@ Preflight validates:
 - `.beads` integrity
 - `context_files` exist and are committed on `main`
 - kernel status command succeeds via `uv tool run`
+- active/integrated convergence checklist + report generation (`scripts/cyntra/converge-worktrees.sh`)
 
 If you need to bypass the `main`-commit requirement temporarily:
 
@@ -57,6 +58,29 @@ grep -F '[preflight] preflight checks passed' /tmp/cyntra-preflight.log
 Expected outcomes:
 - every command exits with status `0`
 - `preflight` prints both toolchain OK lines and ends with `preflight checks passed`
+
+Convergence report-only run (ahead/behind + conflict risk + command checklist):
+
+```bash
+scripts/cyntra/converge-worktrees.sh --checklist-only
+```
+
+Full convergence verification (compile + gates in active and integrated worktrees):
+
+```bash
+scripts/cyntra/converge-worktrees.sh
+```
+
+Convergence report artifacts:
+- latest report: `.cyntra/reports/convergence/latest.txt`
+- timestamped reports: `.cyntra/reports/convergence/convergence-<UTC>.txt`
+- per-step logs: `.cyntra/reports/convergence/logs/`
+
+Enable convergence gate execution from preflight:
+
+```bash
+CYNTRA_PREFLIGHT_SYNC_COMPILE_VERIFY=1 CYNTRA_PREFLIGHT_SYNC_GATE_VERIFY=1 scripts/cyntra/preflight.sh
+```
 
 ## 4. Run the kernel
 
@@ -113,6 +137,20 @@ Additional gate modes:
 ```bash
 bash scripts/cyntra/gates.sh --mode=java
 bash scripts/cyntra/gates.sh --mode=evidence
+```
+
+## 4.1 Nightly or per-wave convergence sanity
+
+Per-wave sanity check before merge waves:
+
+```bash
+scripts/cyntra/converge-worktrees.sh
+```
+
+Nightly sanity check example (02:15 local time):
+
+```bash
+15 2 * * * cd /Users/connor/Medica/backbay/standalone/reverend && scripts/cyntra/converge-worktrees.sh --checklist-only >> /tmp/cyntra-convergence-nightly.log 2>&1
 ```
 
 Failure taxonomy and completion-policy binding:
