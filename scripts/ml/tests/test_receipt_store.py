@@ -117,7 +117,55 @@ class ReceiptStoreTest(unittest.TestCase):
             with self.assertRaises(ReceiptStoreIntegrityError):
                 tampered.append(self._base_receipt(receipt_id="r-3", target_id="func-3"))
 
+    def test_append_accepts_canonical_evidence_entity_and_edge_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = ReceiptStore(Path(tmpdir) / "receipts.json")
+            payload = self._base_receipt(receipt_id="r-1", target_id="func-1")
+            payload["evidence"] = [
+                {
+                    "evidence_type": "type_support",
+                    "source_type": "symbolic_solver",
+                    "source_id": "evidence:ssa-pass-1",
+                    "entity_type": "symbolic",
+                    "entity_id": "evy_solver-path-01",
+                    "entity_schema_version": 1,
+                    "edge": {
+                        "edge_type": "supports",
+                        "target_entity_type": "proposal",
+                        "target_entity_id": "evp_type-proposal-1",
+                        "target_entity_schema_version": 1,
+                    },
+                    "metadata": {"path_constraints": 4},
+                }
+            ]
+            stored = store.append(payload)
+            self.assertEqual(stored["evidence"][0]["entity_type"], "symbolic")
+            self.assertEqual(stored["evidence"][0]["edge"]["edge_type"], "supports")
+
+    def test_append_rejects_invalid_canonical_cross_source_edge_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = ReceiptStore(Path(tmpdir) / "receipts.json")
+            payload = self._base_receipt(receipt_id="r-1", target_id="func-1")
+            payload["evidence"] = [
+                {
+                    "evidence_type": "invalid_contract",
+                    "source_type": "symbolic_solver",
+                    "source_id": "evidence:ssa-pass-1",
+                    "entity_type": "symbolic",
+                    "entity_id": "evy_solver-path-01",
+                    "entity_schema_version": 1,
+                    "edge": {
+                        "edge_type": "supports",
+                        "target_entity_type": "dynamic",
+                        "target_entity_id": "evd_trace-step-9",
+                        "target_entity_schema_version": 1,
+                    },
+                    "metadata": {},
+                }
+            ]
+            with self.assertRaises(ValueError):
+                store.append(payload)
+
 
 if __name__ == "__main__":
     unittest.main()
-

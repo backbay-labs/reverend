@@ -850,6 +850,31 @@ Evidence {
 }
 ```
 
+### 3.2.1 Canonical Evidence Graph Contract (v1)
+
+Canonical evidence entities and cross-source edges are versioned in:
+
+- `docs/schemas/evidence-graph.schema.json`
+- `docs/schemas/evidence-graph-migration-v1.md`
+
+v1 defines six evidence entity types with stable IDs:
+
+- `static`: `evs_<stable-token>`
+- `dynamic`: `evd_<stable-token>`
+- `symbolic`: `evy_<stable-token>`
+- `taint`: `evt_<stable-token>`
+- `proposal`: `evp_<stable-token>`
+- `receipt`: `evr_<stable-token>`
+
+Every canonical entity and edge carries `*_schema_version = 1`. Cross-source edges are constrained to explicit contracts:
+
+- `supports`: `static|dynamic|symbolic|taint|receipt -> proposal`
+- `derived_from`: `proposal -> static|dynamic|symbolic|taint`
+- `corroborates`: `static <-> dynamic`, `symbolic <-> taint`
+- `supersedes`: `proposal -> proposal`, `receipt -> receipt`
+
+`scripts/ml/receipt_store.py` validates canonical IDs, schema versions, and edge contracts whenever canonical evidence fields are present. Legacy `source_type/source_id` evidence continues to validate for backward compatibility during migration.
+
 ### 3.3 Type Assertion Lifecycle Schema
 
 Type assertions are persisted in a dedicated table so the system can enforce lifecycle semantics without requiring JSON payload parsing in write paths.
