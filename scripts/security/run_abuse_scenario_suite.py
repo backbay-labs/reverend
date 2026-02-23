@@ -159,6 +159,29 @@ SCENARIOS: tuple[Scenario, ...] = (
             "scripts/ml/receipt_store.py."
         ),
     ),
+    Scenario(
+        scenario_id="S6",
+        name="Malware safety profile drift to unsafe mode/egress",
+        log_name="scenario-06-malware-safety-profiles.log",
+        command=(
+            "python3",
+            "scripts/security/validate_malware_safety_profiles.py",
+            "--profiles",
+            "scripts/security/malware_safety_policy_profiles.json",
+        ),
+        expected_controls=(
+            "Malware profile set is fail-closed: no cloud mode, sandbox-only detonation, "
+            "and explicit non-wildcard allowlist semantics."
+        ),
+        pass_observed_controls=(
+            "Malware safety profile validator passed; unsafe mode/egress profile drift was blocked."
+        ),
+        remediation_if_failed=(
+            "Restore fail-closed malware profile constraints in "
+            "scripts/security/malware_safety_policy_profiles.json and "
+            "scripts/security/validate_malware_safety_profiles.py."
+        ),
+    ),
 )
 
 

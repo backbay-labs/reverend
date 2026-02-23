@@ -1,0 +1,38 @@
+{
+  "kind": "malware_domain_pack_sample_set",
+  "pack_id": "malware-pack-v1.0.0",
+  "seed": "E26-S1-2026-02-23",
+  "generated_at_utc": "2026-02-23T00:00:00Z",
+  "samples": [
+    {
+      "sample_id": "mz-e26-001",
+      "sha256": "90f4c9d28f6fce6b9d9fb81de2bb9876f138d7f77d2dbfdbf50695e6b7af9c43",
+      "family_hint": "loader",
+      "source_url": "https://bazaar.abuse.ch/sample/90f4c9d28f6fce6b9d9fb81de2bb9876f138d7f77d2dbfdbf50695e6b7af9c43/",
+      "license_disposition": "public-malware-feed",
+      "acquisition_date": "2026-02-10",
+      "packer_hint": "upx-modified",
+      "analysis_profile": "malware_airgap"
+    },
+    {
+      "sample_id": "mz-e26-002",
+      "sha256": "6ea30a98b203ca9250fce35574cf704f4fcd2f75f84b2e2cf5b652defbde2e90",
+      "family_hint": "infostealer",
+      "source_url": "https://bazaar.abuse.ch/sample/6ea30a98b203ca9250fce35574cf704f4fcd2f75f84b2e2cf5b652defbde2e90/",
+      "license_disposition": "public-malware-feed",
+      "acquisition_date": "2026-02-12",
+      "packer_hint": "themida",
+      "analysis_profile": "malware_ti_allowlist"
+    },
+    {
+      "sample_id": "mz-e26-003",
+      "sha256": "f7a2344fa879b6492a4ce738ad2d527df6dc76883e58cc9827ea6f5f76ce9341",
+      "family_hint": "rat",
+      "source_url": "https://bazaar.abuse.ch/sample/f7a2344fa879b6492a4ce738ad2d527df6dc76883e58cc9827ea6f5f76ce9341/",
+      "license_disposition": "public-malware-feed",
+      "acquisition_date": "2026-02-15",
+      "packer_hint": "vmprotect",
+      "analysis_profile": "malware_airgap"
+    }
+  ]
+}

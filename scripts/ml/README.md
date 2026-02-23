@@ -217,6 +217,8 @@ Published deterministic mission examples:
 - `docs/schemas/examples/mission-dsl/protocol-mission.json`
 - `docs/schemas/examples/mission-dsl/diff-mission.json`
 - `docs/schemas/examples/mission-dsl/deobf-mission.json`
+- `docs/schemas/examples/mission-dsl/malware-ioc-triage-mission.json`
+- `docs/schemas/examples/mission-dsl/malware-anti-analysis-mission.json`
 
 ## Sync Approved Proposals to Shared Corpus Backend
 
