@@ -259,6 +259,10 @@ bash scripts/cyntra/gates.sh --mode=context
 
 # Diff/lint validation
 bash scripts/cyntra/gates.sh --mode=diff
+
+# Mission DSL schema + determinism validation
+python3 scripts/ml/mission_dsl_validator.py \
+  --mission docs/schemas/examples/mission-dsl/triage-mission.json
 ```
 
 Gate descriptions:
@@ -270,6 +274,11 @@ Gate descriptions:
 | `lint` | Static | Code style and diff hygiene |
 | `max-diff-size` | Diff check | Ensures changes stay within size limits |
 | `secret-detection` | Diff check | No credentials or secrets in committed code |
+
+Mission DSL references:
+- Schema: `docs/schemas/mission-dsl.schema.json`
+- Docs: `docs/schemas/mission-dsl.md`
+- Examples: `docs/schemas/examples/mission-dsl/{triage,protocol,diff,deobf}-mission.json`
 
 ---
 

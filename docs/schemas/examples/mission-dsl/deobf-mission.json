@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "mission_id": "deobf.pipeline.v1",
+  "mission_kind": "deobf",
+  "description": "Deobfuscation mission with deterministic transform sequencing and review gates.",
+  "inputs": [
+    {
+      "name": "obfuscated_ir",
+      "type": "object",
+      "description": "Normalized IR containing obfuscation artifacts.",
+      "required": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "deobf_report",
+      "description": "Deterministic deobfuscation report and rewrite plan.",
+      "source": {
+        "kind": "stage_output",
+        "stage_id": "summarize_rewrites",
+        "output": "deobf_report"
+      }
+    }
+  ],
+  "policies": {
+    "determinism": {
+      "execution_order": "linear",
+      "stage_selector": "explicit_ids_only",
+      "allow_randomness": false
+    },
+    "conflict_resolution": {
+      "source_priority_order": [
+        "human",
+        "static_analysis",
+        "heuristic",
+        "ml_model"
+      ],
+      "confidence_margin": 0.05,
+      "tie_breaker": "source_priority_then_stage_id"
+    },
+    "approval": {
+      "human_review_on_apply": true,
+      "auto_apply_threshold": 1.0
+    },
+    "retry_defaults": {
+      "max_attempts": 2,
+      "backoff_strategy": "linear",
+      "initial_delay_ms": 400,
+      "jitter": "none"
+    }
+  },
+  "stages": [
+    {
+      "id": "extract_patterns",
+      "order": 1,
+      "kind": "analyze",
+      "description": "Extract obfuscation patterns and candidate rewrite points.",
+      "depends_on": [],
+      "inputs": [
+        {
+          "name": "obfuscated_ir",
+          "source": {
+            "kind": "mission_input",
+            "input": "obfuscated_ir"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pattern_catalog",
+          "type": "array",
+          "description": "Pattern catalog sorted by deterministic precedence."
+        }
+      ]
+    },
+    {
+      "id": "build_rewrite_plan",
+      "order": 2,
+      "kind": "review",
+      "description": "Create stable rewrite plan for reviewer approval.",
+      "depends_on": [
+        "extract_patterns"
+      ],
+      "inputs": [
+        {
+          "name": "pattern_catalog",
+          "source": {
+            "kind": "stage_output",
+            "stage_id": "extract_patterns",
+            "output": "pattern_catalog"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "rewrite_plan",
+          "type": "array",
+          "description": "Deterministic ordered rewrite plan."
+        }
+      ]
+    },
+    {
+      "id": "summarize_rewrites",
+      "order": 3,
+      "kind": "report",
+      "description": "Summarize approved rewrites and confidence impact.",
+      "depends_on": [
+        "build_rewrite_plan"
+      ],
+      "inputs": [
+        {
+          "name": "rewrite_plan",
+          "source": {
+            "kind": "stage_output",
+            "stage_id": "build_rewrite_plan",
+            "output": "rewrite_plan"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "deobf_report",
+          "type": "object",
+          "description": "Final deobfuscation report payload."
+        }
+      ]
+    }
+  ]
+}

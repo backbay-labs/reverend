@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "mission_id": "triage.core.v1",
+  "mission_kind": "triage",
+  "description": "Deterministic triage mission that produces ranked entrypoints, hotspots, and unknowns.",
+  "inputs": [
+    {
+      "name": "corpus_records",
+      "type": "array",
+      "description": "Normalized function records for the target program.",
+      "required": true
+    },
+    {
+      "name": "mission_seed",
+      "type": "string",
+      "description": "Pinned mission seed used for stable artifact naming.",
+      "required": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "triage_summary",
+      "description": "Summary bundle for entrypoints/hotspots/unknowns.",
+      "source": {
+        "kind": "stage_output",
+        "stage_id": "render_report",
+        "output": "summary"
+      }
+    }
+  ],
+  "policies": {
+    "determinism": {
+      "execution_order": "linear",
+      "stage_selector": "explicit_ids_only",
+      "allow_randomness": false
+    },
+    "conflict_resolution": {
+      "source_priority_order": [
+        "human",
+        "static_analysis",
+        "ml_model",
+        "heuristic"
+      ],
+      "confidence_margin": 0.05,
+      "tie_breaker": "stage_order_then_id"
+    },
+    "approval": {
+      "human_review_on_apply": true,
+      "auto_apply_threshold": 0.98
+    },
+    "retry_defaults": {
+      "max_attempts": 2,
+      "backoff_strategy": "fixed",
+      "initial_delay_ms": 250,
+      "jitter": "none"
+    }
+  },
+  "stages": [
+    {
+      "id": "ingest_records",
+      "order": 1,
+      "kind": "ingest",
+      "description": "Load and sort incoming function records.",
+      "depends_on": [],
+      "inputs": [
+        {
+          "name": "corpus_records",
+          "source": {
+            "kind": "mission_input",
+            "input": "corpus_records"
+          }
+        },
+        {
+          "name": "mission_seed",
+          "source": {
+            "kind": "mission_input",
+            "input": "mission_seed"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records_sorted",
+          "type": "array",
+          "description": "Stable sorted records."
+        }
+      ]
+    },
+    {
+      "id": "score_triage",
+      "order": 2,
+      "kind": "analyze",
+      "description": "Compute deterministic triage scores.",
+      "depends_on": [
+        "ingest_records"
+      ],
+      "inputs": [
+        {
+          "name": "records_sorted",
+          "source": {
+            "kind": "stage_output",
+            "stage_id": "ingest_records",
+            "output": "records_sorted"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "scored_rows",
+          "type": "array",
+          "description": "Score rows keyed by function id."
+        }
+      ]
+    },
+    {
+      "id": "render_report",
+      "order": 3,
+      "kind": "report",
+      "description": "Render triage summary artifact.",
+      "depends_on": [
+        "score_triage"
+      ],
+      "inputs": [
+        {
+          "name": "scored_rows",
+          "source": {
+            "kind": "stage_output",
+            "stage_id": "score_triage",
+            "output": "scored_rows"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "summary",
+          "type": "object",
+          "description": "Final triage mission summary payload."
+        }
+      ]
+    }
+  ]
+}

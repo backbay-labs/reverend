@@ -191,6 +191,24 @@ Calibration artifact includes:
 - Before/after deltas for `macro_f1`, `entrypoint_recall`, `hotspot_recall`, and `unknown_precision`
 - Target-threshold checks and pass/fail status
 
+## Validate Mission DSL Definitions (E25-S1)
+
+Schema:
+- `docs/schemas/mission-dsl.schema.json`
+
+Validator:
+
+```bash
+python3 scripts/ml/mission_dsl_validator.py \
+  --mission docs/schemas/examples/mission-dsl/triage-mission.json
+```
+
+Published deterministic mission examples:
+- `docs/schemas/examples/mission-dsl/triage-mission.json`
+- `docs/schemas/examples/mission-dsl/protocol-mission.json`
+- `docs/schemas/examples/mission-dsl/diff-mission.json`
+- `docs/schemas/examples/mission-dsl/deobf-mission.json`
+
 ## Sync Approved Proposals to Shared Corpus Backend
 
 ```bash
