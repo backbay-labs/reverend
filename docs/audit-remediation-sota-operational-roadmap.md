@@ -75,6 +75,7 @@ Dispatch waves:
 - Continuous dispatch: `scripts/cyntra/run-watch.sh`
 - Status: `scripts/cyntra/cyntra.sh status`
 - Live telemetry: `tail -f .cyntra/logs/events.jsonl`
+- Completion anomaly guard: `bash scripts/cyntra/cyntra.sh completion-anomaly-guard`
 - Reconcile queue after edits: `scripts/cyntra/sync-backlog-csv.sh`
 
 ## References

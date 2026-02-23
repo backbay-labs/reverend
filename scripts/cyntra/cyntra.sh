@@ -569,6 +569,13 @@ if [[ "${args[0]:-}" == "repair-merge-conflicts" ]]; then
   exit 0
 fi
 
+if [[ "${args[0]:-}" == "completion-anomaly-guard" ]]; then
+  shift || true
+  cd "$repo_root"
+  python3 scripts/cyntra/completion-anomaly-guard.py "$@"
+  exit $?
+fi
+
 if [[ ! -d "$kernel_path" ]]; then
   echo "Kernel path not found: $kernel_path" >&2
   exit 1

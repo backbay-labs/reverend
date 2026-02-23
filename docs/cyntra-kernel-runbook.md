@@ -179,6 +179,29 @@ Failure taxonomy and completion-policy binding:
   - kernel telemetry: `.cyntra/logs/events.jsonl`
   - event: `completion_policy_gate_summary`
   - gate summary fields: `completion_classification`, `noop_reason`, `noop_reason_source`, `noop_justification_source`, `explicit_noop_justification_present`, `policy_result`
+- Completion anomaly guard (`E20-S11`) scans kernel telemetry and emits deterministic report evidence:
+  - command: `bash scripts/cyntra/cyntra.sh completion-anomaly-guard`
+  - input log: `.cyntra/logs/events.jsonl`
+  - report artifact: `.cyntra/logs/completion-anomaly-report.json`
+  - decision telemetry event: `completion_anomaly_guard_decision`
+- Current anomaly classes:
+  - `zero_diff_missing_noop_justification`
+  - `policy_blocked_missing_noop_justification`
+  - `policy_blocked_blocking_skip_evidence_missing`
+  - `policy_blocked_blocking_skip_reason_not_allowlisted`
+  - `invalid_gate_summary_schema`
+  - `invalid_completion_classification`
+  - `invalid_blocking_skip_budget_signal`
+- Reopen policy:
+  - auto-reopen (`status: done -> open`) when anomaly evidence shows false completion (`zero_diff_missing_noop_justification`, `policy_blocked_missing_noop_justification`, `policy_blocked_blocking_skip_evidence_missing`)
+  - otherwise flag issue for human review by adding `needs-human-review`
+
+Operator remediation flow:
+1. Run `bash scripts/cyntra/cyntra.sh completion-anomaly-guard`.
+2. Review `.cyntra/logs/completion-anomaly-report.json` findings and decision counts.
+3. For auto-reopened issues, address missing completion evidence and rerun gates.
+4. For `needs-human-review` issues, validate gate skip rationale/evidence and either clear the tag after remediation or reopen manually.
+5. Re-run `scripts/cyntra/validate-roadmap-completion.sh` after remediation and backlog sync.
 
 ## 5. Cleanup and disk management
 
