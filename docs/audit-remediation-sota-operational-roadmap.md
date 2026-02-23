@@ -23,14 +23,16 @@ Close every finding from the 2026-02-22 audit, then prove Reverend is operationa
 | F9 | O(N) query architecture + TODO embedding | `3201-3204` | indexed retrieval + embedding-backed ranking path |
 | F10 | Weak Java/Python/plugin runtime integration | `3205` | query -> proposal -> apply/rollback loop operational in cockpit |
 | F11 | “Operational” claim not benchmark-gated | `3206-3208` | benchmark thresholds enforced and GA packet published |
+| F12 | Kernel toolchain deadlock at `prompt_sent` (no telemetry progress) | `3113` | stalled runs fail-fast with deterministic retry/reopen policy |
+| F13 | Sleeptime evolution schema mismatch traceback | `3114` | sleeptime consolidation runs cleanly with validated input schema |
 
 ## Epic E20: Audit Closure + Delivery Integrity (`3100`)
-Stories: `3101-3112`
+Stories: `3101-3114`
 
 Dispatch waves:
-1. Wave A (critical unblock): `3103`, `3105`, `3106`, `3109`.
-2. Wave B (gate hardening): `3102`, `3107`, `3108`.
-3. Wave C (kernel integrity controls): `3110`, `3111`.
+1. Wave A (kernel/runtime unblock): `3113`, `3114`.
+2. Wave B (critical functional fixes): `3103`, `3105`, `3106`, `3109`.
+3. Wave C (gate hardening + completion integrity): `3102`, `3107`, `3108`, `3110`, `3111`, `3112`.
 
 ## Epic E21: SOTA Assistant Operationalization (`3200`)
 Stories: `3201-3208`

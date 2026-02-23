@@ -1,0 +1,103 @@
+{
+  "report_version": "1.0",
+  "story_id": "2702",
+  "generated_at": "2026-02-22T15:35:15Z",
+  "validation_status": "PASS",
+  "schema_validation": {
+    "status": "PASS",
+    "components": {
+      "taint_source": {
+        "status": "PASS",
+        "fields": ["labelId", "sourceType", "sourceDescription", "creationSnap", "byteOffset", "sessionId"],
+        "source_types": ["FILE_INPUT", "NETWORK", "ENVIRONMENT", "REGISTER", "CUSTOM"]
+      },
+      "taint_evidence": {
+        "status": "PASS",
+        "fields": ["moduleId", "locationType", "locationOffset", "size", "labelSet", "taintComputeNumber", "sourceSnap", "lifespan", "confidence", "sessionId"],
+        "location_types": ["MEMORY", "REGISTER", "TEMP"],
+        "has_confidence_field": true
+      },
+      "taint_propagation": {
+        "status": "PASS",
+        "fields": ["edgeId", "snapId", "fromLocationType", "fromLocationOffset", "fromSize", "toLocationType", "toLocationOffset", "toSize", "operation", "pcOffset", "moduleId", "edgeType", "sessionId"],
+        "edge_types": ["DATA_FLOW", "CONTROL_FLOW", "ADDRESS_DEPENDENCY"]
+      },
+      "taint_sink": {
+        "status": "PASS",
+        "fields": ["moduleId", "sinkOffset", "sinkType", "reachingLabels", "snapId", "functionOffset", "calleeOffset", "taintedArgIndex", "lifespan", "confidence", "sessionId"],
+        "sink_types": ["MEMCPY_SIZE", "MEMCPY_DEST", "FORMAT_STRING", "SYSTEM_ARG", "SQL_QUERY", "FILE_PATH", "NETWORK_OUTPUT", "FREE_ARG", "RETURN_ADDRESS", "FUNCTION_POINTER", "ARRAY_INDEX", "CUSTOM"]
+      }
+    }
+  },
+  "adapter_validation": {
+    "status": "PASS",
+    "adapters": [
+      {
+        "format_id": "panda_taint2",
+        "parser_contract_version": "1.0",
+        "supported_extensions": [".plog", ".ptaint", ".json"],
+        "features": {
+          "json_format": true,
+          "binary_format": true,
+          "streaming": true
+        }
+      }
+    ]
+  },
+  "query_api_validation": {
+    "status": "PASS",
+    "queries": {
+      "by_function": {
+        "method": "getTaintForFunction",
+        "parameters": ["AddressRange", "long snap", "String sessionId"],
+        "status": "IMPLEMENTED"
+      },
+      "by_variable": {
+        "method": "getTaintForVariable",
+        "parameters": ["long locationOffset", "LocationType", "Lifespan", "String sessionId"],
+        "status": "IMPLEMENTED"
+      },
+      "by_timeline": {
+        "method": "findTaintOverlapping",
+        "parameters": ["AddressRange", "Lifespan"],
+        "status": "IMPLEMENTED"
+      },
+      "by_label": {
+        "method": "findTaintByLabel",
+        "parameters": ["int labelId", "Lifespan", "String sessionId"],
+        "status": "IMPLEMENTED"
+      }
+    }
+  },
+  "acceptance_criteria": {
+    "taint_schema_supports_source_sink_propagation_confidence": {
+      "status": "PASS",
+      "evidence": "TraceTaintSource, TraceTaintSink, TraceTaintPropagation, TraceTaintEvidence interfaces with confidence field"
+    },
+    "dynamic_taint_adapter_imports_to_normalized_store": {
+      "status": "PASS",
+      "evidence": "PandaTaint2Adapter implements TaintAdapter and imports to TraceEvidenceManager"
+    },
+    "records_queryable_by_function_variable_timeline": {
+      "status": "PASS",
+      "evidence": "TraceEvidenceManager provides getTaintForFunction, getTaintForVariable, findTaintOverlapping methods"
+    }
+  },
+  "files_created": [
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/model/evidence/TraceTaintSource.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/model/evidence/TraceTaintEvidence.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/model/evidence/TraceTaintPropagation.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/model/evidence/TraceTaintSink.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/database/evidence/DBTraceTaintSource.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/database/evidence/DBTraceTaintEvidence.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/database/evidence/DBTraceTaintPropagation.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/database/evidence/DBTraceTaintSink.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/model/evidence/adapters/TaintAdapter.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/model/evidence/adapters/PandaTaint2Adapter.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/test/java/ghidra/trace/model/evidence/TaintEvidenceSchemaTest.java"
+  ],
+  "files_modified": [
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/model/evidence/TraceEvidenceManager.java",
+    "Ghidra/Debug/Framework-TraceModeling/src/main/java/ghidra/trace/database/evidence/DBTraceEvidenceManager.java"
+  ]
+}

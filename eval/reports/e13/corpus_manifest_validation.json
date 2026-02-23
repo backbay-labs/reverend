@@ -1,0 +1,123 @@
+{
+  "manifest_path": "datasets/registry/oss-corpus-sample-v1/manifest.json",
+  "manifest_sha256": "458826deaeef09a62f085e3cccb779cbfcb7e6b374bdb32a16ccd2ad5e1a54ac",
+  "validated_at": "2026-02-22T14:14:09.468582+00:00",
+  "schema_version": "1.0.0",
+  "artifact_count": 5,
+  "status": "ok",
+  "issues": [],
+  "field_coverage": {
+    "acquired_at": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "architecture": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "bits": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "bytes": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "compiler": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "compiler_version": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "dynamic": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "endian": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "format": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "local_path": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "name": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "sha256": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "source_url": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "spdx_license": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "stripped": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    },
+    "version": {
+      "present": 5,
+      "total": 5,
+      "percentage": 100.0
+    }
+  },
+  "license_summary": {
+    "by_license": {
+      "Apache-2.0": 3,
+      "GPL-3.0-or-later": 1,
+      "MIT": 1
+    },
+    "by_class": {
+      "permissive": 4,
+      "copyleft_strong": 1
+    },
+    "policy_failures": 0
+  },
+  "architecture_summary": {
+    "by_architecture": {
+      "x86_64": 4,
+      "aarch64": 1
+    },
+    "by_format": {
+      "ELF": 5
+    }
+  },
+  "reproducibility": {
+    "reproducible": true,
+    "checks": {
+      "has_command_log": true,
+      "has_version": true,
+      "has_ingested_at": true,
+      "all_artifacts_have_acquired_at": true,
+      "all_artifacts_have_source_url": true,
+      "all_artifacts_have_sha256": true
+    }
+  }
+}

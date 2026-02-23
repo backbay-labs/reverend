@@ -81,6 +81,23 @@ retired_shadow = 0
 retired_duplicate = 0
 retired_cycle = 0
 retired_active = 0
+hydrated_context = 0
+
+
+def normalize_context_files(values):
+    if not isinstance(values, list):
+        return []
+    normalized = []
+    seen = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        item = value.strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        normalized.append(item)
+    return normalized
 
 for issue in issues:
     issue_id = str(issue.get("id"))
@@ -110,8 +127,19 @@ for issue in issues:
         continue
     if not is_merge_conflict(issue):
         continue
+    source_issue_id = original_issue_id(issue)
+    source_issue = by_id.get(source_issue_id) if source_issue_id else None
+
+    issue_context = normalize_context_files(issue.get("context_files"))
+    if not issue_context and isinstance(source_issue, dict):
+        source_context = normalize_context_files(source_issue.get("context_files"))
+        if source_context:
+            issue["context_files"] = source_context
+            hydrated_context += 1
+
     status = str(issue.get("status") or "").lower()
-    if status in {"open", "ready", "in_progress"}:
+    has_canonical = bool(source_issue_id and source_issue_id != issue_id and source_issue is not None)
+    if status in {"open", "ready", "in_progress"} or (status == "escalated" and has_canonical):
         issue["status"] = "done"
         retired_active += 1
 
@@ -133,6 +161,7 @@ print(
     f" retired_duplicate={retired_duplicate}"
     f" retired_cycle={retired_cycle}"
     f" retired_active={retired_active}"
+    f" hydrated_context={hydrated_context}"
 )
 PY
 }

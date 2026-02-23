@@ -20,6 +20,14 @@ toolchains:
     config:
       approval_mode: "full-auto"
       default_reasoning_effort: "high"
+      quiescence_timeout_seconds: 300
+      stall_confirmation_seconds: 5
+      quiescence_timeout_seconds_by_reasoning_effort:
+        medium: 240
+        high: 420
+        xhigh: 600
+      quiescence_timeout_seconds_by_model:
+        gpt-5.3-codex: 420
       reasoning_effort_map:
         dk_risk_critical: "high"
         dk_risk_high: "medium"

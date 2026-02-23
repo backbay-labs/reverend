@@ -1,0 +1,78 @@
+version: '1.0'
+scheduling:
+  max_concurrent_workcells: 3
+  max_concurrent_tokens: 360000
+  starvation_threshold_hours: 4.0
+toolchain_priority:
+- claude
+toolchains:
+  codex:
+    enabled: false
+    path: codex
+    default_model: gpt-5.2
+    timeout_minutes: 60
+    max_tokens: 100000
+    config:
+      approval_mode: full-auto
+  claude:
+    enabled: true
+    path: claude
+    timeout_minutes: 60
+    max_tokens: 100000
+    config:
+      skip_permissions: true
+      output_format: json
+      allowed_tools:
+      - Edit
+      - Write
+      - Bash
+      - Read
+  opencode:
+    enabled: false
+    path: opencode
+    timeout_minutes: 45
+    max_tokens: 100000
+  crush:
+    enabled: false
+    path: crush
+    timeout_minutes: 45
+    max_tokens: 100000
+    config:
+      auto_approve: true
+routing:
+  rules:
+  - match: {}
+    use:
+    - claude
+  fallbacks:
+    claude:
+    - claude
+gates:
+  test_command: bash scripts/cyntra/gates.sh --mode=all
+  typecheck_command: bash scripts/cyntra/gates.sh --mode=context
+  lint_command: bash scripts/cyntra/gates.sh --mode=diff
+  build_command: null
+  timeout_seconds: 600
+  retry_flaky: 1
+  parallel: false
+  max_diff_lines: 4000
+  max_diff_files: 200
+  secret_detection: true
+  secret_detection_scan_diff: true
+  secret_detection_max_bytes: 250000
+speculation:
+  enabled: false
+  default_parallelism: 1
+  max_parallelism: 1
+  vote_threshold: 0.7
+  auto_trigger:
+    on_critical_path: false
+    risk_levels: []
+control:
+  enabled: true
+planner:
+  mode: 'off'
+  bundle_dir: null
+  confidence_threshold: 0.2
+sentinels:
+  enabled: false

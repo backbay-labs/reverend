@@ -96,7 +96,7 @@ Detailed remediation and operational target definitions are documented in:
 
 | Epic | Story Bead IDs | Current Status |
 |---|---|---|
-| E20 | `3101-3112` | `open` |
+| E20 | `3101-3114` | `open` |
 | E21 | `3201-3208` | `open` |
 
 ## Dependency Edges
@@ -178,6 +178,8 @@ Detailed remediation and operational target definitions are documented in:
 3102 -> 3107,3108,3112
 3108 -> 3110
 3110 -> 3111,3112
+3113 -> 3102,3103,3105,3106,3108,3110,3111,3112,3201
+3114 -> 3208
 
 3100 -> 3200
 3103,3105,3106,3109 -> 3201

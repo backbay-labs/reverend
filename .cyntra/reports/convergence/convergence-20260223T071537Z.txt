@@ -1,0 +1,28 @@
+# Cyntra Convergence Report
+
+timestamp_utc: 20260223T071537Z
+repo_root: /Users/connor/Medica/backbay/standalone/reverend
+active_path: /Users/connor/Medica/backbay/standalone/reverend
+active_branch: master
+active_head: dd921b30e227e99deaac5225351e3059fcfb2948
+integrated_path: /Users/connor/Medica/backbay/standalone/reverend-main
+integrated_branch: main
+integrated_head: 3b25405d583ec0f5594710941cb3a17b1a042fb5
+ahead_behind(active_vs_integrated): ahead=64 behind=108
+conflict_status: clean-merge-prediction
+
+## Checklist
+- compile(active): cd /Users/connor/Medica/backbay/standalone/reverend && GRADLE_USER_HOME=/Users/connor/Medica/backbay/standalone/reverend/.gradle-user-home ./gradlew --no-daemon :Framework-TraceModeling:compileJava :Reverend:compileJava :Reverend:test --tests ghidra.reverend.cockpit.*
+- compile(integrated): cd /Users/connor/Medica/backbay/standalone/reverend-main && GRADLE_USER_HOME=/Users/connor/Medica/backbay/standalone/reverend-main/.gradle-user-home ./gradlew --no-daemon :Framework-TraceModeling:compileJava :Reverend:compileJava :Reverend:test --tests ghidra.reverend.cockpit.*
+- gates(context,active): cd /Users/connor/Medica/backbay/standalone/reverend && CYNTRA_GATE_CONTEXT_STRICT=0 bash scripts/cyntra/gates.sh --mode=context
+- gates(context,integrated): cd /Users/connor/Medica/backbay/standalone/reverend-main && CYNTRA_GATE_CONTEXT_STRICT=0 bash scripts/cyntra/gates.sh --mode=context
+- gates(diff,active): cd /Users/connor/Medica/backbay/standalone/reverend && CYNTRA_GATE_CONTEXT_STRICT=0 bash scripts/cyntra/gates.sh --mode=diff
+- gates(diff,integrated): cd /Users/connor/Medica/backbay/standalone/reverend-main && CYNTRA_GATE_CONTEXT_STRICT=0 bash scripts/cyntra/gates.sh --mode=diff
+- gates(java,active): cd /Users/connor/Medica/backbay/standalone/reverend && CYNTRA_GATE_CONTEXT_STRICT=0 bash scripts/cyntra/gates.sh --mode=java
+- gates(java,integrated): cd /Users/connor/Medica/backbay/standalone/reverend-main && CYNTRA_GATE_CONTEXT_STRICT=0 bash scripts/cyntra/gates.sh --mode=java
+
+## Evidence
+- compile(active): skipped
+- compile(integrated): skipped
+- gates(active): skipped
+- gates(integrated): skipped
