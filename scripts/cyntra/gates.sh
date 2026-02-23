@@ -732,6 +732,42 @@ run_eval_regression() {
   echo "[gates] eval regression OK (artifacts: $metrics_out, $regression_out)"
 }
 
+run_query_slo_gate() {
+  local query_slo_reporter="eval/scripts/query_slo_report.py"
+  local thresholds_path="eval/config/query_slo_thresholds.json"
+  local smoke_runner="eval/run_smoke.sh"
+  local eval_gate_out="${artifact_root}/eval"
+  local metrics_out="${eval_gate_out}/smoke-metrics.json"
+  local query_slo_json="${eval_gate_out}/query-slo-report.json"
+  local query_slo_md="${eval_gate_out}/query-slo-report.md"
+
+  if [[ ! -f "$query_slo_reporter" ]]; then
+    echo "[gates] ERROR: missing query SLO reporter: $query_slo_reporter" >&2
+    exit 1
+  fi
+  if [[ ! -f "$thresholds_path" ]]; then
+    echo "[gates] ERROR: missing query SLO thresholds: $thresholds_path" >&2
+    exit 1
+  fi
+  if [[ ! -f "$smoke_runner" ]]; then
+    echo "[gates] ERROR: missing smoke runner: $smoke_runner" >&2
+    exit 1
+  fi
+
+  mkdir -p "$eval_gate_out"
+  if [[ ! -f "$metrics_out" ]]; then
+    bash "$smoke_runner" --output "$metrics_out"
+  fi
+
+  python3 "$query_slo_reporter" \
+    --metrics "$metrics_out" \
+    --thresholds "$thresholds_path" \
+    --output-json "$query_slo_json" \
+    --output-md "$query_slo_md" \
+    --fail-on-breach
+  echo "[gates] query SLO OK (artifacts: $query_slo_json, $query_slo_md)"
+}
+
 run_reliability_soak_slo() {
   local soak_runner="eval/run_soak.sh"
   local slo_reporter="eval/scripts/reliability_slo_report.py"
@@ -854,6 +890,7 @@ case "$mode" in
     run_reverend_compile_regression
     run_frontier_compile_regression
     run_eval_regression
+    run_query_slo_gate
     run_reliability_soak_slo
     run_security_evidence_integrity
     run_roadmap_consistency_validation

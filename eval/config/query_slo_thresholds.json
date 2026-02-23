@@ -1,0 +1,33 @@
+{
+  "schema_version": 3,
+  "kind": "query_slo_thresholds",
+  "description": "Pinned query quality and latency budgets for real-target smoke metrics.",
+  "metrics": {
+    "real_target": {
+      "mrr": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 0.95,
+        "description": "Mean reciprocal rank budget for real-target query ranking."
+      },
+      "recall@1": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 0.95,
+        "description": "Top-1 retrieval quality must remain within the allowed drop budget."
+      },
+      "recall@5": {
+        "value": 1.0,
+        "operator": ">=",
+        "min_threshold": 0.95,
+        "description": "Top-5 retrieval quality must remain within the allowed drop budget."
+      },
+      "latency_p95_ms": {
+        "value": 0.007208,
+        "operator": "<=",
+        "max_threshold": 0.00865,
+        "description": "p95 query latency budget for real-target benchmark slices."
+      }
+    }
+  }
+}
