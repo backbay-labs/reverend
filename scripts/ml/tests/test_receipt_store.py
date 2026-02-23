@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import tarfile
 import sys
 import tempfile
@@ -457,6 +458,272 @@ class ReceiptStoreTest(unittest.TestCase):
             self.assertEqual(exit_one, 0)
             self.assertEqual(exit_two, 0)
             self.assertEqual(bundle_one.read_bytes(), bundle_two.read_bytes())
+
+    def test_replay_bundle_restores_state_and_matches_stage_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "receipts.json"
+            store = ReceiptStore(store_path)
+            store.append(self._base_receipt(receipt_id="r-1", target_id="func-1"))
+
+            artifact_path = root / "stage-output.json"
+            artifact_payload = {"kind": "artifact", "stage": "extract_features"}
+            artifact_path.write_text(json.dumps(artifact_payload, sort_keys=True) + "\n", encoding="utf-8")
+            stage_input_path = root / "stage-input.json"
+            stage_input_payload = {"records": ["fn.1", "fn.2"]}
+            stage_input_path.write_text(json.dumps(stage_input_payload, sort_keys=True) + "\n", encoding="utf-8")
+
+            runtime_toolchain = MODULE._runtime_toolchain_versions()
+            environment_manifest_path = root / "environment-manifest-source.json"
+            environment_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "mission_replay_environment_manifest",
+                        "profiles": {
+                            "local": {
+                                "python": runtime_toolchain["python"],
+                            },
+                            "ci": {
+                                "python": runtime_toolchain["python"],
+                            },
+                        },
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            replay_manifest_path = root / "replay-manifest-source.json"
+            replay_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "mission_incident_replay_manifest",
+                        "mission_id": "replay-mission",
+                        "stages": [
+                            {
+                                "stage_id": "extract_features",
+                                "input_sha256": MODULE._sha256_file(stage_input_path),
+                                "output": {
+                                    "path": "artifacts/stage-output.json",
+                                    "sha256": MODULE._sha256_file(artifact_path),
+                                },
+                            }
+                        ],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            bundle_path = root / "bundle.tar.gz"
+            pack_exit = main(
+                [
+                    "pack-bundle",
+                    "--store",
+                    str(store_path),
+                    "--artifact",
+                    str(artifact_path),
+                    "--mission-id",
+                    "replay-mission",
+                    "--output",
+                    str(bundle_path),
+                    "--signing-key",
+                    "test-signing-key",
+                    "--replay-manifest",
+                    str(replay_manifest_path),
+                    "--environment-manifest",
+                    str(environment_manifest_path),
+                ]
+            )
+            self.assertEqual(pack_exit, 0)
+
+            restored_dir = root / "restored"
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                replay_exit = main(
+                    [
+                        "replay-bundle",
+                        "--bundle",
+                        str(bundle_path),
+                        "--signing-key",
+                        "test-signing-key",
+                        "--restore-dir",
+                        str(restored_dir),
+                        "--stage-input",
+                        f"extract_features={stage_input_path}",
+                    ]
+                )
+            self.assertEqual(replay_exit, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["divergence_count"], 0)
+            self.assertEqual(payload["runtime_profile"], "local")
+            self.assertTrue((restored_dir / "manifest.json").exists())
+            self.assertTrue((restored_dir / "artifacts" / "stage-output.json").exists())
+            self.assertEqual(payload["verification"]["issue_count"], 0)
+
+    def test_replay_bundle_reports_exact_stage_input_hash_divergence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "receipts.json"
+            store = ReceiptStore(store_path)
+            store.append(self._base_receipt(receipt_id="r-1", target_id="func-1"))
+
+            artifact_path = root / "stage-output.json"
+            artifact_path.write_text("{\"ok\":true}\n", encoding="utf-8")
+            expected_input_path = root / "expected-input.json"
+            expected_input_path.write_text("{\"seed\":\"stable\"}\n", encoding="utf-8")
+            wrong_input_path = root / "wrong-input.json"
+            wrong_input_path.write_text("{\"seed\":\"changed\"}\n", encoding="utf-8")
+
+            replay_manifest_path = root / "replay-manifest-source.json"
+            replay_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "mission_incident_replay_manifest",
+                        "mission_id": "replay-mission",
+                        "stages": [
+                            {
+                                "stage_id": "build_summary",
+                                "input_sha256": MODULE._sha256_file(expected_input_path),
+                                "output_path": "artifacts/stage-output.json",
+                                "output_sha256": MODULE._sha256_file(artifact_path),
+                            }
+                        ],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            bundle_path = root / "bundle.tar.gz"
+            self.assertEqual(
+                main(
+                    [
+                        "pack-bundle",
+                        "--store",
+                        str(store_path),
+                        "--artifact",
+                        str(artifact_path),
+                        "--mission-id",
+                        "replay-mission",
+                        "--output",
+                        str(bundle_path),
+                        "--signing-key",
+                        "test-signing-key",
+                        "--replay-manifest",
+                        str(replay_manifest_path),
+                    ]
+                ),
+                0,
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                replay_exit = main(
+                    [
+                        "replay-bundle",
+                        "--bundle",
+                        str(bundle_path),
+                        "--signing-key",
+                        "test-signing-key",
+                        "--stage-input",
+                        f"build_summary={wrong_input_path}",
+                    ]
+                )
+            self.assertEqual(replay_exit, 1)
+            payload = json.loads(stdout.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertGreater(payload["divergence_count"], 0)
+            divergence = payload["divergences"][0]
+            self.assertEqual(divergence["stage_id"], "build_summary")
+            self.assertEqual(divergence["field"], "input_sha256")
+            self.assertIn("mismatch", divergence["detail"])
+
+    def test_replay_bundle_auto_profile_uses_ci_toolchain_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store_path = root / "receipts.json"
+            store = ReceiptStore(store_path)
+            store.append(self._base_receipt(receipt_id="r-1", target_id="func-1"))
+
+            artifact_path = root / "artifact.txt"
+            artifact_path.write_text("artifact\n", encoding="utf-8")
+
+            runtime_toolchain = MODULE._runtime_toolchain_versions()
+            environment_manifest_path = root / "environment-manifest-source.json"
+            environment_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "mission_replay_environment_manifest",
+                        "profiles": {
+                            "local": {"python": "0.0.0"},
+                            "ci": {"python": runtime_toolchain["python"]},
+                        },
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            bundle_path = root / "bundle.tar.gz"
+            self.assertEqual(
+                main(
+                    [
+                        "pack-bundle",
+                        "--store",
+                        str(store_path),
+                        "--artifact",
+                        str(artifact_path),
+                        "--mission-id",
+                        "profile-mission",
+                        "--output",
+                        str(bundle_path),
+                        "--signing-key",
+                        "test-signing-key",
+                        "--environment-manifest",
+                        str(environment_manifest_path),
+                    ]
+                ),
+                0,
+            )
+
+            old_ci = os.environ.get("CI")
+            os.environ["CI"] = "true"
+            try:
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    replay_exit = main(
+                        [
+                            "replay-bundle",
+                            "--bundle",
+                            str(bundle_path),
+                            "--signing-key",
+                            "test-signing-key",
+                        ]
+                    )
+            finally:
+                if old_ci is None:
+                    os.environ.pop("CI", None)
+                else:
+                    os.environ["CI"] = old_ci
+
+            self.assertEqual(replay_exit, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["runtime_profile"], "ci")
+            self.assertEqual(payload["divergence_count"], 0)
 
 
 if __name__ == "__main__":

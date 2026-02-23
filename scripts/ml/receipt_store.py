@@ -11,6 +11,8 @@ import io
 import json
 import os
 import re
+import subprocess
+import sys
 import tarfile
 from collections import deque
 from dataclasses import dataclass
@@ -291,6 +293,51 @@ class BundleVerificationReport:
         }
 
 
+@dataclass(frozen=True)
+class BundleReplayDivergence:
+    stage_id: str
+    field: str
+    expected: str
+    actual: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class BundleReplayReport:
+    ok: bool
+    verification: BundleVerificationReport
+    restored_dir: str | None
+    runtime_profile: str
+    toolchain: Mapping[str, str]
+    divergences: tuple[BundleReplayDivergence, ...]
+
+    @property
+    def divergence_count(self) -> int:
+        return len(self.divergences)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "kind": "mission_artifact_bundle_replay_report",
+            "ok": self.ok,
+            "runtime_profile": self.runtime_profile,
+            "restored_dir": self.restored_dir,
+            "toolchain": dict(self.toolchain),
+            "divergence_count": self.divergence_count,
+            "divergences": [
+                {
+                    "stage_id": item.stage_id,
+                    "field": item.field,
+                    "expected": item.expected,
+                    "actual": item.actual,
+                    "detail": item.detail,
+                }
+                for item in self.divergences
+            ],
+            "verification": self.verification.as_dict(),
+        }
+
+
 class ReceiptStoreIntegrityError(ValueError):
     """Raised when receipt history fails integrity verification."""
 
@@ -336,8 +383,10 @@ def _build_bundle_manifest_payload(
     provenance_report_name: str,
     provenance_report_sha256: str,
     artifacts: Sequence[tuple[str, str, int]],
+    replay_manifest: tuple[str, str] | None = None,
+    environment_manifest: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "schema_version": 1,
         "kind": "mission_artifact_bundle_manifest",
         "mission_id": mission_id,
@@ -359,6 +408,19 @@ def _build_bundle_manifest_payload(
             for path, checksum, size_bytes in artifacts
         ],
     }
+    if replay_manifest is not None:
+        replay_path, replay_sha256 = replay_manifest
+        payload["replay_manifest"] = {
+            "path": replay_path,
+            "sha256": replay_sha256,
+        }
+    if environment_manifest is not None:
+        env_path, env_sha256 = environment_manifest
+        payload["environment_manifest"] = {
+            "path": env_path,
+            "sha256": env_sha256,
+        }
+    return payload
 
 
 def _write_manifest_json(*, payload: Mapping[str, Any], signature: Mapping[str, Any]) -> bytes:
@@ -383,6 +445,7 @@ def _write_deterministic_bundle(
     receipt_store_bytes: bytes,
     provenance_report_bytes: bytes,
     artifacts: Sequence[tuple[str, bytes]],
+    extra_members: Sequence[tuple[str, bytes]] = (),
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("wb") as raw_handle:
@@ -394,6 +457,7 @@ def _write_deterministic_bundle(
                     ("provenance-verification-report.json", provenance_report_bytes),
                 ]
                 entries.extend((path, payload) for path, payload in artifacts)
+                entries.extend((path, payload) for path, payload in extra_members)
                 for name, payload in sorted(entries, key=lambda item: item[0]):
                     info = tarfile.TarInfo(name=name)
                     info.size = len(payload)
@@ -404,6 +468,112 @@ def _write_deterministic_bundle(
                     info.gname = ""
                     info.mode = 0o644
                     tar.addfile(info, io.BytesIO(payload))
+
+
+def _load_json_mapping(path: Path, *, field: str) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        raise ValueError(f"{field} path '{path}' must exist and be a file")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"failed to parse {field} JSON '{path}': {exc}") from exc
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{field} JSON '{path}' must decode to an object")
+    return dict(raw)
+
+
+def _stage_output_spec(stage_raw: Mapping[str, Any]) -> tuple[str, str] | None:
+    output_raw = stage_raw.get("output")
+    if isinstance(output_raw, Mapping):
+        path = str(output_raw.get("path") or "").strip()
+        sha = str(output_raw.get("sha256") or "").strip().lower()
+    else:
+        path = str(stage_raw.get("output_path") or "").strip()
+        sha = str(stage_raw.get("output_sha256") or "").strip().lower()
+    if not path and not sha:
+        return None
+    if not path or not sha:
+        raise ValueError("replay stage output must include both path and sha256")
+    if not HEX64_RE.match(sha):
+        raise ValueError(f"replay stage output sha256 '{sha}' must be hex64")
+    return path, sha
+
+
+def _parse_stage_input_bindings(values: Sequence[str]) -> dict[str, Path]:
+    bindings: dict[str, Path] = {}
+    for raw in values:
+        entry = str(raw or "").strip()
+        if not entry:
+            continue
+        if "=" not in entry:
+            raise ValueError(f"invalid --stage-input '{entry}' (expected <stage_id>=<path>)")
+        stage_id, path_raw = entry.split("=", 1)
+        stage_id = stage_id.strip()
+        path_raw = path_raw.strip()
+        if not stage_id or not path_raw:
+            raise ValueError(f"invalid --stage-input '{entry}' (expected <stage_id>=<path>)")
+        path = Path(path_raw)
+        if not path.exists() or not path.is_file():
+            raise ValueError(f"stage input path '{path}' must exist and be a file")
+        bindings[stage_id] = path
+    return bindings
+
+
+def _normalize_runtime_profile(profile: str | None) -> str:
+    raw = str(profile or "").strip().lower()
+    if raw == "auto":
+        ci_env = str(os.environ.get("CI") or "").strip().lower()
+        return "ci" if ci_env in {"1", "true", "yes", "on"} else "local"
+    if raw in {"local", "ci"}:
+        return raw
+    raise ValueError(f"unsupported runtime profile '{profile}' (expected local, ci, or auto)")
+
+
+def _runtime_toolchain_versions() -> dict[str, str]:
+    versions = {
+        "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+    }
+
+    def _run_version(cmd: Sequence[str]) -> str:
+        try:
+            completed = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            return ""
+        stream = completed.stdout if completed.stdout.strip() else completed.stderr
+        first_line = stream.strip().splitlines()
+        if not first_line:
+            return ""
+        line = first_line[0].strip()
+        match = re.search(r"(\d+\.\d+(?:\.\d+)?)", line)
+        return match.group(1) if match else ""
+
+    java_version = _run_version(("java", "-version"))
+    if java_version:
+        versions["java"] = java_version
+    javac_version = _run_version(("javac", "-version"))
+    if javac_version:
+        versions["javac"] = javac_version
+    return versions
+
+
+def _load_bundle_members(bundle_path: Path) -> dict[str, bytes]:
+    members: dict[str, bytes] = {}
+    with tarfile.open(bundle_path, mode="r:gz") as tar:
+        for member in tar.getmembers():
+            if not member.isfile():
+                continue
+            if member.name.startswith("/") or ".." in Path(member.name).parts:
+                continue
+            handle = tar.extractfile(member)
+            if handle is None:
+                continue
+            members[member.name] = handle.read()
+    return members
 
 
 def verify_receipt_history(receipts: Sequence[Mapping[str, Any]]) -> ReceiptIntegrityReport:
@@ -1034,6 +1204,25 @@ def _pack_bundle_command(args: argparse.Namespace) -> int:
         artifact_payloads.append((arcname, payload))
         artifact_manifest_entries.append((arcname, _sha256_bytes(payload), len(payload)))
 
+    extra_members: list[tuple[str, bytes]] = []
+    replay_manifest_spec: tuple[str, str] | None = None
+    if args.replay_manifest is not None:
+        replay_payload = _load_json_mapping(args.replay_manifest, field="replay-manifest")
+        replay_bytes = json.dumps(replay_payload, indent=2, sort_keys=True, ensure_ascii=True).encode("utf-8") + b"\n"
+        replay_path = "replay-manifest.json"
+        replay_manifest_spec = (replay_path, _sha256_bytes(replay_bytes))
+        extra_members.append((replay_path, replay_bytes))
+
+    environment_manifest_spec: tuple[str, str] | None = None
+    if args.environment_manifest is not None:
+        environment_payload = _load_json_mapping(args.environment_manifest, field="environment-manifest")
+        environment_bytes = (
+            json.dumps(environment_payload, indent=2, sort_keys=True, ensure_ascii=True).encode("utf-8") + b"\n"
+        )
+        environment_path = "environment-manifest.json"
+        environment_manifest_spec = (environment_path, _sha256_bytes(environment_bytes))
+        extra_members.append((environment_path, environment_bytes))
+
     manifest_payload = _build_bundle_manifest_payload(
         mission_id=mission_id,
         receipt_store_name="receipts.json",
@@ -1042,6 +1231,8 @@ def _pack_bundle_command(args: argparse.Namespace) -> int:
         provenance_report_name="provenance-verification-report.json",
         provenance_report_sha256=_sha256_bytes(provenance_report_bytes),
         artifacts=artifact_manifest_entries,
+        replay_manifest=replay_manifest_spec,
+        environment_manifest=environment_manifest_spec,
     )
     signature = {
         "algorithm": "hmac-sha256",
@@ -1056,6 +1247,7 @@ def _pack_bundle_command(args: argparse.Namespace) -> int:
         receipt_store_bytes=receipt_store_bytes,
         provenance_report_bytes=provenance_report_bytes,
         artifacts=artifact_payloads,
+        extra_members=extra_members,
     )
 
     output_payload = {
@@ -1202,6 +1394,48 @@ def verify_bundle(*, bundle_path: Path, signing_key: bytes) -> BundleVerificatio
             else:
                 issues.append(BundleVerificationIssue(reason="manifest missing artifacts array"))
 
+            replay_spec = manifest_raw.get("replay_manifest")
+            if replay_spec is not None:
+                if not isinstance(replay_spec, Mapping):
+                    issues.append(BundleVerificationIssue(reason="manifest replay_manifest must be an object"))
+                else:
+                    replay_path = str(replay_spec.get("path") or "").strip()
+                    replay_sha = str(replay_spec.get("sha256") or "").strip().lower()
+                    if replay_path != "replay-manifest.json":
+                        issues.append(
+                            BundleVerificationIssue(reason="manifest replay_manifest.path must be 'replay-manifest.json'")
+                        )
+                    if replay_sha and not HEX64_RE.match(replay_sha):
+                        issues.append(BundleVerificationIssue(reason="manifest replay_manifest.sha256 must be hex64"))
+                    if replay_path in member_names:
+                        payload = _safe_tar_read_member(tar, member_name=replay_path)
+                        if replay_sha and replay_sha != _sha256_bytes(payload):
+                            issues.append(BundleVerificationIssue(reason="replay-manifest.json checksum mismatch"))
+                    else:
+                        issues.append(BundleVerificationIssue(reason="bundle missing replay-manifest.json"))
+
+            environment_spec = manifest_raw.get("environment_manifest")
+            if environment_spec is not None:
+                if not isinstance(environment_spec, Mapping):
+                    issues.append(BundleVerificationIssue(reason="manifest environment_manifest must be an object"))
+                else:
+                    env_path = str(environment_spec.get("path") or "").strip()
+                    env_sha = str(environment_spec.get("sha256") or "").strip().lower()
+                    if env_path != "environment-manifest.json":
+                        issues.append(
+                            BundleVerificationIssue(
+                                reason="manifest environment_manifest.path must be 'environment-manifest.json'"
+                            )
+                        )
+                    if env_sha and not HEX64_RE.match(env_sha):
+                        issues.append(BundleVerificationIssue(reason="manifest environment_manifest.sha256 must be hex64"))
+                    if env_path in member_names:
+                        payload = _safe_tar_read_member(tar, member_name=env_path)
+                        if env_sha and env_sha != _sha256_bytes(payload):
+                            issues.append(BundleVerificationIssue(reason="environment-manifest.json checksum mismatch"))
+                    else:
+                        issues.append(BundleVerificationIssue(reason="bundle missing environment-manifest.json"))
+
     if bundle_receipts:
         provenance_runtime = verify_provenance_chain(bundle_receipts)
         if not provenance_runtime.ok:
@@ -1230,6 +1464,245 @@ def verify_bundle(*, bundle_path: Path, signing_key: bytes) -> BundleVerificatio
 def _verify_bundle_command(args: argparse.Namespace) -> int:
     signing_key = _resolve_signing_key(key_inline=args.signing_key, key_env=args.signing_key_env)
     report = verify_bundle(bundle_path=args.bundle, signing_key=signing_key)
+    payload = report.as_dict()
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    else:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0 if report.ok else 1
+
+
+def _resolve_profile_toolchain(environment_manifest: Mapping[str, Any], *, runtime_profile: str) -> dict[str, str]:
+    profiles_raw = environment_manifest.get("profiles")
+    selected: Mapping[str, Any] | None = None
+    if isinstance(profiles_raw, Mapping):
+        profile_raw = profiles_raw.get(runtime_profile)
+        if isinstance(profile_raw, Mapping):
+            selected = profile_raw
+    if selected is None:
+        toolchain_raw = environment_manifest.get("toolchain")
+        if isinstance(toolchain_raw, Mapping):
+            selected = toolchain_raw
+    if selected is None:
+        return {}
+    resolved: dict[str, str] = {}
+    for key in ("python", "java", "javac"):
+        value = str(selected.get(key) or "").strip()
+        if value:
+            resolved[key] = value
+    return resolved
+
+
+def replay_bundle(
+    *,
+    bundle_path: Path,
+    signing_key: bytes,
+    restore_dir: Path | None,
+    runtime_profile: str,
+    stage_inputs: Mapping[str, Path],
+    enforce_toolchain: bool,
+) -> BundleReplayReport:
+    verification = verify_bundle(bundle_path=bundle_path, signing_key=signing_key)
+    members = _load_bundle_members(bundle_path)
+    divergences: list[BundleReplayDivergence] = []
+    selected_profile = _normalize_runtime_profile(runtime_profile)
+    runtime_toolchain = _runtime_toolchain_versions()
+
+    if restore_dir is not None:
+        restore_dir.mkdir(parents=True, exist_ok=True)
+        for name in sorted(members):
+            dest = restore_dir / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(members[name])
+
+    replay_manifest: Mapping[str, Any] = {}
+    replay_manifest_bytes = members.get("replay-manifest.json")
+    if replay_manifest_bytes:
+        try:
+            parsed = json.loads(replay_manifest_bytes.decode("utf-8"))
+            if isinstance(parsed, Mapping):
+                replay_manifest = parsed
+            else:
+                divergences.append(
+                    BundleReplayDivergence(
+                        stage_id="bundle",
+                        field="replay_manifest",
+                        expected="json-object",
+                        actual=type(parsed).__name__,
+                        detail="replay-manifest.json must decode to object",
+                    )
+                )
+        except Exception as exc:
+            divergences.append(
+                BundleReplayDivergence(
+                    stage_id="bundle",
+                    field="replay_manifest",
+                    expected="parseable-json",
+                    actual="invalid",
+                    detail=f"failed to parse replay-manifest.json: {exc}",
+                )
+            )
+
+    environment_manifest: Mapping[str, Any] = {}
+    environment_manifest_bytes = members.get("environment-manifest.json")
+    if environment_manifest_bytes:
+        try:
+            parsed = json.loads(environment_manifest_bytes.decode("utf-8"))
+            if isinstance(parsed, Mapping):
+                environment_manifest = parsed
+            else:
+                divergences.append(
+                    BundleReplayDivergence(
+                        stage_id="bundle",
+                        field="environment_manifest",
+                        expected="json-object",
+                        actual=type(parsed).__name__,
+                        detail="environment-manifest.json must decode to object",
+                    )
+                )
+        except Exception as exc:
+            divergences.append(
+                BundleReplayDivergence(
+                    stage_id="bundle",
+                    field="environment_manifest",
+                    expected="parseable-json",
+                    actual="invalid",
+                    detail=f"failed to parse environment-manifest.json: {exc}",
+                )
+            )
+
+    if enforce_toolchain and environment_manifest:
+        pinned = _resolve_profile_toolchain(environment_manifest, runtime_profile=selected_profile)
+        if not pinned:
+            divergences.append(
+                BundleReplayDivergence(
+                    stage_id="environment",
+                    field="runtime_profile",
+                    expected=selected_profile,
+                    actual="missing",
+                    detail=f"environment manifest does not define toolchain for profile '{selected_profile}'",
+                )
+            )
+        for key, expected_value in pinned.items():
+            actual_value = str(runtime_toolchain.get(key) or "")
+            if actual_value != expected_value:
+                divergences.append(
+                    BundleReplayDivergence(
+                        stage_id="environment",
+                        field=f"{key}_version",
+                        expected=expected_value,
+                        actual=actual_value or "missing",
+                        detail=f"toolchain mismatch for profile '{selected_profile}'",
+                    )
+                )
+
+    stages_raw = replay_manifest.get("stages")
+    stages = stages_raw if isinstance(stages_raw, list) else []
+    for stage_entry in stages:
+        if not isinstance(stage_entry, Mapping):
+            continue
+        stage_id = str(stage_entry.get("stage_id") or stage_entry.get("stage") or "").strip()
+        if not stage_id:
+            continue
+
+        expected_input_sha = str(stage_entry.get("input_sha256") or "").strip().lower()
+        if expected_input_sha:
+            if not HEX64_RE.match(expected_input_sha):
+                divergences.append(
+                    BundleReplayDivergence(
+                        stage_id=stage_id,
+                        field="input_sha256",
+                        expected="hex64",
+                        actual=expected_input_sha,
+                        detail="invalid expected input hash",
+                    )
+                )
+            elif stage_id not in stage_inputs:
+                divergences.append(
+                    BundleReplayDivergence(
+                        stage_id=stage_id,
+                        field="input_sha256",
+                        expected=expected_input_sha,
+                        actual="missing",
+                        detail="no --stage-input binding provided for stage",
+                    )
+                )
+            else:
+                actual_input_sha = _sha256_file(stage_inputs[stage_id]).lower()
+                if actual_input_sha != expected_input_sha:
+                    divergences.append(
+                        BundleReplayDivergence(
+                            stage_id=stage_id,
+                            field="input_sha256",
+                            expected=expected_input_sha,
+                            actual=actual_input_sha,
+                            detail=f"input hash mismatch ({stage_inputs[stage_id]})",
+                        )
+                    )
+
+        try:
+            output_spec = _stage_output_spec(stage_entry)
+        except ValueError as exc:
+            divergences.append(
+                BundleReplayDivergence(
+                    stage_id=stage_id,
+                    field="output_sha256",
+                    expected="valid-output-spec",
+                    actual="invalid",
+                    detail=str(exc),
+                )
+            )
+            continue
+        if output_spec is None:
+            continue
+        output_path, expected_output_sha = output_spec
+        payload = members.get(output_path)
+        if payload is None:
+            divergences.append(
+                BundleReplayDivergence(
+                    stage_id=stage_id,
+                    field="output_sha256",
+                    expected=expected_output_sha,
+                    actual="missing",
+                    detail=f"bundle member '{output_path}' is missing",
+                )
+            )
+            continue
+        actual_output_sha = _sha256_bytes(payload).lower()
+        if actual_output_sha != expected_output_sha:
+            divergences.append(
+                BundleReplayDivergence(
+                    stage_id=stage_id,
+                    field="output_sha256",
+                    expected=expected_output_sha,
+                    actual=actual_output_sha,
+                    detail=f"output hash mismatch ({output_path})",
+                )
+            )
+
+    ok = verification.ok and not divergences
+    return BundleReplayReport(
+        ok=ok,
+        verification=verification,
+        restored_dir=str(restore_dir) if restore_dir is not None else None,
+        runtime_profile=selected_profile,
+        toolchain=runtime_toolchain,
+        divergences=tuple(divergences),
+    )
+
+
+def _replay_bundle_command(args: argparse.Namespace) -> int:
+    signing_key = _resolve_signing_key(key_inline=args.signing_key, key_env=args.signing_key_env)
+    stage_inputs = _parse_stage_input_bindings(args.stage_input)
+    report = replay_bundle(
+        bundle_path=args.bundle,
+        signing_key=signing_key,
+        restore_dir=args.restore_dir,
+        runtime_profile=args.runtime_profile,
+        stage_inputs=stage_inputs,
+        enforce_toolchain=not args.no_enforce_toolchain,
+    )
     payload = report.as_dict()
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -1299,6 +1772,18 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional path for pack result JSON",
     )
+    pack_parser.add_argument(
+        "--replay-manifest",
+        type=Path,
+        default=None,
+        help="Optional replay stage/hash manifest JSON to embed as replay-manifest.json",
+    )
+    pack_parser.add_argument(
+        "--environment-manifest",
+        type=Path,
+        default=None,
+        help="Optional pinned toolchain manifest JSON to embed as environment-manifest.json",
+    )
     pack_parser.set_defaults(func=_pack_bundle_command)
 
     verify_bundle_parser = subparsers.add_parser(
@@ -1325,6 +1810,54 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional path to write machine-readable verification report JSON",
     )
     verify_bundle_parser.set_defaults(func=_verify_bundle_command)
+
+    replay_bundle_parser = subparsers.add_parser(
+        "replay-bundle",
+        help="Restore a bundle and detect replay divergence by stage input/output hashes",
+    )
+    replay_bundle_parser.add_argument("--bundle", type=Path, required=True, help="Path to bundle (.tar.gz)")
+    replay_bundle_parser.add_argument(
+        "--signing-key",
+        type=str,
+        default=None,
+        help="Inline HMAC signing key; prefer --signing-key-env in production",
+    )
+    replay_bundle_parser.add_argument(
+        "--signing-key-env",
+        type=str,
+        default="MISSION_BUNDLE_SIGNING_KEY",
+        help="Environment variable name containing the HMAC signing key",
+    )
+    replay_bundle_parser.add_argument(
+        "--restore-dir",
+        type=Path,
+        default=None,
+        help="Optional directory to restore bundle state files",
+    )
+    replay_bundle_parser.add_argument(
+        "--runtime-profile",
+        type=str,
+        default="auto",
+        help="Toolchain profile to enforce from environment manifest: local|ci|auto",
+    )
+    replay_bundle_parser.add_argument(
+        "--stage-input",
+        action="append",
+        default=[],
+        help="Stage input binding for hash replay check: <stage_id>=<path> (repeatable)",
+    )
+    replay_bundle_parser.add_argument(
+        "--no-enforce-toolchain",
+        action="store_true",
+        help="Disable pinned toolchain checks from embedded environment-manifest.json",
+    )
+    replay_bundle_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write machine-readable replay report JSON",
+    )
+    replay_bundle_parser.set_defaults(func=_replay_bundle_command)
     return parser
 
 
