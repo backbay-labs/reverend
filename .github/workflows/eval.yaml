@@ -217,6 +217,13 @@ jobs:
             --output-md "${QUERY_SLO_OUTPUT_DIR}/slo-report.md" \
             --fail-on-breach
 
+      - name: Check operational claim regression (writes eval/output/smoke/operational-claim-regression.json, blocking)
+        run: |
+          python3 eval/scripts/check_regression.py \
+            --current eval/output/smoke/metrics.json \
+            --baseline eval/snapshots/operational_claim_baseline.json \
+            --output eval/output/smoke/operational-claim-regression.json
+
       - name: Add query SLO summary
         if: always()
         run: |
@@ -459,6 +466,13 @@ jobs:
             --output-json "${QUERY_SLO_OUTPUT_DIR}/slo-report.json" \
             --output-md "${QUERY_SLO_OUTPUT_DIR}/slo-report.md" \
             --fail-on-breach
+
+      - name: Check operational claim regression (writes eval/output/smoke/operational-claim-regression.json, blocking)
+        run: |
+          python3 eval/scripts/check_regression.py \
+            --current eval/output/smoke/metrics.json \
+            --baseline eval/snapshots/operational_claim_baseline.json \
+            --output eval/output/smoke/operational-claim-regression.json
 
       - name: Add query SLO summary
         if: always()
@@ -789,6 +803,13 @@ jobs:
             --output-json "${QUERY_SLO_OUTPUT_DIR}/slo-report.json" \
             --output-md "${QUERY_SLO_OUTPUT_DIR}/slo-report.md" \
             --fail-on-breach
+
+      - name: Check operational claim regression (writes eval/output/smoke/operational-claim-regression.json, blocking)
+        run: |
+          python3 eval/scripts/check_regression.py \
+            --current eval/output/smoke/metrics.json \
+            --baseline eval/snapshots/operational_claim_baseline.json \
+            --output eval/output/smoke/operational-claim-regression.json
 
       - name: Add query SLO summary
         if: always()
