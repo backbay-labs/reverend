@@ -365,14 +365,12 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 		}
 
 		SearchResultEntry entry = results.get(row);
-		entry.getEvidenceId().ifPresent(evidenceId -> {
-			// Find or create evidence drawer provider and show evidence
-			EvidenceDrawerProvider drawer = findEvidenceDrawer();
-			if (drawer != null) {
-				drawer.showEvidence(evidenceId);
-				tool.showComponentProvider(drawer, true);
-			}
-		});
+		// Find or create evidence drawer provider and show evidence
+		EvidenceDrawerProvider drawer = findEvidenceDrawer();
+		if (drawer != null) {
+			drawer.showEvidenceForHit(entry);
+			tool.showComponentProvider(drawer, true);
+		}
 	}
 
 	private void showXrefsForSelection() {
