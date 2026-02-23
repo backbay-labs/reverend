@@ -24,6 +24,7 @@ Target outcomes:
 - Safety: policy modes (`offline`, `allowlist`, `cloud`) and capability guardrails remain enforced.
 - Reproducibility: each bead must include runnable command sets and artifact paths.
 - Compatibility: Java 21 + current repository gate stack (`scripts/cyntra/gates.sh`) is non-optional.
+- Merge-health compile parity: before sync, verify `:Framework-TraceModeling:compileJava` plus `:Reverend:compileJava :Reverend:test --tests "ghidra.reverend.cockpit.*"` in both the active worktree and integrated `main` worktree (`scripts/cyntra/preflight.sh` sync checklist).
 - Evidence quality: benchmark and security outputs must include machine-readable plus markdown reports.
 
 ## 3) Epic E13 (2400): Real-Target Benchmark Program GA

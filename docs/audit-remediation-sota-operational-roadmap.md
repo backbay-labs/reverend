@@ -16,7 +16,7 @@ Close every finding from the 2026-02-22 audit, then prove Reverend is operationa
 | F2 | Gate/CI misses Reverend/frontier breakage | `3102` | `scripts/cyntra/gates.sh` + `.github/workflows/eval.yaml` module coverage expanded |
 | F3 | Cockpit defaults to stub services | `3103` | `CockpitPlugin` bootstraps live query/evidence/proposal services by default |
 | F4 | Python gate path not self-contained | `3104` | gate Python suites pass without implicit optional deps |
-| F5 | Integrated-branch compile blockers pending | `3105` | reproducible compile checks for integrated path pass |
+| F5 | Integrated-branch compile blockers pending | `3105` | `:Framework-TraceModeling:compileJava` and `:Reverend:compileJava :Reverend:test --tests "ghidra.reverend.cockpit.*"` pass in active + integrated worktrees |
 | F6 | Hash-collision-prone cache keys | `3106` | canonical serialization + digest cache keys with tests |
 | F7 | Roadmap/docs drift | `3107` | `.beads`/CSV/docs validator parity + CI enforcement |
 | F8 | Zero-diff auto-close integrity gap | `3108`, `3110`, `3111` | no-op close requires explicit manifest `noop_justification` (`manifest.issue.noop_justification` or `manifest.noop_justification`) + completion gate-summary telemetry (`completion_policy_gate_summary`) + reopen policy |
@@ -55,12 +55,15 @@ Dispatch waves:
 - End-to-end operator path is reproducible from a local clean setup (`3207`, `3208`).
 
 ## Required Verification Commands
+- `./gradlew --no-daemon :Framework-TraceModeling:compileJava`
+- `./gradlew --no-daemon :Reverend:compileJava :Reverend:test --tests "ghidra.reverend.cockpit.*"`
+- `cd "$CYNTRA_INTEGRATED_WORKTREE_PATH" && ./gradlew --no-daemon :Framework-TraceModeling:compileJava :Reverend:compileJava :Reverend:test --tests "ghidra.reverend.cockpit.*"`
 - `./gradlew --no-daemon :Reverend:compileJava :Reverend:test --tests "ghidra.reverend.*"`
 - `./gradlew --no-daemon :Generic:compileJava :Generic:test --tests "ghidra.security.*"`
 - `./gradlew --no-daemon :SoftwareModeling:compileJava :Base:compileJava`
 - `bash scripts/cyntra/gates.sh --mode=all`
 - `scripts/cyntra/validate-roadmap-completion.sh`
-- `scripts/cyntra/preflight.sh`
+- `CYNTRA_PREFLIGHT_SYNC_COMPILE_VERIFY=1 scripts/cyntra/preflight.sh`
 
 ## Kernel Control Loop
 - Dispatch one cycle: `scripts/cyntra/run-once.sh`
