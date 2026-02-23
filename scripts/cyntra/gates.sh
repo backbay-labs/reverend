@@ -897,6 +897,8 @@ run_operational_claim_gate() {
   python3 "$regression_checker" \
     --current "$metrics_out" \
     --baseline "$operational_baseline" \
+    --require-area real_target \
+    --require-area spec_review \
     --output "$regression_out"
   regression_status=$?
   set -e

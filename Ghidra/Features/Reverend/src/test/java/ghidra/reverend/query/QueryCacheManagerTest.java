@@ -50,7 +50,10 @@ public class QueryCacheManagerTest {
 		// Use Ghidra's StubProgram which works as a map key
 		stubProgram = new StubProgram();
 		// Create a test address space and address for context cache testing
-		testSpace = new GenericAddressSpace("test", 32, AddressSpace.TYPE_RAM, 0);
+		testSpace = stubProgram.getAddressFactory().getDefaultAddressSpace();
+		if (testSpace == null) {
+			testSpace = new GenericAddressSpace("test", 32, AddressSpace.TYPE_RAM, 0);
+		}
 		testAddress = testSpace.getAddress(0x1000);
 		secondAddress = testSpace.getAddress(0x2000);
 	}
@@ -310,6 +313,53 @@ public class QueryCacheManagerTest {
 	}
 
 	@Test
+	public void testQueryIndexedFunctionCandidatesPrefersLexicalHits() throws Exception {
+		cacheManager.initializeForProgram(stubProgram);
+
+		Object perProgramCache = getPerProgramCache();
+		Field functionFeatureIndexField = perProgramCache.getClass().getDeclaredField("functionFeatureIndex");
+		functionFeatureIndexField.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<String, QueryCacheManager.IndexedFunctionFeatures> functionFeatureIndex =
+			(Map<String, QueryCacheManager.IndexedFunctionFeatures>) functionFeatureIndexField.get(perProgramCache);
+		functionFeatureIndex.put(addressKey(testAddress),
+			createIndexedFeature(testAddress, testAddress, testAddress,
+				"socket_handler", Set.of("socket", "handler")));
+		functionFeatureIndex.put(addressKey(secondAddress),
+			createIndexedFeature(secondAddress, secondAddress, secondAddress,
+				"header_parser", Set.of("header", "parser")));
+
+		List<QueryCacheManager.IndexedFunctionCandidate> candidates =
+			cacheManager.queryIndexedFunctionCandidates(stubProgram, List.of("socket"), 2);
+
+		assertEquals(2, candidates.size());
+		assertEquals(testAddress, candidates.get(0).getEntryAddress());
+	}
+
+	@Test
+	public void testQueryIndexedFunctionCandidatesRespectsBudget() throws Exception {
+		cacheManager.initializeForProgram(stubProgram);
+
+		Object perProgramCache = getPerProgramCache();
+		Field functionFeatureIndexField = perProgramCache.getClass().getDeclaredField("functionFeatureIndex");
+		functionFeatureIndexField.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<String, QueryCacheManager.IndexedFunctionFeatures> functionFeatureIndex =
+			(Map<String, QueryCacheManager.IndexedFunctionFeatures>) functionFeatureIndexField.get(perProgramCache);
+		functionFeatureIndex.put(addressKey(testAddress),
+			createIndexedFeature(testAddress, testAddress, testAddress,
+				"socket_handler", Set.of("socket", "handler")));
+		functionFeatureIndex.put(addressKey(secondAddress),
+			createIndexedFeature(secondAddress, secondAddress, secondAddress,
+				"socket_parser", Set.of("socket", "parser")));
+
+		List<QueryCacheManager.IndexedFunctionCandidate> candidates =
+			cacheManager.queryIndexedFunctionCandidates(stubProgram, List.of("socket"), 1);
+
+		assertEquals(1, candidates.size());
+	}
+
+	@Test
 	public void testHitRate() {
 		cacheManager.initializeForProgram(stubProgram);
 
@@ -442,6 +492,12 @@ public class QueryCacheManagerTest {
 
 	private QueryCacheManager.IndexedFunctionFeatures createIndexedFeature(Address entryPoint,
 			Address bodyMin, Address bodyMax) throws Exception {
+		return createIndexedFeature(entryPoint, bodyMin, bodyMax, "mockFunction",
+			Set.of("mock", "function"));
+	}
+
+	private QueryCacheManager.IndexedFunctionFeatures createIndexedFeature(Address entryPoint,
+			Address bodyMin, Address bodyMax, String functionName, Set<String> lexicalTokens) throws Exception {
 		Constructor<QueryCacheManager.IndexedFunctionFeatures> constructor =
 			QueryCacheManager.IndexedFunctionFeatures.class.getDeclaredConstructor(
 				String.class, String.class, String.class, String.class, String.class, String.class,
@@ -449,8 +505,8 @@ public class QueryCacheManagerTest {
 		constructor.setAccessible(true);
 		return constructor.newInstance(
 			addressKey(entryPoint),
-			"mockFunction",
-			"mockfunction",
+			functionName,
+			functionName.toLowerCase(Locale.ROOT),
 			"",
 			"void",
 			"__stdcall",
@@ -459,7 +515,7 @@ public class QueryCacheManagerTest {
 			2,
 			addressKey(bodyMin),
 			addressKey(bodyMax),
-			Set.of("mock", "function"));
+			lexicalTokens);
 	}
 
 	private String addressKey(Address address) {
