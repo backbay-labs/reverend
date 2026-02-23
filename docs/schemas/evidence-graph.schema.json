@@ -1,0 +1,452 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reverend.local/schemas/evidence-graph.schema.json",
+  "title": "Canonical Evidence Graph",
+  "description": "Versioned contracts for evidence entities and cross-source edges.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "entities",
+    "edges"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entity"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    }
+  },
+  "$defs": {
+    "entity_type": {
+      "type": "string",
+      "enum": [
+        "static",
+        "dynamic",
+        "symbolic",
+        "taint",
+        "proposal",
+        "receipt"
+      ]
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity_type",
+        "entity_id",
+        "entity_schema_version",
+        "payload"
+      ],
+      "properties": {
+        "entity_type": {
+          "$ref": "#/$defs/entity_type"
+        },
+        "entity_id": {
+          "type": "string",
+          "pattern": "^ev[sdytpr]_[a-z0-9][a-z0-9._:-]*$"
+        },
+        "entity_schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "entity_type": {
+                "const": "static"
+              }
+            },
+            "required": [
+              "entity_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entity_id": {
+                "pattern": "^evs_[a-z0-9][a-z0-9._:-]*$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entity_type": {
+                "const": "dynamic"
+              }
+            },
+            "required": [
+              "entity_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entity_id": {
+                "pattern": "^evd_[a-z0-9][a-z0-9._:-]*$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entity_type": {
+                "const": "symbolic"
+              }
+            },
+            "required": [
+              "entity_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entity_id": {
+                "pattern": "^evy_[a-z0-9][a-z0-9._:-]*$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entity_type": {
+                "const": "taint"
+              }
+            },
+            "required": [
+              "entity_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entity_id": {
+                "pattern": "^evt_[a-z0-9][a-z0-9._:-]*$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entity_type": {
+                "const": "proposal"
+              }
+            },
+            "required": [
+              "entity_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entity_id": {
+                "pattern": "^evp_[a-z0-9][a-z0-9._:-]*$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entity_type": {
+                "const": "receipt"
+              }
+            },
+            "required": [
+              "entity_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entity_id": {
+                "pattern": "^evr_[a-z0-9][a-z0-9._:-]*$"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edge_type",
+        "source_entity_type",
+        "source_entity_id",
+        "source_entity_schema_version",
+        "target_entity_type",
+        "target_entity_id",
+        "target_entity_schema_version",
+        "payload"
+      ],
+      "properties": {
+        "edge_type": {
+          "type": "string",
+          "enum": [
+            "supports",
+            "derived_from",
+            "corroborates",
+            "supersedes"
+          ]
+        },
+        "source_entity_type": {
+          "$ref": "#/$defs/entity_type"
+        },
+        "source_entity_id": {
+          "type": "string",
+          "pattern": "^ev[sdytpr]_[a-z0-9][a-z0-9._:-]*$"
+        },
+        "source_entity_schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "target_entity_type": {
+          "$ref": "#/$defs/entity_type"
+        },
+        "target_entity_id": {
+          "type": "string",
+          "pattern": "^ev[sdytpr]_[a-z0-9][a-z0-9._:-]*$"
+        },
+        "target_entity_schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "edge_type": {
+                "const": "supports"
+              }
+            },
+            "required": [
+              "edge_type"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "static"
+                  },
+                  "target_entity_type": {
+                    "const": "proposal"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "dynamic"
+                  },
+                  "target_entity_type": {
+                    "const": "proposal"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "symbolic"
+                  },
+                  "target_entity_type": {
+                    "const": "proposal"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "taint"
+                  },
+                  "target_entity_type": {
+                    "const": "proposal"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "receipt"
+                  },
+                  "target_entity_type": {
+                    "const": "proposal"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "edge_type": {
+                "const": "derived_from"
+              }
+            },
+            "required": [
+              "edge_type"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "proposal"
+                  },
+                  "target_entity_type": {
+                    "const": "static"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "proposal"
+                  },
+                  "target_entity_type": {
+                    "const": "dynamic"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "proposal"
+                  },
+                  "target_entity_type": {
+                    "const": "symbolic"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "proposal"
+                  },
+                  "target_entity_type": {
+                    "const": "taint"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "edge_type": {
+                "const": "corroborates"
+              }
+            },
+            "required": [
+              "edge_type"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "static"
+                  },
+                  "target_entity_type": {
+                    "const": "dynamic"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "dynamic"
+                  },
+                  "target_entity_type": {
+                    "const": "static"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "symbolic"
+                  },
+                  "target_entity_type": {
+                    "const": "taint"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "taint"
+                  },
+                  "target_entity_type": {
+                    "const": "symbolic"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "edge_type": {
+                "const": "supersedes"
+              }
+            },
+            "required": [
+              "edge_type"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "proposal"
+                  },
+                  "target_entity_type": {
+                    "const": "proposal"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "source_entity_type": {
+                    "const": "receipt"
+                  },
+                  "target_entity_type": {
+                    "const": "receipt"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

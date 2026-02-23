@@ -110,6 +110,65 @@
               "null"
             ]
           },
+          "entity_type": {
+            "type": "string",
+            "enum": [
+              "static",
+              "dynamic",
+              "symbolic",
+              "taint",
+              "proposal",
+              "receipt"
+            ]
+          },
+          "entity_id": {
+            "type": "string",
+            "pattern": "^ev[sdytpr]_[a-z0-9][a-z0-9._:-]*$"
+          },
+          "entity_schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "edge": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "edge_type",
+              "target_entity_type",
+              "target_entity_id",
+              "target_entity_schema_version"
+            ],
+            "properties": {
+              "edge_type": {
+                "type": "string",
+                "enum": [
+                  "supports",
+                  "derived_from",
+                  "corroborates",
+                  "supersedes"
+                ]
+              },
+              "target_entity_type": {
+                "type": "string",
+                "enum": [
+                  "static",
+                  "dynamic",
+                  "symbolic",
+                  "taint",
+                  "proposal",
+                  "receipt"
+                ]
+              },
+              "target_entity_id": {
+                "type": "string",
+                "pattern": "^ev[sdytpr]_[a-z0-9][a-z0-9._:-]*$"
+              },
+              "target_entity_schema_version": {
+                "type": "integer",
+                "const": 1
+              }
+            }
+          },
           "relevance": {
             "type": [
               "number",
@@ -127,7 +186,366 @@
           "metadata": {
             "type": "object"
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "anyOf": [
+                {
+                  "required": [
+                    "entity_type"
+                  ]
+                },
+                {
+                  "required": [
+                    "entity_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "entity_schema_version"
+                  ]
+                },
+                {
+                  "required": [
+                    "edge"
+                  ]
+                }
+              ]
+            },
+            "then": {
+              "required": [
+                "entity_type",
+                "entity_id",
+                "entity_schema_version"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entity_type": {
+                  "const": "static"
+                }
+              },
+              "required": [
+                "entity_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "entity_id": {
+                  "pattern": "^evs_[a-z0-9][a-z0-9._:-]*$"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entity_type": {
+                  "const": "dynamic"
+                }
+              },
+              "required": [
+                "entity_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "entity_id": {
+                  "pattern": "^evd_[a-z0-9][a-z0-9._:-]*$"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entity_type": {
+                  "const": "symbolic"
+                }
+              },
+              "required": [
+                "entity_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "entity_id": {
+                  "pattern": "^evy_[a-z0-9][a-z0-9._:-]*$"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entity_type": {
+                  "const": "taint"
+                }
+              },
+              "required": [
+                "entity_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "entity_id": {
+                  "pattern": "^evt_[a-z0-9][a-z0-9._:-]*$"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entity_type": {
+                  "const": "proposal"
+                }
+              },
+              "required": [
+                "entity_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "entity_id": {
+                  "pattern": "^evp_[a-z0-9][a-z0-9._:-]*$"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entity_type": {
+                  "const": "receipt"
+                }
+              },
+              "required": [
+                "entity_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "entity_id": {
+                  "pattern": "^evr_[a-z0-9][a-z0-9._:-]*$"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "edge": {
+                  "properties": {
+                    "edge_type": {
+                      "const": "supports"
+                    }
+                  },
+                  "required": [
+                    "edge_type"
+                  ]
+                }
+              },
+              "required": [
+                "edge",
+                "entity_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "edge": {
+                  "properties": {
+                    "target_entity_type": {
+                      "const": "proposal"
+                    }
+                  }
+                },
+                "entity_type": {
+                  "enum": [
+                    "static",
+                    "dynamic",
+                    "symbolic",
+                    "taint",
+                    "receipt"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "edge": {
+                  "properties": {
+                    "edge_type": {
+                      "const": "derived_from"
+                    }
+                  },
+                  "required": [
+                    "edge_type"
+                  ]
+                }
+              },
+              "required": [
+                "edge"
+              ]
+            },
+            "then": {
+              "properties": {
+                "entity_type": {
+                  "const": "proposal"
+                },
+                "edge": {
+                  "properties": {
+                    "target_entity_type": {
+                      "enum": [
+                        "static",
+                        "dynamic",
+                        "symbolic",
+                        "taint"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "edge": {
+                  "properties": {
+                    "edge_type": {
+                      "const": "corroborates"
+                    }
+                  },
+                  "required": [
+                    "edge_type"
+                  ]
+                }
+              },
+              "required": [
+                "edge",
+                "entity_type"
+              ]
+            },
+            "then": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "entity_type": {
+                      "const": "static"
+                    },
+                    "edge": {
+                      "properties": {
+                        "target_entity_type": {
+                          "const": "dynamic"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "entity_type": {
+                      "const": "dynamic"
+                    },
+                    "edge": {
+                      "properties": {
+                        "target_entity_type": {
+                          "const": "static"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "entity_type": {
+                      "const": "symbolic"
+                    },
+                    "edge": {
+                      "properties": {
+                        "target_entity_type": {
+                          "const": "taint"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "entity_type": {
+                      "const": "taint"
+                    },
+                    "edge": {
+                      "properties": {
+                        "target_entity_type": {
+                          "const": "symbolic"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "edge": {
+                  "properties": {
+                    "edge_type": {
+                      "const": "supersedes"
+                    }
+                  },
+                  "required": [
+                    "edge_type"
+                  ]
+                }
+              },
+              "required": [
+                "edge",
+                "entity_type"
+              ]
+            },
+            "then": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "entity_type": {
+                      "const": "proposal"
+                    },
+                    "edge": {
+                      "properties": {
+                        "target_entity_type": {
+                          "const": "proposal"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "entity_type": {
+                      "const": "receipt"
+                    },
+                    "edge": {
+                      "properties": {
+                        "target_entity_type": {
+                          "const": "receipt"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
       }
     },
     "chain": {

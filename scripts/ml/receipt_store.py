@@ -12,6 +12,39 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+ENTITY_ID_PATTERNS: dict[str, re.Pattern[str]] = {
+    "static": re.compile(r"^evs_[a-z0-9][a-z0-9._:-]*$"),
+    "dynamic": re.compile(r"^evd_[a-z0-9][a-z0-9._:-]*$"),
+    "symbolic": re.compile(r"^evy_[a-z0-9][a-z0-9._:-]*$"),
+    "taint": re.compile(r"^evt_[a-z0-9][a-z0-9._:-]*$"),
+    "proposal": re.compile(r"^evp_[a-z0-9][a-z0-9._:-]*$"),
+    "receipt": re.compile(r"^evr_[a-z0-9][a-z0-9._:-]*$"),
+}
+EDGE_CONTRACTS: dict[str, set[tuple[str, str]]] = {
+    "supports": {
+        ("static", "proposal"),
+        ("dynamic", "proposal"),
+        ("symbolic", "proposal"),
+        ("taint", "proposal"),
+        ("receipt", "proposal"),
+    },
+    "derived_from": {
+        ("proposal", "static"),
+        ("proposal", "dynamic"),
+        ("proposal", "symbolic"),
+        ("proposal", "taint"),
+    },
+    "corroborates": {
+        ("static", "dynamic"),
+        ("dynamic", "static"),
+        ("symbolic", "taint"),
+        ("taint", "symbolic"),
+    },
+    "supersedes": {
+        ("proposal", "proposal"),
+        ("receipt", "receipt"),
+    },
+}
 
 
 def _utc_now() -> str:
@@ -27,6 +60,79 @@ def _required_string(value: Any, *, field: str) -> str:
     if not normalized:
         raise ValueError(f"receipt missing required {field}")
     return normalized
+
+
+def _validate_entity_id(entity_type: str, entity_id: str, *, field: str) -> None:
+    pattern = ENTITY_ID_PATTERNS.get(entity_type)
+    if pattern is None:
+        allowed = ", ".join(sorted(ENTITY_ID_PATTERNS.keys()))
+        raise ValueError(f"{field} has unsupported entity_type '{entity_type}' (allowed: {allowed})")
+    if not pattern.match(entity_id):
+        raise ValueError(f"{field} '{entity_id}' is invalid for entity_type '{entity_type}'")
+
+
+def _validate_canonical_evidence_contract(item: Mapping[str, Any], *, index: int) -> None:
+    canonical_present = any(
+        key in item for key in ("entity_type", "entity_id", "entity_schema_version", "edge")
+    )
+    if not canonical_present:
+        return
+
+    entity_type = _required_string(item.get("entity_type"), field=f"evidence[{index}].entity_type")
+    entity_id = _required_string(item.get("entity_id"), field=f"evidence[{index}].entity_id")
+    _validate_entity_id(entity_type, entity_id, field=f"evidence[{index}].entity_id")
+
+    version_raw = item.get("entity_schema_version")
+    try:
+        entity_schema_version = int(version_raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"evidence[{index}].entity_schema_version must be an integer") from None
+    if entity_schema_version != 1:
+        raise ValueError(
+            f"evidence[{index}].entity_schema_version '{version_raw}' is unsupported (expected 1)"
+        )
+
+    edge_raw = item.get("edge")
+    if edge_raw is None:
+        return
+    if not isinstance(edge_raw, Mapping):
+        raise ValueError(f"evidence[{index}].edge must be an object")
+
+    edge_type = _required_string(edge_raw.get("edge_type"), field=f"evidence[{index}].edge.edge_type")
+    target_entity_type = _required_string(
+        edge_raw.get("target_entity_type"),
+        field=f"evidence[{index}].edge.target_entity_type",
+    )
+    target_entity_id = _required_string(
+        edge_raw.get("target_entity_id"),
+        field=f"evidence[{index}].edge.target_entity_id",
+    )
+    _validate_entity_id(target_entity_type, target_entity_id, field=f"evidence[{index}].edge.target_entity_id")
+
+    target_version_raw = edge_raw.get("target_entity_schema_version")
+    try:
+        target_entity_schema_version = int(target_version_raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"evidence[{index}].edge.target_entity_schema_version must be an integer") from None
+    if target_entity_schema_version != 1:
+        raise ValueError(
+            f"evidence[{index}].edge.target_entity_schema_version "
+            f"'{target_version_raw}' is unsupported (expected 1)"
+        )
+
+    allowed_contracts = EDGE_CONTRACTS.get(edge_type)
+    if allowed_contracts is None:
+        allowed_edges = ", ".join(sorted(EDGE_CONTRACTS.keys()))
+        raise ValueError(
+            f"evidence[{index}].edge.edge_type '{edge_type}' is unsupported (allowed: {allowed_edges})"
+        )
+
+    pair = (entity_type, target_entity_type)
+    if pair not in allowed_contracts:
+        raise ValueError(
+            f"evidence[{index}].edge '{edge_type}' does not allow "
+            f"{entity_type} -> {target_entity_type}"
+        )
 
 
 def _validate_receipt_linkage(receipt: Mapping[str, Any]) -> None:
@@ -57,6 +163,7 @@ def _validate_receipt_linkage(receipt: Mapping[str, Any]) -> None:
             raise ValueError(f"receipt evidence[{idx}] source_type requires source_id")
         if source_id and not source_type:
             raise ValueError(f"receipt evidence[{idx}] source_id requires source_type")
+        _validate_canonical_evidence_contract(item, index=idx)
 
 
 def compute_receipt_hash(receipt: Mapping[str, Any]) -> str:
