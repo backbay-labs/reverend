@@ -44,6 +44,44 @@ Behavior:
 - Exit code `0`: signature, content checksums, and provenance chain are all valid.
 - Exit code `1`: one or more checks failed.
 
+## Replay Command (E25-S4)
+
+`replay-bundle` restores mission bundle state and checks deterministic stage replay hashes:
+
+```bash
+python3 scripts/ml/receipt_store.py replay-bundle \
+  --bundle docs/evidence/e25/mission-bundle.tar.gz \
+  --signing-key-env MISSION_BUNDLE_SIGNING_KEY \
+  --runtime-profile auto \
+  --restore-dir docs/evidence/e25/replay-state \
+  --stage-input extract_features=/tmp/extract-features-input.json \
+  --output docs/evidence/e25/mission-bundle-replay.json
+```
+
+Behavior:
+- Exit code `0`: bundle verification succeeded and replay had zero divergences.
+- Exit code `1`: verification failed or replay detected divergence.
+- Divergence payloads include exact `stage_id` plus `input_sha256`/`output_sha256` expected-vs-actual values.
+
+## Replay + Environment Manifests
+
+`pack-bundle` can embed optional manifests:
+
+```bash
+python3 scripts/ml/receipt_store.py pack-bundle \
+  --store /path/to/receipts.json \
+  --artifact /path/to/stage-output.json \
+  --mission-id mission-e25-s4 \
+  --output docs/evidence/e25/mission-bundle.tar.gz \
+  --replay-manifest docs/evidence/e25/replay-manifest.json \
+  --environment-manifest docs/evidence/e25/environment-manifest.json \
+  --signing-key-env MISSION_BUNDLE_SIGNING_KEY
+```
+
+- `replay-manifest.json`: stage-level replay contract (`stage_id`, `input_sha256`, `output.path`, `output.sha256`).
+- `environment-manifest.json`: pinned toolchain versions for `profiles.local` and `profiles.ci` (for example `python`, `java`, `javac`).
+- `replay-bundle --runtime-profile auto` resolves to `ci` when `CI=true`, else `local`.
+
 ## Reproducibility Notes
 
 - Bundle generation is deterministic for identical mission inputs:
