@@ -1,0 +1,107 @@
+{
+  "kind": "firmware_domain_pack_pipeline_manifest",
+  "pack_id": "firmware-pack-v1.0.0",
+  "schema_version": 1,
+  "seed": "E26-S2-2026-02-23",
+  "generated_at_utc": "2026-02-23T00:00:00Z",
+  "toolchain": {
+    "binwalk": "3.1.0",
+    "unblob": "24.12.6",
+    "firmae": "2020-11-05",
+    "emba": "1.6.1",
+    "qemu-system": "8.2.2"
+  },
+  "pipeline": [
+    {
+      "stage_id": "ingest",
+      "description": "Validate supply-chain metadata and acquire deterministic firmware image.",
+      "inputs": [
+        "firmware_path",
+        "sha256",
+        "vendor",
+        "model",
+        "firmware_version"
+      ],
+      "outputs": [
+        "ingest_receipt",
+        "normalized_image_path"
+      ],
+      "repro_command": "sha256sum firmware.bin && cp firmware.bin artifacts/ingest/firmware.bin"
+    },
+    {
+      "stage_id": "extract",
+      "description": "Unpack filesystem and carve embedded binaries with pinned extractors.",
+      "inputs": [
+        "normalized_image_path"
+      ],
+      "outputs": [
+        "filesystem_tree",
+        "extraction_manifest",
+        "file_hash_inventory"
+      ],
+      "repro_command": "binwalk -Me artifacts/ingest/firmware.bin -C artifacts/extract"
+    },
+    {
+      "stage_id": "emulate",
+      "description": "Boot extracted rootfs in emulation and collect service/runtime telemetry.",
+      "inputs": [
+        "filesystem_tree",
+        "architecture_profile"
+      ],
+      "outputs": [
+        "boot_log",
+        "service_inventory",
+        "network_trace",
+        "failure_diagnostics"
+      ],
+      "repro_command": "./run.sh -r mipsel -i artifacts/extract/rootfs"
+    }
+  ],
+  "architecture_profiles": [
+    {
+      "profile_id": "arch.mipsel.linux",
+      "cpu_arch": "mipsel",
+      "endianness": "little",
+      "abi": "o32",
+      "kernel_family": "linux",
+      "emulator": "qemu-system-mipsel",
+      "loader_hint": "ELF 32-bit LSB"
+    },
+    {
+      "profile_id": "arch.armv7hf.linux",
+      "cpu_arch": "armv7",
+      "endianness": "little",
+      "abi": "gnueabihf",
+      "kernel_family": "linux",
+      "emulator": "qemu-system-arm",
+      "loader_hint": "ELF 32-bit LSB, ARM, EABI5"
+    },
+    {
+      "profile_id": "arch.aarch64.linux",
+      "cpu_arch": "aarch64",
+      "endianness": "little",
+      "abi": "lp64",
+      "kernel_family": "linux",
+      "emulator": "qemu-system-aarch64",
+      "loader_hint": "ELF 64-bit LSB, ARM aarch64"
+    }
+  ],
+  "failure_diagnostics_contract": {
+    "required_fields": [
+      "stage_id",
+      "error_code",
+      "error_summary",
+      "stderr_excerpt",
+      "artifact_path",
+      "first_observed_utc",
+      "retryable"
+    ],
+    "common_error_codes": [
+      "UNSUPPORTED_ARCH",
+      "MISSING_NVRAM_STUB",
+      "KERNEL_PANIC",
+      "ROOTFS_MOUNT_FAIL",
+      "SERVICE_START_TIMEOUT"
+    ]
+  }
+}

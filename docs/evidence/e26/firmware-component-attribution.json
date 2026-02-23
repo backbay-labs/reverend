@@ -1,0 +1,91 @@
+{
+  "kind": "firmware_component_attribution_bundle",
+  "pack_id": "firmware-pack-v1.0.0",
+  "schema_version": 1,
+  "bundle_version": "2026.02.23",
+  "firmware_images": [
+    {
+      "firmware_id": "fw-e26-001",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "vendor": "example-vendor",
+      "model": "rv-1000",
+      "firmware_version": "1.0.7",
+      "components": [
+        {
+          "component_id": "cmp.fw-e26-001.001",
+          "name": "busybox",
+          "version": "1.33.1",
+          "type": "binary",
+          "license": "GPL-2.0-only",
+          "path": "/bin/busybox",
+          "purl": "pkg:generic/busybox@1.33.1",
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-001/strings/busybox-version",
+            "local-index://evidence/fw-e26-001/hash/bin-busybox"
+          ]
+        },
+        {
+          "component_id": "cmp.fw-e26-001.002",
+          "name": "openssl",
+          "version": "1.1.1k",
+          "type": "library",
+          "license": "OpenSSL",
+          "path": "/usr/lib/libssl.so.1.1",
+          "purl": "pkg:generic/openssl@1.1.1k",
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-001/elf/libssl-symbols",
+            "local-index://evidence/fw-e26-001/strings/openssl-version"
+          ]
+        },
+        {
+          "component_id": "cmp.fw-e26-001.003",
+          "name": "lighttpd",
+          "version": "1.4.59",
+          "type": "service",
+          "license": "BSD-3-Clause",
+          "path": "/usr/sbin/lighttpd",
+          "purl": "pkg:generic/lighttpd@1.4.59",
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-001/config/lighttpd.conf",
+            "local-index://evidence/fw-e26-001/hash/usr-sbin-lighttpd"
+          ]
+        }
+      ]
+    },
+    {
+      "firmware_id": "fw-e26-002",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "vendor": "example-vendor",
+      "model": "cam-420",
+      "firmware_version": "3.2.1",
+      "components": [
+        {
+          "component_id": "cmp.fw-e26-002.001",
+          "name": "dropbear",
+          "version": "2022.82",
+          "type": "service",
+          "license": "MIT",
+          "path": "/usr/sbin/dropbear",
+          "purl": "pkg:generic/dropbear@2022.82",
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-002/strings/dropbear-version",
+            "local-index://evidence/fw-e26-002/config/dropbear-startup"
+          ]
+        },
+        {
+          "component_id": "cmp.fw-e26-002.002",
+          "name": "mbedtls",
+          "version": "2.28.4",
+          "type": "library",
+          "license": "Apache-2.0",
+          "path": "/usr/lib/libmbedtls.so.14",
+          "purl": "pkg:generic/mbedtls@2.28.4",
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-002/elf/libmbedtls-symbols",
+            "local-index://evidence/fw-e26-002/hash/libmbedtls"
+          ]
+        }
+      ]
+    }
+  ]
+}

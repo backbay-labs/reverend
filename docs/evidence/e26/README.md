@@ -1,8 +1,10 @@
-# E26 Malware Triage Domain Pack Evidence
+# E26 Domain Pack Evidence
 
-This directory tracks the artifact contract for `E26-S1` malware-focused domain pack delivery.
+This directory tracks artifact contracts for Epic E26 domain-pack deliveries.
 
 ## Artifact Contract
+
+### E26-S1 Malware Triage Pack
 
 - Pinned sample set: `pinned-sample-set.json`
   - `kind: "malware_domain_pack_sample_set"`
@@ -16,9 +18,21 @@ This directory tracks the artifact contract for `E26-S1` malware-focused domain 
 - Risk register: `malware-risk-register.md`
 - Operator guidance: `malware-operator-guidance.md`
 
+### E26-S2 Firmware Analysis Pack
+
+- Pipeline manifest: `firmware-pipeline-manifest.json`
+  - `kind: "firmware_domain_pack_pipeline_manifest"`
+  - Reproducible ingest/extract/emulate stages with pinned versions, architecture profiles, and failure diagnostics contracts
+- Component attribution: `firmware-component-attribution.json`
+  - `kind: "firmware_component_attribution_bundle"`
+  - Per-firmware component mapping with package/version/license/provenance fields
+- Hotspot maps: `firmware-hotspot-map.json`
+  - `kind: "firmware_hotspot_map_bundle"`
+  - Network and crypto hotspot triage rows with evidence references and confidence
+
 ## Mission Templates
 
-Mission DSL templates for this domain pack:
+Mission DSL templates for the malware triage domain pack:
 
 - `docs/schemas/examples/mission-dsl/malware-ioc-triage-mission.json`
 - `docs/schemas/examples/mission-dsl/malware-anti-analysis-mission.json`

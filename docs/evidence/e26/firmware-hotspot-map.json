@@ -1,0 +1,112 @@
+{
+  "kind": "firmware_hotspot_map_bundle",
+  "pack_id": "firmware-pack-v1.0.0",
+  "schema_version": 1,
+  "bundle_version": "2026.02.23",
+  "hotspot_maps": [
+    {
+      "firmware_id": "fw-e26-001",
+      "network_hotspots": [
+        {
+          "hotspot_id": "net.fw-e26-001.001",
+          "path": "/usr/sbin/lighttpd",
+          "surface": "http_admin",
+          "protocols": [
+            "http",
+            "https"
+          ],
+          "port_candidates": [
+            80,
+            443
+          ],
+          "confidence": 0.94,
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-001/config/lighttpd.conf",
+            "local-index://evidence/fw-e26-001/strings/cgi-bin"
+          ]
+        },
+        {
+          "hotspot_id": "net.fw-e26-001.002",
+          "path": "/usr/bin/tr069_client",
+          "surface": "wan_management",
+          "protocols": [
+            "http",
+            "soap"
+          ],
+          "port_candidates": [
+            7547
+          ],
+          "confidence": 0.82,
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-001/strings/tr069-endpoint",
+            "local-index://evidence/fw-e26-001/pcap/bootstrap"
+          ]
+        }
+      ],
+      "crypto_hotspots": [
+        {
+          "hotspot_id": "crypto.fw-e26-001.001",
+          "path": "/usr/lib/libssl.so.1.1",
+          "primitive_family": "tls_stack",
+          "symbols": [
+            "SSL_CTX_new",
+            "TLS_method"
+          ],
+          "confidence": 0.96,
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-001/elf/libssl-symbols",
+            "local-index://evidence/fw-e26-001/strings/cipher-suite-list"
+          ]
+        },
+        {
+          "hotspot_id": "crypto.fw-e26-001.002",
+          "path": "/etc/lighttpd/certs/server.key",
+          "primitive_family": "key_material",
+          "symbols": [],
+          "confidence": 0.71,
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-001/filesystem/server-key",
+            "local-index://evidence/fw-e26-001/permissions/server-key-mode"
+          ]
+        }
+      ]
+    },
+    {
+      "firmware_id": "fw-e26-002",
+      "network_hotspots": [
+        {
+          "hotspot_id": "net.fw-e26-002.001",
+          "path": "/usr/sbin/dropbear",
+          "surface": "remote_shell",
+          "protocols": [
+            "ssh"
+          ],
+          "port_candidates": [
+            22
+          ],
+          "confidence": 0.93,
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-002/config/dropbear-startup",
+            "local-index://evidence/fw-e26-002/strings/authorized_keys"
+          ]
+        }
+      ],
+      "crypto_hotspots": [
+        {
+          "hotspot_id": "crypto.fw-e26-002.001",
+          "path": "/usr/lib/libmbedtls.so.14",
+          "primitive_family": "tls_stack",
+          "symbols": [
+            "mbedtls_ssl_setup",
+            "mbedtls_x509_crt_parse"
+          ],
+          "confidence": 0.9,
+          "evidence_refs": [
+            "local-index://evidence/fw-e26-002/elf/libmbedtls-symbols",
+            "local-index://evidence/fw-e26-002/strings/mbedtls-version"
+          ]
+        }
+      ]
+    }
+  ]
+}
