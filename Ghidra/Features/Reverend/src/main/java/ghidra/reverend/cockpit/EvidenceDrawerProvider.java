@@ -16,6 +16,8 @@
 package ghidra.reverend.cockpit;
 
 import java.awt.*;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.List;
 
@@ -61,6 +63,7 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 
 	private static final String KEY_VISIBLE = "evidenceDrawerVisible";
 	private static final String KEY_SELECTED_ID = "selectedEvidenceId";
+	private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ISO_INSTANT;
 
 	private final EvidenceService evidenceService;
 
@@ -262,9 +265,13 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 	private void displayEvidence(List<Evidence> evidenceList, SearchResultEntry hitEntry) {
 		currentEvidence = new ArrayList<>(evidenceList);
 		evidenceCardsPanel.removeAll();
+		EvidencePacket packet = buildEvidencePacket(evidenceList, hitEntry);
+		JPanel packetPanel = createEvidencePacketPanel(packet);
+		evidenceCardsPanel.add(packetPanel);
+		evidenceCardsPanel.add(Box.createRigidArea(new Dimension(0, 10)));
 
 		if (hitEntry != null) {
-			JPanel provenancePanel = createProvenanceOverlayPanel(hitEntry);
+			JPanel provenancePanel = createProvenanceOverlayPanel(packet);
 			if (provenancePanel != null) {
 				evidenceCardsPanel.add(provenancePanel);
 				evidenceCardsPanel.add(Box.createRigidArea(new Dimension(0, 10)));
@@ -288,22 +295,107 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 		evidenceCardsPanel.repaint();
 	}
 
-	private JPanel createProvenanceOverlayPanel(SearchResultEntry entry) {
-		Set<String> staticLinks = new LinkedHashSet<>();
-		Set<String> dynamicLinks = new LinkedHashSet<>();
-		for (String ref : entry.getEvidenceRefs()) {
-			if (ref.contains(":static:")) {
-				staticLinks.add(ref);
-			}
-			else if (ref.contains(":dynamic:")) {
-				dynamicLinks.add(ref);
-			}
+	private JPanel createEvidencePacketPanel(EvidencePacket packet) {
+		JPanel panel = new JPanel();
+		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+		panel.setBorder(BorderFactory.createTitledBorder(
+			BorderFactory.createEtchedBorder(),
+			"Evidence Packet",
+			TitledBorder.LEFT,
+			TitledBorder.TOP));
+		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JTextArea packetTextArea = new JTextArea(renderEvidencePacket(packet));
+		packetTextArea.setEditable(false);
+		packetTextArea.setLineWrap(true);
+		packetTextArea.setWrapStyleWord(true);
+		packetTextArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
+		packetTextArea.setBackground(panel.getBackground());
+		panel.add(packetTextArea);
+		panel.add(Box.createRigidArea(new Dimension(0, 8)));
+		panel.add(createTimelinePanel(packet));
+		panel.add(Box.createRigidArea(new Dimension(0, 8)));
+		panel.add(createLineagePanel(packet));
+		return panel;
+	}
+
+	private JPanel createTimelinePanel(EvidencePacket packet) {
+		JPanel panel = new JPanel();
+		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+		panel.setBorder(BorderFactory.createTitledBorder(
+			BorderFactory.createEtchedBorder(),
+			"Evidence Timeline",
+			TitledBorder.LEFT,
+			TitledBorder.TOP));
+		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		if (packet.timeline().isEmpty()) {
+			panel.add(new JLabel("No timeline events"));
+			return panel;
 		}
-		copyProvenanceLink(entry.getProvenance(), "static_evidence_ref", staticLinks);
-		copyProvenanceLink(entry.getProvenance(), "static_provenance_ref", staticLinks);
-		copyProvenanceLink(entry.getProvenance(), "dynamic_evidence_ref", dynamicLinks);
-		copyProvenanceLink(entry.getProvenance(), "dynamic_provenance_ref", dynamicLinks);
-		if (staticLinks.isEmpty() && dynamicLinks.isEmpty()) {
+
+		for (TimelineItem item : packet.timeline()) {
+			JPanel row = new JPanel(new BorderLayout(6, 0));
+			row.setAlignmentX(Component.LEFT_ALIGNMENT);
+			String when = item.createdAt() != null ? TIMESTAMP_FORMATTER.format(item.createdAt()) : "unknown";
+			JLabel label = new JLabel(
+				"<html>" + when + " | " + item.evidenceId() + " | " + item.source() + "</html>");
+			row.add(label, BorderLayout.CENTER);
+			if (!item.addresses().isEmpty()) {
+				Address address = item.addresses().get(0);
+				JButton jumpButton = new JButton(address.toString());
+				jumpButton.setMargin(new Insets(1, 4, 1, 4));
+				jumpButton.setFont(jumpButton.getFont().deriveFont(10f));
+				jumpButton.setToolTipText("Jump to " + address);
+				jumpButton.addActionListener(e -> goToAddress(address));
+				row.add(jumpButton, BorderLayout.EAST);
+			}
+			panel.add(row);
+			panel.add(Box.createRigidArea(new Dimension(0, 3)));
+		}
+		return panel;
+	}
+
+	private JPanel createLineagePanel(EvidencePacket packet) {
+		JPanel panel = new JPanel();
+		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+		panel.setBorder(BorderFactory.createTitledBorder(
+			BorderFactory.createEtchedBorder(),
+			"Lineage Drilldown",
+			TitledBorder.LEFT,
+			TitledBorder.TOP));
+		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		if (packet.lineage().isEmpty()) {
+			panel.add(new JLabel("No lineage data"));
+			return panel;
+		}
+
+		for (LineageItem item : packet.lineage()) {
+			JPanel row = new JPanel(new BorderLayout(6, 0));
+			row.setAlignmentX(Component.LEFT_ALIGNMENT);
+			String predecessorText = item.predecessorIds().isEmpty()
+					? "root"
+					: String.join(", ", item.predecessorIds());
+			row.add(new JLabel(item.evidenceId() + " <- " + predecessorText), BorderLayout.CENTER);
+			JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
+			for (String predecessorId : item.predecessorIds()) {
+				JButton predecessorButton = new JButton(predecessorId);
+				predecessorButton.setMargin(new Insets(1, 4, 1, 4));
+				predecessorButton.setFont(predecessorButton.getFont().deriveFont(10f));
+				predecessorButton.setToolTipText("Drill down into " + predecessorId);
+				predecessorButton.addActionListener(e -> showEvidence(predecessorId));
+				actionPanel.add(predecessorButton);
+			}
+			row.add(actionPanel, BorderLayout.EAST);
+			panel.add(row);
+			panel.add(Box.createRigidArea(new Dimension(0, 3)));
+		}
+		return panel;
+	}
+
+	private JPanel createProvenanceOverlayPanel(EvidencePacket packet) {
+		if (packet.staticLinks().isEmpty() && packet.dynamicLinks().isEmpty()) {
 			return null;
 		}
 
@@ -315,31 +407,34 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 			TitledBorder.LEFT,
 			TitledBorder.TOP));
 		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		panel.add(createProvenanceRow("Static", staticLinks));
+		panel.add(createProvenanceRow("Static", packet.staticLinks()));
 		panel.add(Box.createRigidArea(new Dimension(0, 4)));
-		panel.add(createProvenanceRow("Dynamic", dynamicLinks));
+		panel.add(createProvenanceRow("Dynamic", packet.dynamicLinks()));
 		return panel;
 	}
 
-	private void copyProvenanceLink(Map<String, String> provenance, String key, Set<String> links) {
-		if (provenance == null || links == null) {
-			return;
-		}
-		String value = provenance.get(key);
-		if (value != null && !value.isBlank()) {
-			links.add(value);
-		}
-	}
-
-	private JPanel createProvenanceRow(String label, Set<String> links) {
+	private JPanel createProvenanceRow(String label, List<String> links) {
 		JPanel row = new JPanel(new BorderLayout(5, 0));
 		JLabel titleLabel = new JLabel(label + ":");
 		titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD));
 		row.add(titleLabel, BorderLayout.WEST);
-		String linkText = links.isEmpty() ? "none" : String.join(" | ", links);
-		JLabel linksLabel = new JLabel("<html>" + truncate(linkText, 180) + "</html>");
-		linksLabel.setFont(linksLabel.getFont().deriveFont(11f));
-		row.add(linksLabel, BorderLayout.CENTER);
+		if (links.isEmpty()) {
+			JLabel noneLabel = new JLabel("none");
+			noneLabel.setFont(noneLabel.getFont().deriveFont(11f));
+			row.add(noneLabel, BorderLayout.CENTER);
+		}
+		else {
+			JPanel linksPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+			for (String link : links) {
+				JButton linkButton = new JButton(truncate(link, 44));
+				linkButton.setMargin(new Insets(1, 4, 1, 4));
+				linkButton.setFont(linkButton.getFont().deriveFont(10f));
+				linkButton.setToolTipText("Jump via " + link);
+				linkButton.addActionListener(e -> jumpToSource(link));
+				linksPanel.add(linkButton);
+			}
+			row.add(linksPanel, BorderLayout.CENTER);
+		}
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return row;
 	}
@@ -428,6 +523,56 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 		}
 	}
 
+	private void jumpToSource(String sourceReference) {
+		Optional<Address> resolvedAddress = resolveAddressFromReference(sourceReference);
+		if (resolvedAddress.isPresent()) {
+			goToAddress(resolvedAddress.get());
+			return;
+		}
+		setOperationState(CockpitState.OperationStatus.ERROR,
+			"Unable to resolve source reference: " + sourceReference);
+		statusLabel.setText("Unable to resolve source reference");
+	}
+
+	private Optional<Address> resolveAddressFromReference(String reference) {
+		if (currentProgram == null || reference == null || reference.isBlank()) {
+			return Optional.empty();
+		}
+		for (String token : reference.split(":")) {
+			Optional<String> candidateAddress = extractHexAddressToken(token);
+			if (candidateAddress.isEmpty()) {
+				continue;
+			}
+			try {
+				Address address = currentProgram.getAddressFactory().getAddress(candidateAddress.get());
+				if (address != null) {
+					return Optional.of(address);
+				}
+			}
+			catch (RuntimeException ignored) {
+				// Continue trying other tokens.
+			}
+		}
+		return Optional.empty();
+	}
+
+	static Optional<String> extractHexAddressToken(String token) {
+		if (token == null) {
+			return Optional.empty();
+		}
+		String trimmed = token.trim();
+		if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
+			String suffix = trimmed.substring(2);
+			if (suffix.matches("[0-9a-fA-F]{4,16}")) {
+				return Optional.of("0x" + suffix.toLowerCase(Locale.ROOT));
+			}
+		}
+		if (trimmed.matches("[0-9a-fA-F]{4,16}")) {
+			return Optional.of("0x" + trimmed.toLowerCase(Locale.ROOT));
+		}
+		return Optional.empty();
+	}
+
 	private void clearEvidence() {
 		currentEvidenceId = null;
 		currentEvidence.clear();
@@ -468,6 +613,122 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 			return text;
 		}
 		return text.substring(0, maxLength - 3) + "...";
+	}
+
+	EvidencePacket buildEvidencePacket(List<Evidence> evidenceList, SearchResultEntry hitEntry) {
+		List<Evidence> stableEvidence = evidenceList != null
+				? new ArrayList<>(evidenceList)
+				: new ArrayList<>();
+		stableEvidence.sort(Comparator
+			.comparing(Evidence::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+			.thenComparing(Evidence::getId));
+
+		List<TimelineItem> timeline = new ArrayList<>();
+		List<LineageItem> lineage = new ArrayList<>();
+		for (Evidence evidence : stableEvidence) {
+			timeline.add(new TimelineItem(
+				evidence.getId(),
+				evidence.getCreatedAt(),
+				evidence.getSource(),
+				List.copyOf(evidence.getAddresses())));
+			lineage.add(new LineageItem(
+				evidence.getId(),
+				List.copyOf(evidence.getPredecessorIds())));
+		}
+
+		Set<String> staticLinks = new LinkedHashSet<>();
+		Set<String> dynamicLinks = new LinkedHashSet<>();
+		if (hitEntry != null) {
+			for (String ref : hitEntry.getEvidenceRefs()) {
+				if (ref.contains(":static:")) {
+					staticLinks.add(ref);
+				}
+				else if (ref.contains(":dynamic:")) {
+					dynamicLinks.add(ref);
+				}
+			}
+			copyProvenanceLink(hitEntry.getProvenance(), "static_evidence_ref", staticLinks);
+			copyProvenanceLink(hitEntry.getProvenance(), "static_provenance_ref", staticLinks);
+			copyProvenanceLink(hitEntry.getProvenance(), "dynamic_evidence_ref", dynamicLinks);
+			copyProvenanceLink(hitEntry.getProvenance(), "dynamic_provenance_ref", dynamicLinks);
+		}
+
+		return new EvidencePacket(
+			List.copyOf(timeline),
+			List.copyOf(lineage),
+			List.copyOf(staticLinks),
+			List.copyOf(dynamicLinks));
+	}
+
+	private void copyProvenanceLink(Map<String, String> provenance, String key, Set<String> links) {
+		if (provenance == null || links == null) {
+			return;
+		}
+		String value = provenance.get(key);
+		if (value != null && !value.isBlank()) {
+			links.add(value);
+		}
+	}
+
+	static String renderEvidencePacket(EvidencePacket packet) {
+		StringBuilder builder = new StringBuilder();
+		builder.append("Evidence Packet\n");
+		builder.append("Timeline\n");
+		if (packet.timeline().isEmpty()) {
+			builder.append("- none\n");
+		}
+		else {
+			for (TimelineItem item : packet.timeline()) {
+				String timestamp = item.createdAt() != null
+						? TIMESTAMP_FORMATTER.format(item.createdAt())
+						: "unknown";
+				String addresses = item.addresses().isEmpty()
+						? "-"
+						: item.addresses().stream().map(Address::toString).reduce((a, b) -> a + "," + b).orElse("-");
+				builder.append("- ")
+					.append(timestamp)
+					.append(" | ")
+					.append(item.evidenceId())
+					.append(" | ")
+					.append(item.source())
+					.append(" | ")
+					.append(addresses)
+					.append('\n');
+			}
+		}
+		builder.append("Lineage\n");
+		if (packet.lineage().isEmpty()) {
+			builder.append("- none\n");
+		}
+		else {
+			for (LineageItem item : packet.lineage()) {
+				String predecessors = item.predecessorIds().isEmpty()
+						? "root"
+						: String.join(",", item.predecessorIds());
+				builder.append("- ")
+					.append(item.evidenceId())
+					.append(" <- ")
+					.append(predecessors)
+					.append('\n');
+			}
+		}
+		builder.append("Sources\n");
+		builder.append("- static: ")
+			.append(packet.staticLinks().isEmpty() ? "none" : String.join(",", packet.staticLinks()))
+			.append('\n');
+		builder.append("- dynamic: ")
+			.append(packet.dynamicLinks().isEmpty() ? "none" : String.join(",", packet.dynamicLinks()));
+		return builder.toString();
+	}
+
+	record TimelineItem(String evidenceId, Instant createdAt, String source, List<Address> addresses) {
+	}
+
+	record LineageItem(String evidenceId, List<String> predecessorIds) {
+	}
+
+	record EvidencePacket(List<TimelineItem> timeline, List<LineageItem> lineage,
+			List<String> staticLinks, List<String> dynamicLinks) {
 	}
 
 	/**
