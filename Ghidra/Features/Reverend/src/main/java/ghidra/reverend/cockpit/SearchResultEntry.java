@@ -15,6 +15,11 @@
  */
 package ghidra.reverend.cockpit;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -33,6 +38,8 @@ public class SearchResultEntry {
 	private final double score;
 	private final String summary;
 	private final String evidenceId;
+	private final List<String> evidenceRefs;
+	private final Map<String, String> provenance;
 	private final String functionName;
 	private final long addressOffset;
 
@@ -48,6 +55,8 @@ public class SearchResultEntry {
 		this.score = result.getScore();
 		this.summary = result.getSummary();
 		this.evidenceId = result.getEvidenceId().orElse(null);
+		this.evidenceRefs = Collections.unmodifiableList(new ArrayList<>(result.getEvidenceRefs()));
+		this.provenance = Collections.unmodifiableMap(new LinkedHashMap<>(result.getProvenance()));
 		this.functionName = functionName != null ? functionName : "<unknown>";
 		this.addressOffset = address != null ? address.getOffset() : 0;
 	}
@@ -67,6 +76,10 @@ public class SearchResultEntry {
 		this.score = score;
 		this.summary = summary != null ? summary : "";
 		this.evidenceId = evidenceId;
+		this.evidenceRefs = evidenceId != null
+				? Collections.unmodifiableList(List.of(evidenceId))
+				: Collections.emptyList();
+		this.provenance = Collections.emptyMap();
 		this.functionName = functionName != null ? functionName : "<unknown>";
 		this.addressOffset = address != null ? address.getOffset() : 0;
 	}
@@ -123,6 +136,24 @@ public class SearchResultEntry {
 	 */
 	public Optional<String> getEvidenceId() {
 		return Optional.ofNullable(evidenceId);
+	}
+
+	/**
+	 * Returns deterministic evidence references for this result.
+	 *
+	 * @return immutable evidence reference list
+	 */
+	public List<String> getEvidenceRefs() {
+		return evidenceRefs;
+	}
+
+	/**
+	 * Returns provenance metadata associated with this result.
+	 *
+	 * @return immutable provenance map
+	 */
+	public Map<String, String> getProvenance() {
+		return provenance;
 	}
 
 	/**

@@ -16,6 +16,7 @@
 package ghidra.reverend.api.v1;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import ghidra.program.model.address.Address;
@@ -131,6 +132,30 @@ public interface QueryService {
 		 * @return optional evidence ID
 		 */
 		Optional<String> getEvidenceId();
+
+		/**
+		 * Returns stable evidence references associated with this result.
+		 *
+		 * <p>Implementations should return deterministic references so result payloads
+		 * remain stable across repeated queries.
+		 *
+		 * @return immutable evidence reference list
+		 */
+		default List<String> getEvidenceRefs() {
+			return getEvidenceId().map(List::of).orElseGet(List::of);
+		}
+
+		/**
+		 * Returns provenance metadata for this result.
+		 *
+		 * <p>The map keys are implementation-defined but should be stable for
+		 * deterministic replay and cockpit rendering.
+		 *
+		 * @return immutable provenance metadata map
+		 */
+		default Map<String, String> getProvenance() {
+			return Map.of();
+		}
 	}
 
 	/**

@@ -177,6 +177,34 @@ class LocalEmbeddingPipelineTest(unittest.TestCase):
         self.assertTrue(comparison["improves_against_baseline"])
         self.assertGreater(comparison["ordering_improved_queries"], 0)
 
+    def test_pinned_fixture_exposes_ranking_parity_and_delta_metrics(self) -> None:
+        corpus_path = MODULE_PATH.parent / "fixtures" / "toy_similarity_corpus_slice.json"
+        queries_path = MODULE_PATH.parent / "fixtures" / "toy_similarity_queries_slice.json"
+
+        pipeline = LocalEmbeddingPipeline(vector_dimension=128)
+        corpus_records = MODULE.load_corpus(corpus_path)
+        index = pipeline.build_index(corpus_records)
+        adapter = BaselineSimilarityAdapter(pipeline, index)
+
+        baseline = evaluate_queries(adapter, queries_path, top_k=3)
+        reranked = evaluate_queries(
+            adapter,
+            queries_path,
+            top_k=3,
+            index=index,
+            reranker=EvidenceWeightedReranker(),
+        )
+
+        comparison = MODULE.compare_eval_ordering(baseline, reranked, top_k=3)
+        self.assertEqual(comparison["queries_compared"], 3)
+        self.assertEqual(comparison["ordering_improved_queries"], 1)
+        self.assertEqual(comparison["ordering_worsened_queries"], 0)
+        self.assertEqual(comparison["ordering_unchanged_queries"], 2)
+        self.assertEqual(comparison["mrr_delta"], 0.222222)
+        self.assertEqual(comparison["recall@1_delta"], 0.333333)
+        self.assertEqual(comparison["recall_metric_key"], "recall@3")
+        self.assertEqual(comparison["recall_at_top_k_delta"], 0.0)
+
     def test_reranker_prefers_complete_receipt_provenance_on_tied_baseline(self) -> None:
         records = [
             FunctionRecord.from_json(

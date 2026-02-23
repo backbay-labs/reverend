@@ -17,6 +17,8 @@ package ghidra.reverend.cockpit;
 
 import static org.junit.Assert.*;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.Test;
@@ -44,6 +46,8 @@ public class SearchResultEntryTest {
 		assertEquals("main", entry.getFunctionName());
 		assertTrue(entry.hasEvidence());
 		assertEquals("ev-123", entry.getEvidenceId().orElse(null));
+		assertEquals(List.of("ev-ref-1", "ev-ref-2"), entry.getEvidenceRefs());
+		assertEquals("ml-index", entry.getProvenance().get("source"));
 	}
 
 	@Test
@@ -71,6 +75,8 @@ public class SearchResultEntryTest {
 		assertEquals("Exact match", entry.getSummary());
 		assertEquals("evidence-abc", entry.getEvidenceId().orElse(null));
 		assertEquals("encryptData", entry.getFunctionName());
+		assertEquals(List.of("evidence-abc"), entry.getEvidenceRefs());
+		assertTrue(entry.getProvenance().isEmpty());
 	}
 
 	@Test
@@ -184,6 +190,10 @@ public class SearchResultEntryTest {
 		private final double score;
 		private final String summary;
 		private final String evidenceId;
+		private final List<String> evidenceRefs = List.of("ev-ref-1", "ev-ref-2");
+		private final Map<String, String> provenance = Map.of(
+			"source", "ml-index",
+			"workflow", "embedding+rerank-v1");
 
 		TestQueryResult(Address address, double score, String summary, String evidenceId) {
 			this.address = address;
@@ -210,6 +220,16 @@ public class SearchResultEntryTest {
 		@Override
 		public Optional<String> getEvidenceId() {
 			return Optional.ofNullable(evidenceId);
+		}
+
+		@Override
+		public List<String> getEvidenceRefs() {
+			return evidenceRefs;
+		}
+
+		@Override
+		public Map<String, String> getProvenance() {
+			return provenance;
 		}
 	}
 }

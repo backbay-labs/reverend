@@ -144,6 +144,35 @@ public class LiveQueryServiceImplTest extends AbstractGhidraHeadlessIntegrationT
 	}
 
 	@Test
+	public void testFindSimilarFunctionsDeterministicFallbackMode() throws QueryException {
+		Function func1 = program.getFunctionManager().getFunctionAt(
+			program.getAddressFactory().getAddress("0x01000000"));
+		assertNotNull("Test function should exist", func1);
+
+		System.setProperty("ghidra.reverend.semantic.embedding.backend", "none");
+		try {
+			List<QueryResult> first = queryService.findSimilarFunctions(
+				program, func1, 10, TaskMonitor.DUMMY);
+			List<QueryResult> second = queryService.findSimilarFunctions(
+				program, func1, 10, TaskMonitor.DUMMY);
+			assertEquals(first.size(), second.size());
+			for (int i = 0; i < first.size(); i++) {
+				QueryResult firstResult = first.get(i);
+				QueryResult secondResult = second.get(i);
+				assertEquals(firstResult.getAddress(), secondResult.getAddress());
+				assertEquals(firstResult.getScore(), secondResult.getScore(), 0.000001d);
+				assertEquals("deterministic_index_fallback",
+					firstResult.getProvenance().get("ranking_mode"));
+				assertEquals("true",
+					firstResult.getProvenance().get("embedding_fallback_applied"));
+			}
+		}
+		finally {
+			System.clearProperty("ghidra.reverend.semantic.embedding.backend");
+		}
+	}
+
+	@Test
 	public void testSemanticSearch() throws QueryException {
 		List<QueryResult> results = queryService.semanticSearch(
 			program, "test", null, 10, TaskMonitor.DUMMY);
@@ -151,6 +180,11 @@ public class LiveQueryServiceImplTest extends AbstractGhidraHeadlessIntegrationT
 		assertNotNull(results);
 		// Should find functions with "test" in their name
 		assertTrue(results.size() >= 1);
+		QueryResult first = results.get(0);
+		assertTrue(first.getEvidenceId().isPresent());
+		assertFalse(first.getEvidenceRefs().isEmpty());
+		assertFalse(first.getProvenance().isEmpty());
+		assertEquals("semantic", first.getProvenance().get("operation"));
 
 		// Verify telemetry
 		QueryTelemetry.LatencyStats stats = telemetry.getLatencyStats("semanticSearch");
