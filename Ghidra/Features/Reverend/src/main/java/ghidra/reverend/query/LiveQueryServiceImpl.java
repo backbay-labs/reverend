@@ -19,7 +19,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.framework.model.DomainObjectChangedEvent;
 import ghidra.framework.model.DomainObjectListener;
@@ -186,38 +185,50 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			}
 
 			telemetry.recordCacheMiss(operationId);
-
-			// Decompile the reference function to extract features
-			DecompileResults decompResults = decompilerProvider.decompile(program, function, monitor);
-			if (decompResults == null || !decompResults.decompileCompleted()) {
-				throw new QueryException("Failed to decompile function: " + function.getName());
-			}
-
-			if (monitor != null) {
-				monitor.setProgress(30);
-			}
-
-			// Find similar functions by comparing decompiler features
-			List<QueryResult> results = new ArrayList<>();
+			List<Function> candidates = new ArrayList<>();
 			FunctionIterator functions = program.getFunctionManager().getFunctions(true);
-			int totalFunctions = program.getFunctionManager().getFunctionCount();
+			while (functions.hasNext()) {
+				Function candidate = functions.next();
+				if (!candidate.equals(function)) {
+					candidates.add(candidate);
+				}
+			}
+			List<Function> indexedFunctions = new ArrayList<>(candidates.size() + 1);
+			indexedFunctions.add(function);
+			indexedFunctions.addAll(candidates);
+			QueryCacheManager.FunctionFeatureBatch featureBatch =
+				cacheManager.ensureFunctionFeatures(program, indexedFunctions);
+			QueryCacheManager.IndexedFunctionFeatures referenceFeatures =
+				featureBatch.get(function.getEntryPoint());
+			if (referenceFeatures == null) {
+				throw new QueryException("Failed to index function features: " + function.getName());
+			}
+			if (monitor != null) {
+				monitor.setProgress(20);
+			}
+
+			// Find similar functions by comparing indexed function features.
+			List<QueryResult> results = new ArrayList<>();
+			int totalFunctions = candidates.size();
 			int processed = 0;
 
-			for (Function candidate : functions) {
+			for (Function candidate : candidates) {
 				if (monitor != null && monitor.isCancelled()) {
 					break;
 				}
 
-				if (candidate.equals(function)) {
+				QueryCacheManager.IndexedFunctionFeatures candidateFeatures =
+					featureBatch.get(candidate.getEntryPoint());
+				if (candidateFeatures == null) {
 					continue;
 				}
 
-				double similarity = computeFunctionSimilarity(program, function, candidate, monitor);
+				double similarity = computeFunctionSimilarity(referenceFeatures, candidateFeatures);
 				if (similarity > 0.3) { // Threshold for relevance
 					results.add(new QueryResultImpl(
 						candidate.getEntryPoint(),
 						similarity,
-						buildFunctionSummary(candidate, similarity),
+						buildFunctionSummary(candidateFeatures, similarity),
 						null
 					));
 				}
@@ -235,6 +246,14 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			if (results.size() > maxResults) {
 				results = new ArrayList<>(results.subList(0, maxResults));
 			}
+
+			Msg.info(this, String.format(
+				"similarity-index-profile op=%s candidates=%d indexedFresh=%d indexedReused=%d decompileCandidates=%d",
+				operationId,
+				totalFunctions,
+				featureBatch.getIndexedCount(),
+				featureBatch.getReusedCount(),
+				0));
 
 			// Cache the results
 			cacheManager.cacheSimilarFunctions(program, cacheKey, results);
@@ -311,11 +330,27 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					"constraintCount", symbolicConstraints.getConstraintCount()
 				));
 
+			QueryCacheManager.FunctionFeatureBatch featureBatch =
+				cacheManager.ensureFunctionFeatures(program, symbolicCandidates);
+			Map<Function, QueryCacheManager.IndexedFunctionFeatures> indexedFeatures =
+				new IdentityHashMap<>();
+			for (Function candidate : symbolicCandidates) {
+				QueryCacheManager.IndexedFunctionFeatures feature =
+					featureBatch.get(candidate.getEntryPoint());
+				if (feature != null) {
+					indexedFeatures.put(candidate, feature);
+				}
+			}
+
 			// Stage 2: lexical filtering
 			Map<Function, Double> lexicalScores = new HashMap<>();
 			List<Function> lexicalCandidates = new ArrayList<>();
 			for (Function candidate : symbolicCandidates) {
-				double lexicalScore = computeLexicalScore(candidate, queryTerms);
+				QueryCacheManager.IndexedFunctionFeatures feature = indexedFeatures.get(candidate);
+				if (feature == null) {
+					continue;
+				}
+				double lexicalScore = computeLexicalScore(feature, queryTerms);
 				lexicalScores.put(candidate, lexicalScore);
 				if (!LEXICAL_STAGE_ENABLED || lexicalScore >= LEXICAL_MIN_SCORE) {
 					lexicalCandidates.add(candidate);
@@ -331,21 +366,40 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					"minScore", LEXICAL_MIN_SCORE
 				));
 
-			// Stage 3: embedding candidate scoring with fallback when backend is unavailable
+			// Stage 3: index-backed primary ranking
 			boolean embeddingBackendAvailable = EMBEDDING_STAGE_ENABLED && isEmbeddingBackendAvailable();
 			QueryDecompileBudget queryBudget = decompileBudgetManager.startQuery();
 			List<FunctionScore> scoredCandidates = new ArrayList<>();
 			int embeddingWindow = Math.min(
 				Math.max(maxResults, maxResults * EMBEDDING_STAGE_MULTIPLIER),
 				lexicalCandidates.size());
+			for (Function candidate : lexicalCandidates) {
+				QueryCacheManager.IndexedFunctionFeatures feature = indexedFeatures.get(candidate);
+				if (feature == null) {
+					continue;
+				}
+				double lexicalScore = lexicalScores.getOrDefault(candidate, 0.0);
+				double indexedScore = computeIndexedSemanticScore(feature, queryTerms, lexicalScore);
+				scoredCandidates.add(new FunctionScore(candidate, indexedScore));
+			}
+			scoredCandidates.sort((a, b) -> {
+				int scoreCmp = Double.compare(b.score, a.score);
+				if (scoreCmp != 0) {
+					return scoreCmp;
+				}
+				return a.function.getEntryPoint().toString().compareTo(b.function.getEntryPoint().toString());
+			});
+			if (scoredCandidates.size() > embeddingWindow) {
+				scoredCandidates = new ArrayList<>(scoredCandidates.subList(0, embeddingWindow));
+			}
+			int refineCandidateCount = scoredCandidates.size();
 			boolean queryBudgetExhausted = false;
 			boolean sessionBudgetExhausted = false;
-			for (Function candidate : lexicalCandidates) {
-				double lexicalScore = lexicalScores.getOrDefault(candidate, 0.0);
-				double finalScore;
-				if (embeddingBackendAvailable) {
+			if (embeddingBackendAvailable) {
+				List<FunctionScore> refinedCandidates = new ArrayList<>();
+				for (FunctionScore candidateScore : scoredCandidates) {
 					EmbeddingScoreResult embeddingResult = computeEmbeddingScoreWithBudget(
-						program, candidate, queryTerms, monitor, queryBudget);
+						program, candidateScore.function, queryTerms, monitor, queryBudget);
 					if (embeddingResult.exhaustedScope == BudgetExhaustedScope.QUERY) {
 						if (!queryBudgetExhausted) {
 							telemetry.recordDecompileBudgetExhausted(operationId, "query");
@@ -358,44 +412,33 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 						}
 						sessionBudgetExhausted = true;
 					}
+					double finalScore = candidateScore.score;
 					if (embeddingResult.usedEmbeddingScore) {
-						finalScore = (0.65 * embeddingResult.score) + (0.35 * lexicalScore);
+						finalScore = (0.55 * candidateScore.score) + (0.45 * embeddingResult.score);
 						if (finalScore < EMBEDDING_MIN_SCORE) {
 							continue;
 						}
 					}
-					else {
-						// Fallback to lexical score when embedding decompilation budget is exhausted.
-						finalScore = lexicalScore;
-					}
+					refinedCandidates.add(new FunctionScore(candidateScore.function, finalScore));
 				}
-				else {
-					finalScore = lexicalScore;
-				}
-				scoredCandidates.add(new FunctionScore(candidate, finalScore));
-			}
-			scoredCandidates.sort((a, b) -> {
-				int scoreCmp = Double.compare(b.score, a.score);
-				if (scoreCmp != 0) {
-					return scoreCmp;
-				}
-				return a.function.getEntryPoint().toString().compareTo(b.function.getEntryPoint().toString());
-			});
-			if (scoredCandidates.size() > embeddingWindow) {
-				scoredCandidates = new ArrayList<>(scoredCandidates.subList(0, embeddingWindow));
+				scoredCandidates = refinedCandidates;
 			}
 			logCandidateStageMetrics(operationId, normalizedQuery, "embedding",
 				lexicalCandidates.size(), scoredCandidates.size(),
-				Map.of(
-					"enabled", EMBEDDING_STAGE_ENABLED,
-					"backendAvailable", embeddingBackendAvailable,
-					"fallbackApplied", !embeddingBackendAvailable,
-					"queryBudgetExhausted", queryBudgetExhausted,
-					"sessionBudgetExhausted", sessionBudgetExhausted,
-					"queryBudgetRemaining", queryBudget.remaining(),
-					"sessionBudgetRemaining", decompileBudgetManager.remainingSessionBudget(),
-					"minScore", EMBEDDING_MIN_SCORE,
-					"candidateMultiplier", EMBEDDING_STAGE_MULTIPLIER
+				Map.ofEntries(
+					Map.entry("enabled", EMBEDDING_STAGE_ENABLED),
+					Map.entry("backendAvailable", embeddingBackendAvailable),
+					Map.entry("fallbackApplied", !embeddingBackendAvailable),
+					Map.entry("primaryRanker", "indexed-features"),
+					Map.entry("indexedFresh", featureBatch.getIndexedCount()),
+					Map.entry("indexedReused", featureBatch.getReusedCount()),
+					Map.entry("refineCandidateCount", refineCandidateCount),
+					Map.entry("queryBudgetExhausted", queryBudgetExhausted),
+					Map.entry("sessionBudgetExhausted", sessionBudgetExhausted),
+					Map.entry("queryBudgetRemaining", queryBudget.remaining()),
+					Map.entry("sessionBudgetRemaining", decompileBudgetManager.remainingSessionBudget()),
+					Map.entry("minScore", EMBEDDING_MIN_SCORE),
+					Map.entry("candidateMultiplier", EMBEDDING_STAGE_MULTIPLIER)
 				));
 			if (sessionBudgetExhausted || queryBudgetExhausted) {
 				String reason = sessionBudgetExhausted ? "session" : "query";
@@ -644,8 +687,8 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		return CacheKeyGenerator.forPatternSearch(pattern, scope);
 	}
 
-	private double computeFunctionSimilarity(Program program, Function reference,
-			Function candidate, TaskMonitor monitor) {
+	private double computeFunctionSimilarity(QueryCacheManager.IndexedFunctionFeatures reference,
+			QueryCacheManager.IndexedFunctionFeatures candidate) {
 		// Compare basic function characteristics
 		double score = 0.0;
 
@@ -659,14 +702,14 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		}
 
 		// Compare body size
-		long refSize = reference.getBody().getNumAddresses();
-		long candSize = candidate.getBody().getNumAddresses();
+		long refSize = Math.max(1, reference.getBodySize());
+		long candSize = Math.max(1, candidate.getBodySize());
 		double sizeSimilarity = 1.0 - (Math.abs(refSize - candSize) / (double) Math.max(refSize, candSize));
 		score += 0.3 * Math.max(0, sizeSimilarity);
 
 		// Compare call counts
-		int refCalls = getCallCount(reference);
-		int candCalls = getCallCount(candidate);
+		int refCalls = reference.getCallCount();
+		int candCalls = candidate.getCallCount();
 		if (refCalls == candCalls) {
 			score += 0.2;
 		} else if (Math.abs(refCalls - candCalls) <= 2) {
@@ -674,89 +717,26 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		}
 
 		// Compare return type
-		if (reference.getReturnType().equals(candidate.getReturnType())) {
+		if (Objects.equals(reference.getNormalizedReturnType(), candidate.getNormalizedReturnType())) {
 			score += 0.1;
 		}
 
 		// Compare calling convention
-		if (reference.getCallingConventionName().equals(candidate.getCallingConventionName())) {
+		if (Objects.equals(reference.getNormalizedCallingConvention(),
+			candidate.getNormalizedCallingConvention())) {
 			score += 0.1;
 		}
 
-		// TODO: Integrate with embedding-based similarity when available
-
 		return Math.min(1.0, score);
 	}
 
-	private int getCallCount(Function function) {
-		int count = 0;
-		InstructionIterator iter = function.getProgram().getListing()
-			.getInstructions(function.getBody(), true);
-		while (iter.hasNext()) {
-			Instruction instr = iter.next();
-			if (instr.getFlowType().isCall()) {
-				count++;
-			}
-		}
-		return count;
-	}
-
-	private String buildFunctionSummary(Function function, double similarity) {
+	private String buildFunctionSummary(QueryCacheManager.IndexedFunctionFeatures function,
+			double similarity) {
 		return String.format("%s (%.1f%% similar) - %d params, %d bytes",
-			function.getName(),
+			function.getFunctionName(),
 			similarity * 100,
 			function.getParameterCount(),
-			function.getBody().getNumAddresses());
-	}
-
-	private double computeSemanticScore(Program program, Function function,
-			String[] queryTerms, TaskMonitor monitor) {
-		double score = 0.0;
-		int matches = 0;
-
-		// Check function name
-		String funcName = function.getName().toLowerCase();
-		for (String term : queryTerms) {
-			if (funcName.contains(term)) {
-				matches++;
-				score += 0.3;
-			}
-		}
-
-		// Check comments
-		String comment = function.getComment();
-		if (comment != null) {
-			String lowerComment = comment.toLowerCase();
-			for (String term : queryTerms) {
-				if (lowerComment.contains(term)) {
-					matches++;
-					score += 0.2;
-				}
-			}
-		}
-
-		// Check decompiled output for more context
-		try {
-			DecompileResults results = decompilerProvider.decompile(program, function, monitor);
-			if (results != null && results.decompileCompleted() && results.getDecompiledFunction() != null) {
-				String decompiledCode = results.getDecompiledFunction().getC().toLowerCase();
-				for (String term : queryTerms) {
-					if (decompiledCode.contains(term)) {
-						matches++;
-						score += 0.15;
-					}
-				}
-			}
-		} catch (Exception e) {
-			// Ignore decompilation errors for scoring
-		}
-
-		// Normalize by query term count
-		if (queryTerms.length > 0) {
-			score = score / queryTerms.length;
-		}
-
-		return Math.min(1.0, score);
+			function.getBodySize());
 	}
 
 	private String buildSemanticSummary(Function function, String query) {
@@ -764,13 +744,30 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			function.getName(), function.getParameterCount());
 	}
 
-	private double computeLexicalScore(Function function, String[] queryTerms) {
+	private double computeIndexedSemanticScore(QueryCacheManager.IndexedFunctionFeatures feature,
+			String[] queryTerms, double lexicalScore) {
+		if (feature == null || queryTerms.length == 0) {
+			return lexicalScore;
+		}
+		int tokenMatches = 0;
+		for (String term : queryTerms) {
+			if (feature.getLexicalTokens().contains(term)) {
+				tokenMatches++;
+			}
+		}
+		double tokenCoverage = tokenMatches / (double) queryTerms.length;
+		double callDensity = Math.min(1.0, feature.getCallCount() / 8.0);
+		return Math.min(1.0, (0.7 * lexicalScore) + (0.2 * tokenCoverage) + (0.1 * callDensity));
+	}
+
+	private double computeLexicalScore(QueryCacheManager.IndexedFunctionFeatures function,
+			String[] queryTerms) {
 		if (queryTerms.length == 0) {
 			return 0.0;
 		}
 		double score = 0.0;
-		String functionName = function.getName().toLowerCase();
-		String comment = function.getComment() != null ? function.getComment().toLowerCase() : "";
+		String functionName = function.getNormalizedFunctionName();
+		String comment = function.getNormalizedComment();
 		for (String term : queryTerms) {
 			if (functionName.contains(term)) {
 				score += 0.6;

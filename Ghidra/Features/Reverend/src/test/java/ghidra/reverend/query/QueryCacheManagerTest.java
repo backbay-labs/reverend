@@ -17,6 +17,7 @@ package ghidra.reverend.query;
 
 import static org.junit.Assert.*;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -184,6 +185,32 @@ public class QueryCacheManagerTest {
 		assertNotNull(cacheManager.getCachedSimilarFunctions(stubProgram, keyB));
 		assertNull(cacheManager.getCachedSemanticSearch(stubProgram, "semantic:keyA"));
 		assertNotNull(cacheManager.getCachedSemanticSearch(stubProgram, "semantic:keyB"));
+	}
+
+	@Test
+	public void testCodeRangeInvalidationAlsoInvalidatesIndexedFunctionFeatures() throws Exception {
+		cacheManager.initializeForProgram(stubProgram);
+
+		String similarKey = CacheKeyGenerator.forSimilarFunctions(testAddress.toString());
+		String semanticKey = "semantic:indexed-range";
+		cacheManager.cacheSimilarFunctions(stubProgram, similarKey, createMockResultsForAddresses(testAddress));
+		cacheManager.cacheSemanticSearch(stubProgram, semanticKey, createMockResultsForAddresses(testAddress));
+
+		Object perProgramCache = getPerProgramCache();
+		Field functionFeatureIndexField = perProgramCache.getClass().getDeclaredField("functionFeatureIndex");
+		functionFeatureIndexField.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<String, QueryCacheManager.IndexedFunctionFeatures> functionFeatureIndex =
+			(Map<String, QueryCacheManager.IndexedFunctionFeatures>) functionFeatureIndexField.get(perProgramCache);
+		functionFeatureIndex.put(addressKey(testAddress),
+			createIndexedFeature(testAddress, testAddress, secondAddress));
+
+		assertEquals(1, cacheManager.getIndexedFunctionFeatureCount(stubProgram));
+		cacheManager.invalidateCodeCaches(stubProgram, testAddress, secondAddress);
+
+		assertNull(cacheManager.getCachedSimilarFunctions(stubProgram, similarKey));
+		assertNull(cacheManager.getCachedSemanticSearch(stubProgram, semanticKey));
+		assertEquals(0, cacheManager.getIndexedFunctionFeatureCount(stubProgram));
 	}
 
 	@Test
@@ -403,5 +430,40 @@ public class QueryCacheManagerTest {
 				return new ArrayList<>();
 			}
 		};
+	}
+
+	private Object getPerProgramCache() throws Exception {
+		Field programCachesField = QueryCacheManager.class.getDeclaredField("programCaches");
+		programCachesField.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<Program, Object> programCaches = (Map<Program, Object>) programCachesField.get(cacheManager);
+		return programCaches.get(stubProgram);
+	}
+
+	private QueryCacheManager.IndexedFunctionFeatures createIndexedFeature(Address entryPoint,
+			Address bodyMin, Address bodyMax) throws Exception {
+		Constructor<QueryCacheManager.IndexedFunctionFeatures> constructor =
+			QueryCacheManager.IndexedFunctionFeatures.class.getDeclaredConstructor(
+				String.class, String.class, String.class, String.class, String.class, String.class,
+				int.class, long.class, int.class, String.class, String.class, Set.class);
+		constructor.setAccessible(true);
+		return constructor.newInstance(
+			addressKey(entryPoint),
+			"mockFunction",
+			"mockfunction",
+			"",
+			"void",
+			"__stdcall",
+			1,
+			64L,
+			2,
+			addressKey(bodyMin),
+			addressKey(bodyMax),
+			Set.of("mock", "function"));
+	}
+
+	private String addressKey(Address address) {
+		return address.getAddressSpace().getName() + ":" +
+			Long.toUnsignedString(address.getOffset(), 16);
 	}
 }

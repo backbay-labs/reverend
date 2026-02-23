@@ -54,6 +54,10 @@ Dispatch waves:
 - Query and similarity paths are index-backed, not full-program decompile scans (`3201`, `3202`).
 - End-to-end operator path is reproducible from a local clean setup (`3207`, `3208`).
 
+## E21-3201 Profiling Artifacts
+- `semantic-search-stage ... stage=embedding ... details={primaryRanker=indexed-features, indexedFresh=..., indexedReused=..., refineCandidateCount=...}` documents that semantic ranking is index-first and only decompile-refines a bounded shortlist.
+- `similarity-index-profile ... decompileCandidates=0` documents that `findSimilarFunctions` primary scoring no longer decompiles every candidate function.
+
 ## Required Verification Commands
 - `./gradlew --no-daemon :Framework-TraceModeling:compileJava`
 - `./gradlew --no-daemon :Reverend:compileJava :Reverend:test --tests "ghidra.reverend.cockpit.*"`
