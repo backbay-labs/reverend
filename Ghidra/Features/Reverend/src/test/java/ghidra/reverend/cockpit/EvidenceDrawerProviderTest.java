@@ -23,6 +23,7 @@ import java.util.*;
 
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.text.JTextComponent;
 
 import org.junit.*;
 
@@ -92,7 +93,9 @@ public class EvidenceDrawerProviderTest extends AbstractGhidraHeadlessIntegratio
 			"ev-hit-1",
 			EvidenceType.DYNAMIC_TRACE,
 			"trace-fixture",
-			List.of(address));
+			List.of(address),
+			Instant.parse("2026-02-01T00:00:00Z"),
+			List.of());
 		evidenceService.put(evidence);
 		SearchResultEntry entry = new SearchResultEntry(
 			new TestQueryResult(
@@ -112,6 +115,68 @@ public class EvidenceDrawerProviderTest extends AbstractGhidraHeadlessIntegratio
 		assertTrue(text.contains("evidence_ref:dynamic:semantic:00402000"));
 	}
 
+	@Test
+	public void testEvidencePacketTimelineAndLineageUiHeadlessParity() {
+		Address address = createAddress(0x403000);
+		MockEvidence base = new MockEvidence(
+			"ev-base",
+			EvidenceType.STATIC_ANALYSIS,
+			"static-fixture",
+			List.of(address),
+			Instant.parse("2026-02-01T00:00:00Z"),
+			List.of());
+		MockEvidence mid = new MockEvidence(
+			"ev-mid",
+			EvidenceType.DYNAMIC_TRACE,
+			"dynamic-fixture",
+			List.of(address),
+			Instant.parse("2026-02-01T00:00:01Z"),
+			List.of("ev-base"));
+		MockEvidence root = new MockEvidence(
+			"ev-root",
+			EvidenceType.MODEL_INFERENCE,
+			"ml-fixture",
+			List.of(address),
+			Instant.parse("2026-02-01T00:00:02Z"),
+			List.of("ev-mid"));
+		evidenceService.put(base);
+		evidenceService.put(mid);
+		evidenceService.put(root);
+
+		SearchResultEntry entry = new SearchResultEntry(
+			new TestQueryResult(
+				address,
+				0.95,
+				"lineage hit",
+				"ev-root",
+				List.of("evidence_ref:static:semantic:00403000", "evidence_ref:dynamic:semantic:00403000"),
+				Map.of(
+					"static_provenance_ref", "provenance_ref:static:semantic:00403000",
+					"dynamic_provenance_ref", "provenance_ref:dynamic:semantic:00403000")),
+			"lineageFunc");
+
+		provider.showEvidenceForHit(entry);
+
+		EvidenceDrawerProvider.EvidencePacket packet =
+			provider.buildEvidencePacket(List.of(root, mid, base), entry);
+		String expectedPacketText = EvidenceDrawerProvider.renderEvidencePacket(packet);
+		String uiText = collectText(provider.getComponent());
+		assertTrue(uiText.contains("Evidence Timeline"));
+		assertTrue(uiText.contains("Lineage Drilldown"));
+		assertTrue(uiText.contains("ev-root <- ev-mid"));
+		assertTrue(uiText.contains("ev-mid <- ev-base"));
+		assertTrue(uiText.contains(expectedPacketText));
+	}
+
+	@Test
+	public void testExtractHexAddressTokenSupportsStaticAndDynamicReferences() {
+		assertEquals(Optional.of("0x00401000"),
+			EvidenceDrawerProvider.extractHexAddressToken("00401000"));
+		assertEquals(Optional.of("0x00abcdef"),
+			EvidenceDrawerProvider.extractHexAddressToken("0x00ABCDEF"));
+		assertEquals(Optional.empty(), EvidenceDrawerProvider.extractHexAddressToken("semantic"));
+	}
+
 	private String collectText(JComponent root) {
 		StringBuilder builder = new StringBuilder();
 		collectTextRecursive(root, builder);
@@ -121,6 +186,9 @@ public class EvidenceDrawerProviderTest extends AbstractGhidraHeadlessIntegratio
 	private void collectTextRecursive(Component component, StringBuilder builder) {
 		if (component instanceof JLabel label && label.getText() != null) {
 			builder.append(label.getText()).append('\n');
+		}
+		if (component instanceof JTextComponent textComponent && textComponent.getText() != null) {
+			builder.append(textComponent.getText()).append('\n');
 		}
 		if (component instanceof JComponent jComponent) {
 			for (Component child : jComponent.getComponents()) {
@@ -170,7 +238,27 @@ public class EvidenceDrawerProviderTest extends AbstractGhidraHeadlessIntegratio
 
 		@Override
 		public List<Evidence> getDerivationChain(String evidenceId) {
-			return Collections.emptyList();
+			List<Evidence> chain = new ArrayList<>();
+			Set<String> seen = new LinkedHashSet<>();
+			Deque<String> queue = new ArrayDeque<>();
+			queue.add(evidenceId);
+			while (!queue.isEmpty()) {
+				Evidence current = evidenceById.get(queue.removeFirst());
+				if (current == null) {
+					continue;
+				}
+				for (String predecessorId : current.getPredecessorIds()) {
+					if (!seen.add(predecessorId)) {
+						continue;
+					}
+					Evidence predecessor = evidenceById.get(predecessorId);
+					if (predecessor != null) {
+						chain.add(predecessor);
+						queue.add(predecessorId);
+					}
+				}
+			}
+			return chain;
 		}
 
 		@Override
@@ -184,12 +272,17 @@ public class EvidenceDrawerProviderTest extends AbstractGhidraHeadlessIntegratio
 		private final EvidenceType type;
 		private final String source;
 		private final List<Address> addresses;
+		private final Instant createdAt;
+		private final List<String> predecessorIds;
 
-		MockEvidence(String id, EvidenceType type, String source, List<Address> addresses) {
+		MockEvidence(String id, EvidenceType type, String source, List<Address> addresses,
+				Instant createdAt, List<String> predecessorIds) {
 			this.id = id;
 			this.type = type;
 			this.source = source;
 			this.addresses = addresses;
+			this.createdAt = createdAt;
+			this.predecessorIds = predecessorIds;
 		}
 
 		@Override
@@ -234,12 +327,12 @@ public class EvidenceDrawerProviderTest extends AbstractGhidraHeadlessIntegratio
 
 		@Override
 		public Instant getCreatedAt() {
-			return Instant.parse("2026-02-01T00:00:00Z");
+			return createdAt;
 		}
 
 		@Override
 		public List<String> getPredecessorIds() {
-			return List.of();
+			return predecessorIds;
 		}
 
 		@Override

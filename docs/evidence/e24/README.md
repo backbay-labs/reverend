@@ -1,6 +1,6 @@
-# E24 Provenance Chain Verifier + Explainability Packet
+# E24 Provenance Chain Verifier + Cockpit Evidence Packet
 
-This directory tracks the evidence contract for `E24-S4`.
+This directory tracks the evidence contract for `E24-S5`.
 
 ## Artifact Contract
 
@@ -9,6 +9,10 @@ This directory tracks the evidence contract for `E24-S4`.
   - `ok` + `issue_count` + `issues[]`
   - `explainability_packet.kind: "applied_proposal_explainability_packet"`
   - `explainability_packet.applied_proposals[].canonical_chain[]`
+- Cockpit evidence packet rendering sections (UI/headless parity):
+  - `Timeline` ordered by event/evidence timestamp
+  - `Lineage` predecessor drilldown edges
+  - `Sources` static and dynamic jump references
 
 ## Verifier Command
 
