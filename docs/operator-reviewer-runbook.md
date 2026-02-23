@@ -273,9 +273,174 @@ Gate descriptions:
 
 ---
 
-## 6. Configuration Reference
+## 6. Local SOTA Assistant Workflow (E21-S7)
 
-### 6.1 Cyntra Configuration
+This section is the operator runbook for a local, deterministic in-Ghidra assistant flow:
+- semantic query/panel rendering
+- triage mission execution
+- proposal review/apply/rollback loop with receipt links
+
+### 6.1 Prerequisites
+
+```bash
+# Toolchain and workspace checks
+python3 --version
+java -version
+javac -version
+bash scripts/cyntra/preflight.sh
+```
+
+Expected:
+- Python `>=3.11`
+- Java/Javac `21`
+- preflight exits `0` and ends with `[preflight] preflight checks passed`
+
+### 6.2 Launch
+
+```bash
+# Launch Ghidra (GUI)
+./ghidraRun
+
+# Or headless command surface check
+./support/analyzeHeadless -help
+```
+
+If launching from a built distribution zip:
+
+```bash
+mkdir -p build/dist/_smoke
+unzip -q -o build/dist/ghidra_*.zip -d build/dist/_smoke
+build/dist/_smoke/ghidra_*/support/analyzeHeadless -help
+```
+
+### 6.3 Verification Commands
+
+```bash
+# Cockpit/runtime integration tests
+./gradlew --no-daemon :Reverend:compileJava :Reverend:test --tests "ghidra.reverend.cockpit.*"
+
+# Mandatory gate stack
+bash scripts/cyntra/gates.sh --mode=all
+bash scripts/cyntra/gates.sh --mode=context
+bash scripts/cyntra/gates.sh --mode=diff
+```
+
+### 6.4 Clean-Environment Mission Execution (Validated)
+
+Run the full local flow in a new temp workspace:
+
+```bash
+set -euo pipefail
+RUN_ROOT="$(mktemp -d /tmp/e21-s7-flow-XXXXXX)"
+INDEX_DIR="$RUN_ROOT/index"
+REPORT_DIR="$RUN_ROOT/triage"
+LOCAL_STORE="$RUN_ROOT/local_store.json"
+BACKEND_STORE="$RUN_ROOT/shared_backend.json"
+SEARCH_TELEMETRY="$RUN_ROOT/search-latency.jsonl"
+
+python3 scripts/ml/local_embedding_pipeline.py build \
+  --corpus scripts/ml/fixtures/toy_similarity_corpus_slice.json \
+  --output-dir "$INDEX_DIR" \
+  --vector-dimension 128
+
+python3 scripts/ml/local_embedding_pipeline.py search \
+  --index-dir "$INDEX_DIR" \
+  --mode intent \
+  --query "parse pe imports" \
+  --top-k 3 \
+  --telemetry-path "$SEARCH_TELEMETRY" \
+  > "$RUN_ROOT/search.json"
+
+python3 scripts/ml/local_embedding_pipeline.py panel \
+  --index-dir "$INDEX_DIR" \
+  --mode intent \
+  --query "parse pe imports" \
+  --top-k 3 \
+  > "$RUN_ROOT/panel.json"
+
+python3 scripts/ml/local_embedding_pipeline.py triage-mission \
+  --corpus scripts/ml/fixtures/toy_similarity_corpus_slice.json \
+  --mission-id triage-smoke \
+  --output "$RUN_ROOT/triage-summary.json" \
+  --report-dir "$REPORT_DIR" \
+  > "$RUN_ROOT/triage-mission.stdout.log"
+
+cat > "$BACKEND_STORE" <<'JSON'
+{
+  "schema_version": 1,
+  "kind": "shared_corpus_backend",
+  "artifacts": {
+    "remote-1": {
+      "proposal_id": "remote-1",
+      "state": "APPROVED",
+      "receipt_id": "receipt:remote:1",
+      "program_id": "program:remote",
+      "artifact": {
+        "function_name": "parse_pe_imports",
+        "function_text": "parse pe import table and resolve imported symbol names",
+        "reusable_artifacts": [
+          { "kind": "NAME", "target_scope": "FUNCTION", "value": "resolve_import_thunks", "confidence": 0.95 }
+        ]
+      }
+    }
+  }
+}
+JSON
+
+python3 scripts/ml/local_embedding_pipeline.py pullback-reuse \
+  --index-dir "$INDEX_DIR" \
+  --backend-store "$BACKEND_STORE" \
+  --local-store "$LOCAL_STORE" \
+  --function-id fn.pe.parse_imports \
+  --program-id program:local \
+  > "$RUN_ROOT/pullback.json"
+
+python3 scripts/ml/local_embedding_pipeline.py proposal-review \
+  --local-store "$LOCAL_STORE" \
+  --action approve \
+  --reviewer-id user:operator \
+  > "$RUN_ROOT/review.json"
+
+python3 scripts/ml/local_embedding_pipeline.py proposal-apply \
+  --local-store "$LOCAL_STORE" \
+  --actor-id user:operator \
+  > "$RUN_ROOT/apply.json"
+
+python3 scripts/ml/local_embedding_pipeline.py proposal-rollback \
+  --local-store "$LOCAL_STORE" \
+  --actor-id user:operator \
+  > "$RUN_ROOT/rollback.json"
+```
+
+Success criteria:
+- `search.json` contains ranked results and `search-latency.jsonl` has query telemetry events
+- `triage/triage-panel.json` and `triage/triage-report.md` exist
+- `pullback.json` reports `metrics.inserted_count >= 1`
+- `apply.json` reports `metrics.applied_total >= 1`
+- `rollback.json` reports `metrics.rolled_back_total >= 1`
+
+Validated on `2026-02-23` in a clean temp workspace. Observed outcome:
+- search results generated (`3`)
+- panel payload id `semantic-search`
+- triage artifacts emitted (`triage-summary.json`, `triage-panel.json`, `triage-report.md`, `triage-artifacts.json`)
+- proposal loop completed (`inserted=1`, `reviewed=1`, `applied=1`, `rolled_back=1`)
+
+### 6.5 Troubleshooting Signatures and Remediations
+
+| Failure signature | Likely cause | Remediation |
+|---|---|---|
+| `[preflight] ERROR: JDK 21 is required...` | Wrong Java/Javac toolchain | Install/select JDK 21 and verify `java -version` + `javac -version`, then rerun `bash scripts/cyntra/preflight.sh` |
+| `[gates] ERROR: unable to resolve context files...` | Gate context resolution failed | Set issue context via `manifest.json` (`issue.id` + `context_files`) or `CYNTRA_GATE_ISSUE_ID`, then rerun gates |
+| `ValueError: unknown local function id: ...` | `pullback-reuse --function-id` not present in local index | List fixture function ids and use one that exists (for toy corpus: `fn.elf.parse_headers`, `fn.net.open_socket`, `fn.crypto.sha256_update`, `fn.pe.parse_imports`) |
+| `ValueError: backend store missing required 'artifacts' object` | Invalid shared backend JSON | Ensure backend JSON is an object with top-level `artifacts` map |
+| `ValueError: local store missing required 'proposals' array` | Corrupt or hand-edited local proposal store | Recreate the store via `pullback-reuse` or restore from backup with `proposals` array present |
+| `ValueError: unknown apply_receipt_id(s): ...` | Rollback requested for nonexistent receipt ids | Omit `--apply-receipt-id` for bulk rollback, or use receipt ids from `proposal-apply` output |
+
+---
+
+## 7. Configuration Reference
+
+### 7.1 Cyntra Configuration
 
 File: `.cyntra/config.yaml`
 
@@ -286,7 +451,7 @@ File: `.cyntra/config.yaml`
 | `CYNTRA_ARCHIVE_RETENTION_DAYS` | (unset) | Days to retain archived workcells |
 | `CYNTRA_STRICT_CONTEXT_MAIN` | 1 | Require context files committed on main |
 
-### 6.2 Agent Security Policy
+### 7.2 Agent Security Policy
 
 Configured via Ghidra Tool Options → Agent Security:
 
@@ -298,7 +463,7 @@ Configured via Ghidra Tool Options → Agent Security:
 
 In all modes, agents cannot write directly to canonical program state. All mutations flow through the proposal → review → apply pipeline.
 
-### 6.3 Auto-Approve Thresholds
+### 7.3 Auto-Approve Thresholds
 
 | Setting | Default | Description |
 |---|---|---|
@@ -308,7 +473,7 @@ In all modes, agents cannot write directly to canonical program state. All mutat
 
 ---
 
-## 7. Monitoring Checklist
+## 8. Monitoring Checklist
 
 Daily operator checks:
 

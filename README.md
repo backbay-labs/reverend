@@ -142,6 +142,9 @@ scripts/cyntra/cyntra.sh status
 
 Operational details: `docs/cyntra-kernel-runbook.md`.
 
+Assistant operator runbook (local setup, launch, mission execution, troubleshooting):
+`docs/operator-reviewer-runbook.md` (see **6. Local SOTA Assistant Workflow (E21-S7)**).
+
 ## Key Evidence and Decision Docs
 
 - Exit-gate report: `docs/exit-gate-report.md`
