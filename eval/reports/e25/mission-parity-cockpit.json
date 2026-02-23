@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "mission_id": "e25.headless-ui.parity.fixture",
+  "execution_mode": "cockpit",
+  "ui_session_id": "cockpit-session-42",
+  "flows": {
+    "mission_launch": {
+      "status": "completed",
+      "outcome": "success",
+      "stage_order": [
+        "primary_supervised",
+        "classify_failure",
+        "fallback_route"
+      ],
+      "generated_at_utc": "2026-02-23T08:55:00Z"
+    },
+    "checkpoint_resume": {
+      "resumed": true,
+      "resume_checkpoint_id": "checkpoint-1",
+      "execution_order": [
+        "primary_supervised",
+        "classify_failure",
+        "fallback_route"
+      ],
+      "replayed_stage_ids": [
+        "fallback_route"
+      ],
+      "updated_at": "2026-02-23T08:56:00Z"
+    },
+    "artifact_export": {
+      "export_status": "success",
+      "export_path": "/tmp/cockpit/exports",
+      "artifacts": [
+        {
+          "artifact_id": "mission.log",
+          "semantic_type": "log",
+          "sha256": "0b0b0b0b",
+          "bytes": 512
+        },
+        {
+          "artifact_id": "triage.summary.json",
+          "semantic_type": "json_summary",
+          "sha256": "0a0a0a0a",
+          "bytes": 1024
+        }
+      ]
+    }
+  }
+}
