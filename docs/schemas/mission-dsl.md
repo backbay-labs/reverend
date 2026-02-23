@@ -5,6 +5,7 @@ This schema defines deterministic mission execution contracts for crew-stage wor
 - Schema file: `docs/schemas/mission-dsl.schema.json`
 - Validator: `scripts/ml/mission_dsl_validator.py`
 - Examples: `docs/schemas/examples/mission-dsl/`
+- Typed compiler: `compile_mission_spec(...)` in `scripts/ml/mission_dsl_validator.py`
 
 ## Required Top-Level Fields
 

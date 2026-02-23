@@ -122,7 +122,7 @@ PY
 run_primary_once_supervised() {
   local supervision_path=""
   local supervision_json=""
-  supervision_path="$(mktemp "${TMPDIR:-/tmp}/cyntra-run-once-supervision.XXXXXX.json")"
+  supervision_path="$(mktemp "${TMPDIR:-/tmp}/cyntra-run-once-supervision.XXXXXX")"
   python3 - "$repo_root" "$supervised_stall_timeout_seconds" "$supervised_stall_poll_seconds" "$supervised_activity_paths" "$supervision_path" scripts/cyntra/cyntra.sh run --once "$@" <<'PY'
 import json
 import os

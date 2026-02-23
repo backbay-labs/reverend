@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import heapq
 import json
 import math
@@ -20,7 +21,7 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -37,6 +38,11 @@ DEFAULT_TRIAGE_ENTRYPOINT_THRESHOLD = 0.30
 DEFAULT_TRIAGE_HOTSPOT_THRESHOLD = 0.25
 DEFAULT_TRIAGE_UNKNOWN_THRESHOLD = 0.65
 DEFAULT_TRIAGE_CALIBRATION_STEP = 0.05
+TRIAGE_ARTIFACT_PACK_SIGNATURE_SCHEME = "hmac-sha256"
+TRIAGE_ARTIFACT_PACK_SIGNING_KEY_ENV = "CYNTRA_ARTIFACT_PACK_SIGNING_KEY"
+TRIAGE_ARTIFACT_PACK_SIGNING_KEY_ID_ENV = "CYNTRA_ARTIFACT_PACK_SIGNING_KEY_ID"
+TRIAGE_ARTIFACT_PACK_DEFAULT_SIGNING_KEY = "cyntra-triage-artifact-pack-signing-key-v1"
+TRIAGE_ARTIFACT_PACK_DEFAULT_KEY_ID = "local-dev-hmac-sha256"
 
 PROPOSAL_STATE_PROPOSED = "PROPOSED"
 PROPOSAL_STATE_APPROVED = "APPROVED"
@@ -4897,9 +4903,17 @@ class DeterministicTriageMission:
         entrypoints = context["entrypoints"]
         hotspots = context["hotspots"]
         unknowns = context["unknowns"]
+        generated_at_utc = self._deterministic_generated_at_utc(
+            mission_id=resolved_mission_id,
+            stages=tuple(stage_events),
+            features=features,
+            entrypoints=entrypoints,
+            hotspots=hotspots,
+            unknowns=unknowns,
+        )
         return TriageMissionReport(
             mission_id=resolved_mission_id,
-            generated_at_utc=_utc_now(),
+            generated_at_utc=generated_at_utc,
             stages=tuple(stage_events),
             features=features,
             feature_count=len(features),
@@ -4913,6 +4927,62 @@ class DeterministicTriageMission:
         seed = "|".join(record.function_id for record in records)
         digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
         return f"triage:{digest}"
+
+    @staticmethod
+    def _feature_seed_row(feature: TriageFunctionFeatures) -> dict[str, Any]:
+        return {
+            "function_id": feature.function_id,
+            "entrypoint_score": round(feature.entrypoint_score, 6),
+            "hotspot_score": round(feature.hotspot_score, 6),
+            "unknown_score": round(feature.unknown_score, 6),
+            "tags": list(feature.tags),
+            "rationale": list(feature.rationale),
+            "evidence_refs": [
+                {
+                    "evidence_ref_id": ref.evidence_ref_id,
+                    "kind": ref.kind,
+                    "uri": ref.uri,
+                    "description": ref.description,
+                    "confidence": None if ref.confidence is None else round(ref.confidence, 6),
+                }
+                for ref in feature.evidence_refs
+            ],
+        }
+
+    @staticmethod
+    def _finding_seed_row(finding: TriageFinding) -> dict[str, Any]:
+        return {
+            "function_id": finding.function_id,
+            "score": round(finding.score, 6),
+            "tags": list(finding.tags),
+            "rationale": list(finding.rationale),
+            "evidence_ref_ids": [ref.evidence_ref_id for ref in finding.evidence_refs],
+        }
+
+    @classmethod
+    def _deterministic_generated_at_utc(
+        cls,
+        *,
+        mission_id: str,
+        stages: tuple[TriageMissionStageEvent, ...],
+        features: tuple[TriageFunctionFeatures, ...],
+        entrypoints: tuple[TriageFinding, ...],
+        hotspots: tuple[TriageFinding, ...],
+        unknowns: tuple[TriageFinding, ...],
+    ) -> str:
+        seed_payload = {
+            "mission_id": mission_id,
+            "stages": [stage.to_json() for stage in stages],
+            "features": [cls._feature_seed_row(feature) for feature in features],
+            "entrypoints": [cls._finding_seed_row(item) for item in entrypoints],
+            "hotspots": [cls._finding_seed_row(item) for item in hotspots],
+            "unknowns": [cls._finding_seed_row(item) for item in unknowns],
+        }
+        canonical = json.dumps(seed_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        offset_seconds = int(digest[:12], 16) % (40 * 365 * 24 * 60 * 60)
+        deterministic_timestamp = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=offset_seconds)
+        return deterministic_timestamp.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     @staticmethod
     def _stage_input_count(stage_name: str, context: Mapping[str, Any]) -> int:
@@ -5097,6 +5167,115 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _canonical_json_bytes(payload: Mapping[str, Any]) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+
+def _triage_artifact_pack_signature_payload(
+    *,
+    mission_id: str,
+    report: Mapping[str, Any],
+    artifact_paths: Mapping[str, str],
+    artifact_checksums: Mapping[str, str],
+    artifact_bytes: Mapping[str, int],
+) -> dict[str, Any]:
+    execution = report.get("execution")
+    execution_map = execution if isinstance(execution, Mapping) else {}
+    stage_graph = execution_map.get("stage_graph")
+    if not isinstance(stage_graph, list):
+        stage_graph = []
+    feature_count_raw = execution_map.get("feature_count")
+    try:
+        feature_count = int(feature_count_raw) if feature_count_raw is not None else 0
+    except (TypeError, ValueError):
+        feature_count = 0
+
+    counts = report.get("counts")
+    counts_map = counts if isinstance(counts, Mapping) else {}
+    entrypoints_count = int(counts_map.get("entrypoints") or 0)
+    hotspots_count = int(counts_map.get("hotspots") or 0)
+    unknowns_count = int(counts_map.get("unknowns") or 0)
+    return {
+        "schema_version": 1,
+        "kind": "triage_mission_artifact_pack_payload",
+        "mission_id": mission_id,
+        "execution": {
+            "stage_graph": stage_graph,
+            "feature_count": feature_count,
+        },
+        "counts": {
+            "entrypoints": entrypoints_count,
+            "hotspots": hotspots_count,
+            "unknowns": unknowns_count,
+        },
+        "artifacts": dict(artifact_paths),
+        "artifact_checksums": dict(artifact_checksums),
+        "artifact_bytes": dict(artifact_bytes),
+    }
+
+
+def _resolve_triage_pack_signing_material() -> tuple[str, str]:
+    key_id = str(os.environ.get(TRIAGE_ARTIFACT_PACK_SIGNING_KEY_ID_ENV) or "").strip()
+    if not key_id:
+        key_id = TRIAGE_ARTIFACT_PACK_DEFAULT_KEY_ID
+    signing_key = str(os.environ.get(TRIAGE_ARTIFACT_PACK_SIGNING_KEY_ENV) or "").strip()
+    if not signing_key:
+        signing_key = TRIAGE_ARTIFACT_PACK_DEFAULT_SIGNING_KEY
+    return key_id, signing_key
+
+
+def _sign_triage_artifact_pack_payload(
+    payload: Mapping[str, Any],
+    *,
+    signing_key: str,
+) -> tuple[str, str]:
+    canonical_payload = _canonical_json_bytes(payload)
+    payload_sha256 = hashlib.sha256(canonical_payload).hexdigest()
+    signature = hmac.new(signing_key.encode("utf-8"), canonical_payload, hashlib.sha256).hexdigest()
+    return payload_sha256, signature
+
+
+def verify_triage_artifact_pack_signature(
+    manifest: Mapping[str, Any],
+    *,
+    signing_key: str | None = None,
+) -> bool:
+    artifact_pack_raw = manifest.get("artifact_pack")
+    if not isinstance(artifact_pack_raw, Mapping):
+        return False
+
+    payload_raw = artifact_pack_raw.get("signature_payload")
+    if not isinstance(payload_raw, Mapping):
+        return False
+    payload = dict(payload_raw)
+
+    if payload.get("mission_id") != str(manifest.get("mission_id") or ""):
+        return False
+    if payload.get("artifacts") != manifest.get("artifacts"):
+        return False
+    if payload.get("artifact_checksums") != manifest.get("artifact_checksums"):
+        return False
+    if payload.get("artifact_bytes") != manifest.get("artifact_bytes"):
+        return False
+
+    signature_raw = artifact_pack_raw.get("signature")
+    if not isinstance(signature_raw, Mapping):
+        return False
+    if str(signature_raw.get("scheme") or "") != TRIAGE_ARTIFACT_PACK_SIGNATURE_SCHEME:
+        return False
+
+    signed_payload_sha256 = str(artifact_pack_raw.get("payload_sha256") or "")
+    provided_signature = str(signature_raw.get("value") or "")
+
+    _, default_signing_key = _resolve_triage_pack_signing_material()
+    resolved_key = signing_key if signing_key is not None else default_signing_key
+    expected_payload_sha256, expected_signature = _sign_triage_artifact_pack_payload(
+        payload,
+        signing_key=resolved_key,
+    )
+    return signed_payload_sha256 == expected_payload_sha256 and provided_signature == expected_signature
+
+
 def _triage_report_markdown(report: Mapping[str, Any]) -> str:
     mission_id = str(report.get("mission_id") or "triage:unknown")
     generated_at = str(report.get("generated_at_utc") or "")
@@ -5233,15 +5412,38 @@ def write_triage_report_artifacts(
         "panel": panel_path.stat().st_size,
         "markdown": markdown_path.stat().st_size,
     }
+    mission_id = str(report.get("mission_id") or "")
+    signature_payload = _triage_artifact_pack_signature_payload(
+        mission_id=mission_id,
+        report=report,
+        artifact_paths=artifact_paths,
+        artifact_checksums=artifact_checksums,
+        artifact_bytes=artifact_bytes,
+    )
+    key_id, signing_key = _resolve_triage_pack_signing_material()
+    payload_sha256, signature_value = _sign_triage_artifact_pack_payload(
+        signature_payload,
+        signing_key=signing_key,
+    )
 
     manifest = {
         "schema_version": 1,
         "kind": "triage_mission_artifacts",
-        "generated_at_utc": _utc_now(),
-        "mission_id": str(report.get("mission_id") or ""),
+        "generated_at_utc": str(report.get("generated_at_utc") or ""),
+        "mission_id": mission_id,
         "artifacts": artifact_paths,
         "artifact_checksums": artifact_checksums,
         "artifact_bytes": artifact_bytes,
+        "artifact_pack": {
+            "schema_version": 1,
+            "payload_sha256": payload_sha256,
+            "signature_payload": signature_payload,
+            "signature": {
+                "scheme": TRIAGE_ARTIFACT_PACK_SIGNATURE_SCHEME,
+                "key_id": key_id,
+                "value": signature_value,
+            },
+        },
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
