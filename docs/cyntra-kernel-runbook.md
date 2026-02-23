@@ -174,6 +174,12 @@ Failure taxonomy and completion-policy binding:
   - `proof.json.metadata.failure_code`
   - `proof.json.verification.failure_code`
   - appended `telemetry.jsonl` entry with `event: "failure_code_classified"` and `failure_code`
+- `scripts/cyntra/run-once.sh` now enforces supervised inactivity detection for silent `prompt_sent` stalls:
+  - `CYNTRA_SUPERVISED_STALL_TIMEOUT_SECONDS` (default `300`) controls max allowed inactivity in a supervised cycle
+  - `CYNTRA_SUPERVISED_STALL_POLL_SECONDS` (default `1`) controls supervision poll cadence
+  - `CYNTRA_SUPERVISED_ACTIVITY_PATHS` controls the activity heartbeat files (default: `.cyntra/logs/events.jsonl,telemetry.jsonl`)
+  - on inactivity timeout, run-once force-classifies `runtime.prompt_stall_no_output`, emits machine telemetry, and triggers deterministic fallback routing even when no fresh `proof.json` was produced
+- `failure_code_classified` telemetry is now mirrored to both workcell telemetry and kernel telemetry (`.cyntra/logs/events.jsonl`) for deterministic machine ingestion.
 - Completion policy gate summary telemetry:
   - workcell telemetry: `.workcells/<id>/telemetry.jsonl`
   - kernel telemetry: `.cyntra/logs/events.jsonl`

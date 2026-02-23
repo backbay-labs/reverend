@@ -138,6 +138,70 @@ class CyntraWatchdogReconciliationTest(unittest.TestCase):
             self.assertEqual(events[0]["reason_code"], "stale_running_workcell_missing")
             self.assertEqual(events[0]["action"], "drop_stale_running_entry")
 
+    def test_supervised_run_once_classifies_prompt_stall_and_triggers_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            runner, _state_path, events_path = _prepare_fake_repo(tmp, RUN_ONCE_SRC)
+
+            _write_exec(
+                tmp / "scripts" / "cyntra" / "cyntra.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    "set -euo pipefail\n"
+                    "printf 'FAILURE_CODE=%s\\n' \"${CYNTRA_FAILURE_CODE:-}\" >> .cyntra/logs/invocations.log\n"
+                    "if [[ -z \"${CYNTRA_FAILURE_CODE:-}\" ]]; then\n"
+                    "  sleep 2\n"
+                    "  exit 124\n"
+                    "fi\n"
+                    "exit 0\n"
+                ),
+            )
+            (tmp / ".workcell").write_text(
+                json.dumps(
+                    {
+                        "id": "wc-test-supervision",
+                        "issue_id": "3300",
+                        "created": "20260223T000000Z",
+                        "branch_name": "wc/3300/20260223T000000Z",
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["CYNTRA_SUPERVISED_STALL_TIMEOUT_SECONDS"] = "0.2"
+            env["CYNTRA_SUPERVISED_STALL_POLL_SECONDS"] = "0.1"
+            env["CYNTRA_SUPERVISED_ACTIVITY_PATHS"] = str(tmp / ".cyntra" / "logs" / "idle-heartbeat.jsonl")
+            result = _run(["bash", str(runner)], cwd=tmp, env=env)
+
+            self.assertIn("supervision timeout: classified runtime.prompt_stall_no_output", result.stdout)
+            self.assertIn(
+                "deterministic failure classified as failure_code='runtime.prompt_stall_no_output'",
+                result.stdout,
+            )
+            invocations = (tmp / ".cyntra" / "logs" / "invocations.log").read_text(encoding="utf-8").splitlines()
+            self.assertIn("FAILURE_CODE=", invocations)
+            self.assertIn("FAILURE_CODE=runtime.prompt_stall_no_output", invocations)
+            self.assertEqual(len([line for line in invocations if line.startswith("FAILURE_CODE=")]), 2)
+
+            events = [
+                json.loads(line)
+                for line in events_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            failure_events = [
+                event
+                for event in events
+                if event.get("event") == "failure_code_classified"
+                and event.get("failure_code") == "runtime.prompt_stall_no_output"
+            ]
+            self.assertTrue(failure_events, "expected supervised stall classification telemetry")
+            latest = failure_events[-1]
+            self.assertEqual(latest.get("classification_source"), "supervision")
+            self.assertEqual(latest.get("reason_code"), "supervision.inactivity_timeout")
+
 
 if __name__ == "__main__":
     unittest.main()
