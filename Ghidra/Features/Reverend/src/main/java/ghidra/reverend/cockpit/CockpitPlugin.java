@@ -55,6 +55,7 @@ public class CockpitPlugin extends ProgramPlugin {
 	private QueryService queryService;
 	private EvidenceService evidenceService;
 	private ProposalIntegrationService proposalService;
+	private final CockpitServiceBootstrap serviceBootstrap = new CockpitServiceBootstrap();
 
 	private CockpitSearchProvider searchProvider;
 	private EvidenceDrawerProvider evidenceProvider;
@@ -72,7 +73,25 @@ public class CockpitPlugin extends ProgramPlugin {
 	@Override
 	protected void init() {
 		super.init();
+		initializeServices();
 		createProviders();
+	}
+
+	private void initializeServices() {
+		if (queryService != null && evidenceService != null && proposalService != null) {
+			return;
+		}
+
+		serviceBootstrap.init();
+		if (queryService == null) {
+			queryService = serviceBootstrap.getQueryService();
+		}
+		if (evidenceService == null) {
+			evidenceService = serviceBootstrap.getEvidenceService();
+		}
+		if (proposalService == null) {
+			proposalService = serviceBootstrap.getProposalService();
+		}
 	}
 
 	/**
@@ -120,8 +139,7 @@ public class CockpitPlugin extends ProgramPlugin {
 
 	private void createSearchProvider() {
 		if (queryService == null) {
-			// Use a stub service until the real one is set
-			queryService = new StubQueryService();
+			initializeServices();
 		}
 		searchProvider = new CockpitSearchProvider(tool, queryService);
 		tool.addComponentProvider(searchProvider, false);
@@ -129,8 +147,7 @@ public class CockpitPlugin extends ProgramPlugin {
 
 	private void createEvidenceProvider() {
 		if (evidenceService == null) {
-			// Use a stub service until the real one is set
-			evidenceService = new StubEvidenceService();
+			initializeServices();
 		}
 		evidenceProvider = new EvidenceDrawerProvider(tool, evidenceService);
 		tool.addComponentProvider(evidenceProvider, false);
@@ -148,6 +165,9 @@ public class CockpitPlugin extends ProgramPlugin {
 		tool.addAction(navigationActions.createGoToFunctionAction());
 		tool.addAction(navigationActions.createShowInDecompilerAction());
 
+		if (proposalService == null) {
+			initializeServices();
+		}
 		if (proposalService != null) {
 			tool.addAction(navigationActions.createProposalAction(proposalService));
 		}
@@ -164,6 +184,9 @@ public class CockpitPlugin extends ProgramPlugin {
 
 	@Override
 	protected void programActivated(Program program) {
+		if (usesBootstrapServices()) {
+			serviceBootstrap.bindProgram(program);
+		}
 		if (searchProvider != null) {
 			searchProvider.setProgram(program);
 		}
@@ -174,12 +197,24 @@ public class CockpitPlugin extends ProgramPlugin {
 
 	@Override
 	protected void programDeactivated(Program program) {
+		if (usesBootstrapServices()) {
+			serviceBootstrap.unbindProgram(program);
+		}
 		if (searchProvider != null) {
 			searchProvider.clearProgram();
 		}
 		if (evidenceProvider != null) {
 			evidenceProvider.clearProgram();
 		}
+	}
+
+	private boolean usesBootstrapServices() {
+		if (!serviceBootstrap.isInitialized()) {
+			return false;
+		}
+		return queryService == serviceBootstrap.getQueryService() ||
+			evidenceService == serviceBootstrap.getEvidenceService() ||
+			proposalService == serviceBootstrap.getProposalService();
 	}
 
 	@Override
@@ -220,6 +255,9 @@ public class CockpitPlugin extends ProgramPlugin {
 			tool.removeComponentProvider(evidenceProvider);
 			evidenceProvider = null;
 		}
+		if (serviceBootstrap.isInitialized()) {
+			serviceBootstrap.dispose();
+		}
 		super.dispose();
 	}
 
@@ -256,133 +294,6 @@ public class CockpitPlugin extends ProgramPlugin {
 	public void showEvidenceProvider() {
 		if (evidenceProvider != null) {
 			tool.showComponentProvider(evidenceProvider, true);
-		}
-	}
-
-	/**
-	 * Stub query service used before real service is set.
-	 */
-	private static class StubQueryService implements QueryService {
-		@Override
-		public java.util.List<QueryResult> findSimilarFunctions(Program program,
-				ghidra.program.model.listing.Function function, int maxResults,
-				ghidra.util.task.TaskMonitor monitor) {
-			return java.util.Collections.emptyList();
-		}
-
-		@Override
-		public java.util.List<QueryResult> semanticSearch(Program program, String query,
-				ghidra.program.model.address.AddressSetView scope, int maxResults,
-				ghidra.util.task.TaskMonitor monitor) {
-			return java.util.Collections.emptyList();
-		}
-
-		@Override
-		public java.util.List<ghidra.program.model.address.Address> patternSearch(
-				Program program, String pattern,
-				ghidra.program.model.address.AddressSetView scope,
-				ghidra.util.task.TaskMonitor monitor) {
-			return java.util.Collections.emptyList();
-		}
-
-		@Override
-		public java.util.Optional<QueryContext> getContext(Program program,
-				ghidra.program.model.address.Address address) {
-			return java.util.Optional.empty();
-		}
-	}
-
-	/**
-	 * Stub evidence service used before real service is set.
-	 */
-	private static class StubEvidenceService implements EvidenceService {
-		@Override
-		public Evidence record(Evidence evidence) {
-			return evidence;
-		}
-
-		@Override
-		public java.util.Optional<Evidence> get(String evidenceId) {
-			return java.util.Optional.empty();
-		}
-
-		@Override
-		public java.util.List<Evidence> query(Program program, EvidenceType type,
-				String source, java.time.Instant since) {
-			return java.util.Collections.emptyList();
-		}
-
-		@Override
-		public java.util.List<Evidence> getForAddress(Program program,
-				ghidra.program.model.address.Address address) {
-			return java.util.Collections.emptyList();
-		}
-
-		@Override
-		public void linkToProposal(String evidenceId, String proposalId) {
-			// No-op
-		}
-
-		@Override
-		public java.util.List<Evidence> getDerivationChain(String evidenceId) {
-			return java.util.Collections.emptyList();
-		}
-
-		@Override
-		public EvidenceBuilder builder() {
-			return new StubEvidenceBuilder();
-		}
-
-		private static class StubEvidenceBuilder implements EvidenceBuilder {
-			@Override
-			public EvidenceBuilder type(EvidenceType type) {
-				return this;
-			}
-
-			@Override
-			public EvidenceBuilder source(String source) {
-				return this;
-			}
-
-			@Override
-			public EvidenceBuilder sourceVersion(String version) {
-				return this;
-			}
-
-			@Override
-			public EvidenceBuilder programId(String programId) {
-				return this;
-			}
-
-			@Override
-			public EvidenceBuilder addAddress(ghidra.program.model.address.Address address) {
-				return this;
-			}
-
-			@Override
-			public EvidenceBuilder payload(java.util.Map<String, Object> payload) {
-				return this;
-			}
-
-			@Override
-			public EvidenceBuilder confidence(double confidence) {
-				return this;
-			}
-
-			@Override
-			public EvidenceBuilder addPredecessor(String predecessorId) {
-				return this;
-			}
-
-			@Override
-			public EvidenceBuilder missionId(String missionId) {
-				return this;
-			}
-
-			@Override
-			public Evidence build() {
-				return null;
-			}
 		}
 	}
 }
