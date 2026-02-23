@@ -14,6 +14,7 @@ required_python_minor="${CYNTRA_REQUIRED_PYTHON_MINOR:-11}"
 required_java_major="${CYNTRA_REQUIRED_JAVA_MAJOR:-21}"
 sync_compile_checklist="${CYNTRA_PREFLIGHT_SYNC_COMPILE_CHECKLIST:-1}"
 sync_compile_verify="${CYNTRA_PREFLIGHT_SYNC_COMPILE_VERIFY:-0}"
+sync_gate_verify="${CYNTRA_PREFLIGHT_SYNC_GATE_VERIFY:-0}"
 sync_require_integrated_worktree="${CYNTRA_PREFLIGHT_REQUIRE_INTEGRATED_WORKTREE:-0}"
 integrated_worktree_branch="${CYNTRA_PREFLIGHT_INTEGRATED_BRANCH:-main}"
 active_gradle_user_home="${CYNTRA_PREFLIGHT_ACTIVE_GRADLE_USER_HOME:-$repo_root/.gradle-user-home}"
@@ -55,7 +56,7 @@ parse_javac_major() {
 
 is_enabled() {
   local value="${1:-}"
-  case "${value,,}" in
+  case "$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" in
     1|true|yes|on)
       return 0
       ;;
@@ -63,79 +64,6 @@ is_enabled() {
       return 1
       ;;
   esac
-}
-
-resolve_integrated_worktree_path() {
-  local configured_path="${CYNTRA_INTEGRATED_WORKTREE_PATH:-}"
-  local requested_branch="${integrated_worktree_branch}"
-  local current_path
-  local worktree_path=""
-  local worktree_branch=""
-  local line
-
-  current_path="$(cd "$repo_root" && pwd -P)"
-
-  if [[ -n "$configured_path" ]]; then
-    [[ -d "$configured_path" ]] || fail "configured integrated worktree path does not exist: $configured_path"
-    (cd "$configured_path" && pwd -P)
-    return 0
-  fi
-
-  while IFS= read -r line; do
-    case "$line" in
-      worktree\ *)
-        worktree_path="${line#worktree }"
-        worktree_branch=""
-        ;;
-      branch\ refs/heads/*)
-        worktree_branch="${line#branch refs/heads/}"
-        if [[ "$worktree_branch" == "$requested_branch" && -n "$worktree_path" && -d "$worktree_path" ]]; then
-          local canonical_path
-          canonical_path="$(cd "$worktree_path" && pwd -P)"
-          if [[ "$canonical_path" != "$current_path" ]]; then
-            printf '%s\n' "$canonical_path"
-            return 0
-          fi
-        fi
-        ;;
-    esac
-  done < <(cd "$repo_root" && git worktree list --porcelain)
-
-  return 1
-}
-
-sync_compile_command_for_worktree() {
-  local worktree_path="$1"
-  local gradle_user_home="$2"
-  printf "cd %q && GRADLE_USER_HOME=%q ./gradlew --no-daemon :Framework-TraceModeling:compileJava :Reverend:compileJava :Reverend:test --tests %q" \
-    "$worktree_path" "$gradle_user_home" "ghidra.reverend.cockpit.*"
-}
-
-run_sync_compile_verification() {
-  local active_path="$1"
-  local integrated_path="$2"
-  local active_gradle_home="$3"
-  local integrated_gradle_home="$4"
-
-  info "running sync compile verification in active worktree"
-  (
-    cd "$active_path"
-    GRADLE_USER_HOME="$active_gradle_home" ./gradlew --no-daemon \
-      :Framework-TraceModeling:compileJava \
-      :Reverend:compileJava \
-      :Reverend:test --tests "ghidra.reverend.cockpit.*"
-  )
-
-  if [[ -n "$integrated_path" ]]; then
-    info "running sync compile verification in integrated worktree: $integrated_path"
-    (
-      cd "$integrated_path"
-      GRADLE_USER_HOME="$integrated_gradle_home" ./gradlew --no-daemon \
-        :Framework-TraceModeling:compileJava \
-        :Reverend:compileJava \
-        :Reverend:test --tests "ghidra.reverend.cockpit.*"
-    )
-  fi
 }
 
 command -v uv >/dev/null 2>&1 || fail "uv is required but not found in PATH"
@@ -322,38 +250,33 @@ if [[ "$run_status_check" == "1" ]]; then
 fi
 
 if is_enabled "$sync_compile_checklist"; then
-  integrated_worktree_path="$(resolve_integrated_worktree_path || true)"
-  integrated_gradle_user_home=""
-  if [[ -z "$integrated_worktree_path" ]]; then
-    if is_enabled "$sync_require_integrated_worktree"; then
-      fail "unable to resolve integrated worktree for branch '${integrated_worktree_branch}' (set CYNTRA_INTEGRATED_WORKTREE_PATH)"
-    fi
-    info "WARN: integrated worktree for branch '${integrated_worktree_branch}' not found; set CYNTRA_INTEGRATED_WORKTREE_PATH to include integrated compile verification"
+  local_require_integrated="0"
+  if is_enabled "$sync_require_integrated_worktree"; then
+    local_require_integrated="1"
   fi
 
-  active_compile_cmd="$(sync_compile_command_for_worktree "$repo_root" "$active_gradle_user_home")"
-  integrated_compile_cmd=""
-  if [[ -n "$integrated_worktree_path" ]]; then
-    integrated_gradle_user_home="${CYNTRA_PREFLIGHT_INTEGRATED_GRADLE_USER_HOME:-$integrated_worktree_path/.gradle-user-home}"
-    integrated_compile_cmd="$(sync_compile_command_for_worktree "$integrated_worktree_path" "$integrated_gradle_user_home")"
+  convergence_args=(
+    "--integrated-branch=${integrated_worktree_branch}"
+    "--require-integrated=${local_require_integrated}"
+  )
+  if [[ -n "${CYNTRA_INTEGRATED_WORKTREE_PATH:-}" ]]; then
+    convergence_args+=("--integrated-path=${CYNTRA_INTEGRATED_WORKTREE_PATH}")
+  fi
+  if ! is_enabled "$sync_compile_verify" && ! is_enabled "$sync_gate_verify"; then
+    convergence_args+=("--checklist-only")
   fi
 
-  info "sync compile checklist (active worktree):"
-  echo "[preflight]   $active_compile_cmd"
-  if [[ -n "$integrated_compile_cmd" ]]; then
-    info "sync compile checklist (integrated worktree):"
-    echo "[preflight]   $integrated_compile_cmd"
-  fi
+  CYNTRA_CONVERGENCE_ACTIVE_GRADLE_USER_HOME="$active_gradle_user_home" \
+  CYNTRA_CONVERGENCE_INTEGRATED_GRADLE_USER_HOME="${CYNTRA_PREFLIGHT_INTEGRATED_GRADLE_USER_HOME:-}" \
+  CYNTRA_CONVERGENCE_RUN_COMPILE="$sync_compile_verify" \
+  CYNTRA_CONVERGENCE_RUN_GATES="$sync_gate_verify" \
+  scripts/cyntra/converge-worktrees.sh "${convergence_args[@]}"
 
-  if is_enabled "$sync_compile_verify"; then
-    [[ -x "$repo_root/gradlew" ]] || fail "active worktree gradlew is missing or not executable: $repo_root/gradlew"
-    if [[ -n "$integrated_worktree_path" ]]; then
-      [[ -x "$integrated_worktree_path/gradlew" ]] || fail "integrated worktree gradlew is missing or not executable: $integrated_worktree_path/gradlew"
-    fi
-    run_sync_compile_verification "$repo_root" "$integrated_worktree_path" "$active_gradle_user_home" "$integrated_gradle_user_home"
-    info "sync compile verification passed"
-  else
-    info "sync compile verification skipped (set CYNTRA_PREFLIGHT_SYNC_COMPILE_VERIFY=1 to execute checklist commands)"
+  if ! is_enabled "$sync_compile_verify"; then
+    info "sync compile verification skipped (set CYNTRA_PREFLIGHT_SYNC_COMPILE_VERIFY=1 to execute compile verification)"
+  fi
+  if ! is_enabled "$sync_gate_verify"; then
+    info "sync gate verification skipped (set CYNTRA_PREFLIGHT_SYNC_GATE_VERIFY=1 to execute gate verification)"
   fi
 fi
 

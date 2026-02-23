@@ -64,6 +64,7 @@ Dispatch waves:
 - `bash scripts/cyntra/gates.sh --mode=all`
 - `scripts/cyntra/validate-roadmap-completion.sh`
 - `CYNTRA_PREFLIGHT_SYNC_COMPILE_VERIFY=1 scripts/cyntra/preflight.sh`
+- `scripts/cyntra/converge-worktrees.sh` (or `--checklist-only` for nightly/per-wave drift sanity)
 
 ## Kernel Control Loop
 - Dispatch one cycle: `scripts/cyntra/run-once.sh`
