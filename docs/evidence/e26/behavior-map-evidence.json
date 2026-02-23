@@ -1,0 +1,57 @@
+{
+  "kind": "malware_behavior_map_bundle",
+  "pack_id": "malware-pack-v1.0.0",
+  "schema_version": 1,
+  "behavior_maps": [
+    {
+      "sample_id": "mz-e26-001",
+      "behaviors": [
+        {
+          "behavior_id": "bm.mz-e26-001.001",
+          "technique": "T1055",
+          "name": "Process Injection",
+          "confidence": 0.92,
+          "evidence_refs": [
+            "local-index://evidence/mz-e26-001/api/writeprocessmemory",
+            "local-index://evidence/mz-e26-001/api/createremotethread"
+          ]
+        },
+        {
+          "behavior_id": "bm.mz-e26-001.002",
+          "technique": "T1112",
+          "name": "Modify Registry",
+          "confidence": 0.87,
+          "evidence_refs": [
+            "local-index://evidence/mz-e26-001/registry/runkey",
+            "local-index://evidence/mz-e26-001/strings/persistence"
+          ]
+        }
+      ]
+    },
+    {
+      "sample_id": "mz-e26-002",
+      "behaviors": [
+        {
+          "behavior_id": "bm.mz-e26-002.001",
+          "technique": "T1027",
+          "name": "Obfuscated Files or Information",
+          "confidence": 0.89,
+          "evidence_refs": [
+            "local-index://evidence/mz-e26-002/entropy/high-sections",
+            "local-index://evidence/mz-e26-002/packer/themida-signature"
+          ]
+        },
+        {
+          "behavior_id": "bm.mz-e26-002.002",
+          "technique": "T1071.001",
+          "name": "Web Protocols",
+          "confidence": 0.9,
+          "evidence_refs": [
+            "local-index://evidence/mz-e26-002/pcap/https",
+            "local-index://evidence/mz-e26-002/api/winhttp_sendrequest"
+          ]
+        }
+      ]
+    }
+  ]
+}

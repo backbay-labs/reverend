@@ -1,0 +1,55 @@
+{
+  "kind": "malware_ioc_bundle_pack",
+  "pack_id": "malware-pack-v1.0.0",
+  "bundle_version": "2026.02.23",
+  "bundles": [
+    {
+      "sample_id": "mz-e26-001",
+      "ioc_counts": {
+        "ipv4": 1,
+        "domain": 1,
+        "url": 1,
+        "mutex": 1,
+        "registry": 1,
+        "file_path": 1
+      },
+      "iocs": {
+        "ipv4": ["198.51.100.42"],
+        "domain": ["update-sync-example.net"],
+        "url": ["http://update-sync-example.net/api/v1/checkin"],
+        "mutex": ["Global\\UpdaterLock_E26"],
+        "registry": ["HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater"],
+        "file_path": ["%APPDATA%\\updater\\svc.exe"]
+      },
+      "evidence_refs": [
+        "local-index://evidence/mz-e26-001/strings/network",
+        "local-index://evidence/mz-e26-001/api/socket_connect",
+        "local-index://evidence/mz-e26-001/registry/runkey"
+      ]
+    },
+    {
+      "sample_id": "mz-e26-002",
+      "ioc_counts": {
+        "ipv4": 1,
+        "domain": 1,
+        "url": 1,
+        "mutex": 1,
+        "registry": 0,
+        "file_path": 1
+      },
+      "iocs": {
+        "ipv4": ["203.0.113.87"],
+        "domain": ["secure-sync-gateway.org"],
+        "url": ["https://secure-sync-gateway.org/collector"],
+        "mutex": ["{C3A0EA7B-4C1F-4476-953A-9D4A93E90A1B}"],
+        "registry": [],
+        "file_path": ["%PROGRAMDATA%\\svc_host\\cache.bin"]
+      },
+      "evidence_refs": [
+        "local-index://evidence/mz-e26-002/pcap/https",
+        "local-index://evidence/mz-e26-002/strings/mutex",
+        "local-index://evidence/mz-e26-002/filesystem/dropper"
+      ]
+    }
+  ]
+}
