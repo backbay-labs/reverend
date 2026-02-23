@@ -1,0 +1,433 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mission DSL",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mission_id",
+    "mission_kind",
+    "description",
+    "inputs",
+    "outputs",
+    "policies",
+    "stages"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "mission_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]{2,127}$"
+    },
+    "mission_kind": {
+      "type": "string",
+      "enum": [
+        "triage",
+        "protocol",
+        "diff",
+        "deobf"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/mission_input"
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/mission_output"
+      }
+    },
+    "policies": {
+      "$ref": "#/$defs/policies"
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/stage"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]{1,127}$"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,63}$"
+    },
+    "value_type": {
+      "type": "string",
+      "enum": [
+        "string",
+        "integer",
+        "number",
+        "boolean",
+        "array",
+        "object"
+      ]
+    },
+    "retry_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_attempts",
+        "backoff_strategy",
+        "initial_delay_ms",
+        "jitter"
+      ],
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "backoff_strategy": {
+          "type": "string",
+          "enum": [
+            "fixed",
+            "linear",
+            "exponential"
+          ]
+        },
+        "initial_delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600000
+        },
+        "jitter": {
+          "type": "string",
+          "enum": [
+            "none",
+            "full",
+            "decorrelated"
+          ]
+        }
+      }
+    },
+    "io_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "type": {
+          "$ref": "#/$defs/value_type"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "mission_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "description",
+        "required"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "type": {
+          "$ref": "#/$defs/value_type"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "stage_output_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "stage_id",
+        "output"
+      ],
+      "properties": {
+        "kind": {
+          "const": "stage_output"
+        },
+        "stage_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "output": {
+          "$ref": "#/$defs/name"
+        }
+      }
+    },
+    "mission_input_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "input"
+      ],
+      "properties": {
+        "kind": {
+          "const": "mission_input"
+        },
+        "input": {
+          "$ref": "#/$defs/name"
+        }
+      }
+    },
+    "stage_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "source": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/mission_input_ref"
+            },
+            {
+              "$ref": "#/$defs/stage_output_ref"
+            }
+          ]
+        }
+      }
+    },
+    "mission_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/$defs/stage_output_ref"
+        }
+      }
+    },
+    "stage_policy_override": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_input_records": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "execution_mode": {
+          "type": "string",
+          "enum": [
+            "serial",
+            "parallel_deterministic"
+          ]
+        },
+        "stable_sort_key": {
+          "type": "string",
+          "enum": [
+            "stage_id_asc",
+            "priority_then_stage_id"
+          ]
+        }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "order",
+        "kind",
+        "description",
+        "depends_on",
+        "inputs",
+        "outputs"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ingest",
+            "normalize",
+            "analyze",
+            "rank",
+            "review",
+            "apply",
+            "report"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stage_input"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/io_binding"
+          }
+        },
+        "policy_override": {
+          "$ref": "#/$defs/stage_policy_override"
+        },
+        "retry": {
+          "$ref": "#/$defs/retry_policy"
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "determinism",
+        "conflict_resolution",
+        "approval",
+        "retry_defaults"
+      ],
+      "properties": {
+        "determinism": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "execution_order",
+            "stage_selector",
+            "allow_randomness"
+          ],
+          "properties": {
+            "execution_order": {
+              "type": "string",
+              "enum": [
+                "linear",
+                "topological_sorted"
+              ]
+            },
+            "stage_selector": {
+              "type": "string",
+              "enum": [
+                "explicit_ids_only"
+              ]
+            },
+            "allow_randomness": {
+              "type": "boolean"
+            }
+          }
+        },
+        "conflict_resolution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_priority_order",
+            "confidence_margin",
+            "tie_breaker"
+          ],
+          "properties": {
+            "source_priority_order": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "human",
+                  "static_analysis",
+                  "ml_model",
+                  "heuristic"
+                ]
+              }
+            },
+            "confidence_margin": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tie_breaker": {
+              "type": "string",
+              "enum": [
+                "stage_order_then_id",
+                "source_priority_then_stage_id"
+              ]
+            }
+          }
+        },
+        "approval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "human_review_on_apply",
+            "auto_apply_threshold"
+          ],
+          "properties": {
+            "human_review_on_apply": {
+              "type": "boolean"
+            },
+            "auto_apply_threshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "retry_defaults": {
+          "$ref": "#/$defs/retry_policy"
+        }
+      }
+    }
+  }
+}

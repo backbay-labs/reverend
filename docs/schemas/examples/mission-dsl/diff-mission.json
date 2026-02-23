@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "mission_id": "diff.semantic.v1",
+  "mission_kind": "diff",
+  "description": "Semantic diff mission with deterministic matching and output bundles.",
+  "inputs": [
+    {
+      "name": "left_program",
+      "type": "object",
+      "description": "Normalized left-side program artifact.",
+      "required": true
+    },
+    {
+      "name": "right_program",
+      "type": "object",
+      "description": "Normalized right-side program artifact.",
+      "required": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "semantic_diff",
+      "description": "Deterministic semantic diff report.",
+      "source": {
+        "kind": "stage_output",
+        "stage_id": "emit_diff_report",
+        "output": "semantic_diff"
+      }
+    }
+  ],
+  "policies": {
+    "determinism": {
+      "execution_order": "linear",
+      "stage_selector": "explicit_ids_only",
+      "allow_randomness": false
+    },
+    "conflict_resolution": {
+      "source_priority_order": [
+        "static_analysis",
+        "human",
+        "ml_model",
+        "heuristic"
+      ],
+      "confidence_margin": 0.08,
+      "tie_breaker": "stage_order_then_id"
+    },
+    "approval": {
+      "human_review_on_apply": true,
+      "auto_apply_threshold": 0.99
+    },
+    "retry_defaults": {
+      "max_attempts": 2,
+      "backoff_strategy": "fixed",
+      "initial_delay_ms": 300,
+      "jitter": "none"
+    }
+  },
+  "stages": [
+    {
+      "id": "normalize_inputs",
+      "order": 1,
+      "kind": "normalize",
+      "description": "Normalize both programs into canonical representations.",
+      "depends_on": [],
+      "inputs": [
+        {
+          "name": "left_program",
+          "source": {
+            "kind": "mission_input",
+            "input": "left_program"
+          }
+        },
+        {
+          "name": "right_program",
+          "source": {
+            "kind": "mission_input",
+            "input": "right_program"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "left_ir",
+          "type": "object",
+          "description": "Canonical left intermediate representation."
+        },
+        {
+          "name": "right_ir",
+          "type": "object",
+          "description": "Canonical right intermediate representation."
+        }
+      ]
+    },
+    {
+      "id": "compute_matches",
+      "order": 2,
+      "kind": "analyze",
+      "description": "Compute deterministic function and block matches.",
+      "depends_on": [
+        "normalize_inputs"
+      ],
+      "inputs": [
+        {
+          "name": "left_ir",
+          "source": {
+            "kind": "stage_output",
+            "stage_id": "normalize_inputs",
+            "output": "left_ir"
+          }
+        },
+        {
+          "name": "right_ir",
+          "source": {
+            "kind": "stage_output",
+            "stage_id": "normalize_inputs",
+            "output": "right_ir"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "matches",
+          "type": "array",
+          "description": "Deterministic match candidates and confidence bands."
+        }
+      ]
+    },
+    {
+      "id": "emit_diff_report",
+      "order": 3,
+      "kind": "report",
+      "description": "Emit semantic diff report artifact.",
+      "depends_on": [
+        "compute_matches"
+      ],
+      "inputs": [
+        {
+          "name": "matches",
+          "source": {
+            "kind": "stage_output",
+            "stage_id": "compute_matches",
+            "output": "matches"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "semantic_diff",
+          "type": "object",
+          "description": "Machine-readable semantic diff report."
+        }
+      ]
+    }
+  ]
+}
