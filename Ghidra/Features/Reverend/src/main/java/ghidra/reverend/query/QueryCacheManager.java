@@ -21,8 +21,12 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import ghidra.program.model.address.Address;
+import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Instruction;
+import ghidra.program.model.listing.InstructionIterator;
 import ghidra.program.model.listing.Program;
 import ghidra.reverend.api.v1.QueryService.QueryContext;
 import ghidra.reverend.api.v1.QueryService.QueryResult;
@@ -57,11 +61,12 @@ public class QueryCacheManager {
 
 	/** Default TTL for cache entries in milliseconds (30 minutes) */
 	private static final long DEFAULT_CACHE_TTL_MS = 30 * 60 * 1000;
-	private static final int FEATURE_INDEX_SCHEMA_VERSION = 2;
+	private static final int FEATURE_INDEX_SCHEMA_VERSION = 3;
 	private static final int FEATURE_INDEX_FORMAT_VERSION = 1;
 	private static final long MAX_INCREMENTAL_VERSION_DELTA = 1024;
 	private static final String INDEX_DIR_PROPERTY = "ghidra.reverend.query.indexDir";
 	private static final String DEFAULT_INDEX_DIR = ".reverend/query-index-v2";
+	private static final Pattern TOKEN_SPLIT_PATTERN = Pattern.compile("[^a-z0-9]+");
 
 	private final Map<Program, ProgramQueryCache> programCaches = new ConcurrentHashMap<>();
 	private final CacheStatistics statistics = new CacheStatistics();
@@ -369,6 +374,48 @@ public class QueryCacheManager {
 		}
 	}
 
+	/**
+	 * Ensures indexed function features exist for the provided functions.
+	 *
+	 * @param program the program
+	 * @param functions functions that should have indexed features
+	 * @return feature batch containing indexed/reused counts and feature lookup map
+	 */
+	public FunctionFeatureBatch ensureFunctionFeatures(Program program,
+			Collection<Function> functions) {
+		ProgramQueryCache cache = programCaches.get(program);
+		if (cache == null || functions == null || functions.isEmpty()) {
+			return FunctionFeatureBatch.empty();
+		}
+		return cache.ensureFunctionFeatures(functions);
+	}
+
+	/**
+	 * Returns indexed features for a function entry if present.
+	 *
+	 * @param program the program
+	 * @param functionEntry function entry address
+	 * @return indexed features or {@code null} if not indexed
+	 */
+	public IndexedFunctionFeatures getIndexedFunctionFeatures(Program program, Address functionEntry) {
+		ProgramQueryCache cache = programCaches.get(program);
+		if (cache == null || functionEntry == null) {
+			return null;
+		}
+		return cache.getIndexedFunctionFeatures(functionEntry);
+	}
+
+	/**
+	 * Returns how many function feature entries are indexed for the program.
+	 *
+	 * @param program the program
+	 * @return indexed feature entry count
+	 */
+	public int getIndexedFunctionFeatureCount(Program program) {
+		ProgramQueryCache cache = programCaches.get(program);
+		return cache != null ? cache.getIndexedFunctionFeatureCount() : 0;
+	}
+
 	// --- Configuration ---
 
 	/**
@@ -415,6 +462,8 @@ public class QueryCacheManager {
 			new ConcurrentHashMap<>();
 		private final Map<Address, CacheEntry<QueryContext>> contextCache =
 			new ConcurrentHashMap<>();
+		private final Map<String, IndexedFunctionFeatures> functionFeatureIndex =
+			new ConcurrentHashMap<>();
 		private final Set<String> similarFeatureKeys = ConcurrentHashMap.newKeySet();
 		private final Set<String> semanticFeatureKeys = ConcurrentHashMap.newKeySet();
 		private final Set<String> patternFeatureKeys = ConcurrentHashMap.newKeySet();
@@ -434,7 +483,7 @@ public class QueryCacheManager {
 
 		int getEntryCount() {
 			return similarFunctionsCache.size() + semanticSearchCache.size() +
-				patternSearchCache.size() + contextCache.size();
+				patternSearchCache.size() + contextCache.size() + functionFeatureIndex.size();
 		}
 
 		// Similar functions
@@ -491,6 +540,46 @@ public class QueryCacheManager {
 			persistFeatureIndex();
 		}
 
+		FunctionFeatureBatch ensureFunctionFeatures(Collection<Function> functions) {
+			if (functions == null || functions.isEmpty()) {
+				return FunctionFeatureBatch.empty();
+			}
+
+			int indexedCount = 0;
+			int reusedCount = 0;
+			Map<String, IndexedFunctionFeatures> features = new HashMap<>();
+			for (Function function : functions) {
+				if (function == null || function.getEntryPoint() == null) {
+					continue;
+				}
+				String entryKey = addressKey(function.getEntryPoint());
+				IndexedFunctionFeatures existing = functionFeatureIndex.get(entryKey);
+				if (existing != null) {
+					reusedCount++;
+					features.put(entryKey, existing);
+					continue;
+				}
+				IndexedFunctionFeatures created = IndexedFunctionFeatures.fromFunction(function);
+				functionFeatureIndex.put(entryKey, created);
+				features.put(entryKey, created);
+				indexedCount++;
+			}
+
+			if (indexedCount > 0) {
+				touchProgramVersion();
+				persistFeatureIndex();
+			}
+			return new FunctionFeatureBatch(features, indexedCount, reusedCount);
+		}
+
+		IndexedFunctionFeatures getIndexedFunctionFeatures(Address functionEntry) {
+			return functionEntry != null ? functionFeatureIndex.get(addressKey(functionEntry)) : null;
+		}
+
+		int getIndexedFunctionFeatureCount() {
+			return functionFeatureIndex.size();
+		}
+
 		// Invalidation methods
 		int invalidateFunctionCaches() {
 			int count = similarFunctionsCache.size();
@@ -501,24 +590,51 @@ public class QueryCacheManager {
 			semanticFeatureKeys.clear();
 			semanticKeysByFunctionEntry.clear();
 			functionEntriesBySemanticKey.clear();
+			count += functionFeatureIndex.size();
+			functionFeatureIndex.clear();
 			touchProgramVersion();
 			persistFeatureIndex();
 			return count;
 		}
 
 		int invalidateFunctionCaches(Collection<Address> functionEntries) {
-			int count = 0;
+			Set<String> functionKeys = new HashSet<>();
 			for (Address entryPoint : functionEntries) {
-				if (entryPoint == null) {
-					continue;
+				if (entryPoint != null) {
+					functionKeys.add(addressKey(entryPoint));
 				}
-				String similarKey = CacheKeyGenerator.forSimilarFunctions(entryPoint.toString());
-				if (similarFunctionsCache.remove(similarKey) != null) {
+			}
+			int count = invalidateFunctionCachesByKeys(functionKeys);
+			if (count > 0) {
+				touchProgramVersion();
+				persistFeatureIndex();
+			}
+			return count;
+		}
+
+		private int invalidateFunctionCachesByKeys(Collection<String> functionKeys) {
+			if (functionKeys == null || functionKeys.isEmpty()) {
+				return 0;
+			}
+			int count = 0;
+			for (String functionKey : functionKeys) {
+				Address entryPoint = resolveAddress(program, functionKey);
+				if (entryPoint != null) {
+					String similarKey = CacheKeyGenerator.forSimilarFunctions(entryPoint.toString());
+					if (similarFunctionsCache.remove(similarKey) != null) {
+						count++;
+					}
+					similarFeatureKeys.remove(similarKey);
+				}
+				else {
+					count += similarFunctionsCache.size();
+					similarFunctionsCache.clear();
+					similarFeatureKeys.clear();
+				}
+
+				if (functionFeatureIndex.remove(functionKey) != null) {
 					count++;
 				}
-				similarFeatureKeys.remove(similarKey);
-
-				String functionKey = addressKey(entryPoint);
 				Set<String> semanticKeys = semanticKeysByFunctionEntry.remove(functionKey);
 				if (semanticKeys == null) {
 					continue;
@@ -542,10 +658,6 @@ public class QueryCacheManager {
 					}
 				}
 			}
-			if (count > 0) {
-				touchProgramVersion();
-				persistFeatureIndex();
-			}
 			return count;
 		}
 
@@ -568,6 +680,16 @@ public class QueryCacheManager {
 			contextFeatureAddresses.clear();
 			patternKeysByAddress.clear();
 			addressesByPatternKey.clear();
+			count += similarFunctionsCache.size();
+			similarFunctionsCache.clear();
+			similarFeatureKeys.clear();
+			count += semanticSearchCache.size();
+			semanticSearchCache.clear();
+			semanticFeatureKeys.clear();
+			semanticKeysByFunctionEntry.clear();
+			functionEntriesBySemanticKey.clear();
+			count += functionFeatureIndex.size();
+			functionFeatureIndex.clear();
 			touchProgramVersion();
 			persistFeatureIndex();
 			return count;
@@ -627,6 +749,17 @@ public class QueryCacheManager {
 				}
 			}
 
+			Set<String> affectedFunctionKeys = new HashSet<>();
+			for (Map.Entry<String, IndexedFunctionFeatures> entry : new ArrayList<>(functionFeatureIndex.entrySet())) {
+				IndexedFunctionFeatures feature = entry.getValue();
+				if (feature != null && feature.overlapsRange(space, minOffset, maxOffset)) {
+					affectedFunctionKeys.add(entry.getKey());
+				}
+			}
+			if (!affectedFunctionKeys.isEmpty()) {
+				count += invalidateFunctionCachesByKeys(affectedFunctionKeys);
+			}
+
 			if (count > 0) {
 				touchProgramVersion();
 				persistFeatureIndex();
@@ -640,6 +773,7 @@ public class QueryCacheManager {
 			semanticSearchCache.clear();
 			patternSearchCache.clear();
 			contextCache.clear();
+			functionFeatureIndex.clear();
 			similarFeatureKeys.clear();
 			semanticFeatureKeys.clear();
 			patternFeatureKeys.clear();
@@ -766,6 +900,8 @@ public class QueryCacheManager {
 				patternFeatureKeys.addAll(persisted.patternFeatureKeys);
 				contextFeatureAddresses.clear();
 				contextFeatureAddresses.addAll(persisted.contextFeatureAddresses);
+				functionFeatureIndex.clear();
+				functionFeatureIndex.putAll(copyFeatureMap(persisted.functionFeatureIndex));
 				functionEntriesBySemanticKey.clear();
 				functionEntriesBySemanticKey.putAll(copyMap(persisted.functionEntriesBySemanticKey));
 				addressesByPatternKey.clear();
@@ -790,6 +926,7 @@ public class QueryCacheManager {
 					semanticFeatureKeys,
 					patternFeatureKeys,
 					contextFeatureAddresses,
+					functionFeatureIndex,
 					functionEntriesBySemanticKey,
 					semanticKeysByFunctionEntry,
 					addressesByPatternKey,
@@ -926,6 +1063,21 @@ public class QueryCacheManager {
 			}
 			return copy;
 		}
+
+		private Map<String, IndexedFunctionFeatures> copyFeatureMap(
+				Map<String, IndexedFunctionFeatures> source) {
+			Map<String, IndexedFunctionFeatures> copy = new HashMap<>();
+			if (source == null) {
+				return copy;
+			}
+			for (Map.Entry<String, IndexedFunctionFeatures> entry : source.entrySet()) {
+				IndexedFunctionFeatures value = entry.getValue();
+				if (entry.getKey() != null && value != null) {
+					copy.put(entry.getKey(), value);
+				}
+			}
+			return copy;
+		}
 	}
 
 	private static final class AddressKey {
@@ -997,12 +1149,245 @@ public class QueryCacheManager {
 		return address.getAddressSpace().getName() + ":" + Long.toUnsignedString(address.getOffset(), 16);
 	}
 
+	private static Address resolveAddress(Program program, String encodedAddress) {
+		if (program == null || encodedAddress == null) {
+			return null;
+		}
+		AddressKey key = AddressKey.parse(encodedAddress);
+		if (key == null) {
+			return null;
+		}
+		try {
+			return program.getAddressFactory()
+				.getAddressSpace(key.spaceName)
+				.getAddress(key.offset);
+		}
+		catch (RuntimeException e) {
+			return null;
+		}
+	}
+
 	private static <T> T safeCall(Supplier<T> supplier, T fallback) {
 		try {
 			T value = supplier.get();
 			return value != null ? value : fallback;
 		} catch (RuntimeException e) {
 			return fallback;
+		}
+	}
+
+	private static String normalize(String value) {
+		if (value == null) {
+			return "";
+		}
+		return value.trim().toLowerCase(Locale.ROOT);
+	}
+
+	private static Set<String> tokenize(String... values) {
+		Set<String> tokens = new HashSet<>();
+		if (values == null) {
+			return tokens;
+		}
+		for (String value : values) {
+			if (value == null || value.isBlank()) {
+				continue;
+			}
+			String[] split = TOKEN_SPLIT_PATTERN.split(value);
+			for (String token : split) {
+				if (!token.isBlank()) {
+					tokens.add(token);
+				}
+			}
+		}
+		return tokens;
+	}
+
+	public static final class FunctionFeatureBatch {
+		private static final FunctionFeatureBatch EMPTY =
+			new FunctionFeatureBatch(Collections.emptyMap(), 0, 0);
+
+		private final Map<String, IndexedFunctionFeatures> featuresByEntryKey;
+		private final int indexedCount;
+		private final int reusedCount;
+
+		private FunctionFeatureBatch(Map<String, IndexedFunctionFeatures> featuresByEntryKey,
+				int indexedCount, int reusedCount) {
+			this.featuresByEntryKey = Collections.unmodifiableMap(new HashMap<>(featuresByEntryKey));
+			this.indexedCount = indexedCount;
+			this.reusedCount = reusedCount;
+		}
+
+		static FunctionFeatureBatch empty() {
+			return EMPTY;
+		}
+
+		public int getIndexedCount() {
+			return indexedCount;
+		}
+
+		public int getReusedCount() {
+			return reusedCount;
+		}
+
+		public int getFeatureCount() {
+			return featuresByEntryKey.size();
+		}
+
+		public IndexedFunctionFeatures get(Address entryAddress) {
+			if (entryAddress == null) {
+				return null;
+			}
+			return featuresByEntryKey.get(addressKey(entryAddress));
+		}
+
+		public Map<String, IndexedFunctionFeatures> asMap() {
+			return featuresByEntryKey;
+		}
+	}
+
+	public static final class IndexedFunctionFeatures implements Serializable {
+		private static final long serialVersionUID = 1L;
+
+		private final String entryKey;
+		private final String functionName;
+		private final String normalizedFunctionName;
+		private final String normalizedComment;
+		private final String normalizedReturnType;
+		private final String normalizedCallingConvention;
+		private final int parameterCount;
+		private final long bodySize;
+		private final int callCount;
+		private final String bodyMinKey;
+		private final String bodyMaxKey;
+		private final Set<String> lexicalTokens;
+
+		private IndexedFunctionFeatures(String entryKey, String functionName,
+				String normalizedFunctionName, String normalizedComment, String normalizedReturnType,
+				String normalizedCallingConvention, int parameterCount, long bodySize,
+				int callCount, String bodyMinKey, String bodyMaxKey, Set<String> lexicalTokens) {
+			this.entryKey = entryKey;
+			this.functionName = functionName;
+			this.normalizedFunctionName = normalizedFunctionName;
+			this.normalizedComment = normalizedComment;
+			this.normalizedReturnType = normalizedReturnType;
+			this.normalizedCallingConvention = normalizedCallingConvention;
+			this.parameterCount = parameterCount;
+			this.bodySize = bodySize;
+			this.callCount = callCount;
+			this.bodyMinKey = bodyMinKey;
+			this.bodyMaxKey = bodyMaxKey;
+			this.lexicalTokens = Collections.unmodifiableSet(new HashSet<>(lexicalTokens));
+		}
+
+		static IndexedFunctionFeatures fromFunction(Function function) {
+			Address entry = function.getEntryPoint();
+			Address bodyMin = function.getBody() != null ? function.getBody().getMinAddress() : null;
+			Address bodyMax = function.getBody() != null ? function.getBody().getMaxAddress() : null;
+			long size = function.getBody() != null ? function.getBody().getNumAddresses() : 0;
+			int calls = getCallCount(function);
+			String functionName = safeString(function.getName(), "unknown");
+			String normalizedName = normalize(functionName);
+			String normalizedComment = normalize(function.getComment());
+			String normalizedReturnType = normalize(
+				function.getReturnType() != null ? function.getReturnType().toString() : "");
+			String normalizedCallingConvention = normalize(function.getCallingConventionName());
+			Set<String> lexicalTokens = tokenize(normalizedName, normalizedComment);
+			return new IndexedFunctionFeatures(
+				addressKey(entry),
+				functionName,
+				normalizedName,
+				normalizedComment,
+				normalizedReturnType,
+				normalizedCallingConvention,
+				function.getParameterCount(),
+				size,
+				calls,
+				addressKey(bodyMin != null ? bodyMin : entry),
+				addressKey(bodyMax != null ? bodyMax : entry),
+				lexicalTokens);
+		}
+
+		public String getEntryKey() {
+			return entryKey;
+		}
+
+		public String getFunctionName() {
+			return functionName;
+		}
+
+		public String getNormalizedFunctionName() {
+			return normalizedFunctionName;
+		}
+
+		public String getNormalizedComment() {
+			return normalizedComment;
+		}
+
+		public String getNormalizedReturnType() {
+			return normalizedReturnType;
+		}
+
+		public String getNormalizedCallingConvention() {
+			return normalizedCallingConvention;
+		}
+
+		public int getParameterCount() {
+			return parameterCount;
+		}
+
+		public long getBodySize() {
+			return bodySize;
+		}
+
+		public int getCallCount() {
+			return callCount;
+		}
+
+		public Set<String> getLexicalTokens() {
+			return lexicalTokens;
+		}
+
+		boolean overlapsRange(String spaceName, long minOffset, long maxOffset) {
+			AddressKey min = AddressKey.parse(bodyMinKey);
+			AddressKey max = AddressKey.parse(bodyMaxKey);
+			if (min == null || max == null) {
+				return false;
+			}
+			if (!Objects.equals(min.spaceName, spaceName) || !Objects.equals(max.spaceName, spaceName)) {
+				return false;
+			}
+			long bodyMin = Math.min(min.offset, max.offset);
+			long bodyMax = Math.max(min.offset, max.offset);
+			return bodyMax >= minOffset && bodyMin <= maxOffset;
+		}
+
+		private static int getCallCount(Function function) {
+			if (function == null || function.getBody() == null || function.getBody().isEmpty()) {
+				return 0;
+			}
+			int calls = 0;
+			try {
+				InstructionIterator instructions = function.getProgram().getListing()
+					.getInstructions(function.getBody(), true);
+				while (instructions.hasNext()) {
+					Instruction instruction = instructions.next();
+					if (instruction.getFlowType().isCall()) {
+						calls++;
+					}
+				}
+			}
+			catch (RuntimeException e) {
+				return 0;
+			}
+			return calls;
+		}
+
+		private static String safeString(String value, String fallback) {
+			if (value == null) {
+				return fallback;
+			}
+			String trimmed = value.trim();
+			return trimmed.isEmpty() ? fallback : trimmed;
 		}
 	}
 
@@ -1017,6 +1402,7 @@ public class QueryCacheManager {
 		private final Set<String> semanticFeatureKeys;
 		private final Set<String> patternFeatureKeys;
 		private final Set<String> contextFeatureAddresses;
+		private final Map<String, IndexedFunctionFeatures> functionFeatureIndex;
 		private final Map<String, Set<String>> functionEntriesBySemanticKey;
 		private final Map<String, Set<String>> semanticKeysByFunctionEntry;
 		private final Map<String, Set<String>> addressesByPatternKey;
@@ -1025,6 +1411,7 @@ public class QueryCacheManager {
 		private PersistedFeatureIndex(String programIdentity, long lastKnownProgramVersion,
 				Set<String> similarFeatureKeys, Set<String> semanticFeatureKeys,
 				Set<String> patternFeatureKeys, Set<String> contextFeatureAddresses,
+				Map<String, IndexedFunctionFeatures> functionFeatureIndex,
 				Map<String, Set<String>> functionEntriesBySemanticKey,
 				Map<String, Set<String>> semanticKeysByFunctionEntry,
 				Map<String, Set<String>> addressesByPatternKey,
@@ -1037,6 +1424,7 @@ public class QueryCacheManager {
 			this.semanticFeatureKeys = new TreeSet<>(semanticFeatureKeys);
 			this.patternFeatureKeys = new TreeSet<>(patternFeatureKeys);
 			this.contextFeatureAddresses = new TreeSet<>(contextFeatureAddresses);
+			this.functionFeatureIndex = normalizeFeatures(functionFeatureIndex);
 			this.functionEntriesBySemanticKey = normalize(functionEntriesBySemanticKey);
 			this.semanticKeysByFunctionEntry = normalize(semanticKeysByFunctionEntry);
 			this.addressesByPatternKey = normalize(addressesByPatternKey);
@@ -1046,12 +1434,14 @@ public class QueryCacheManager {
 		static PersistedFeatureIndex create(String programIdentity, long lastKnownProgramVersion,
 				Set<String> similarFeatureKeys, Set<String> semanticFeatureKeys,
 				Set<String> patternFeatureKeys, Set<String> contextFeatureAddresses,
+				Map<String, IndexedFunctionFeatures> functionFeatureIndex,
 				Map<String, Set<String>> functionEntriesBySemanticKey,
 				Map<String, Set<String>> semanticKeysByFunctionEntry,
 				Map<String, Set<String>> addressesByPatternKey,
 				Map<String, Set<String>> patternKeysByAddress) {
 			return new PersistedFeatureIndex(programIdentity, lastKnownProgramVersion,
 				similarFeatureKeys, semanticFeatureKeys, patternFeatureKeys, contextFeatureAddresses,
+				functionFeatureIndex,
 				functionEntriesBySemanticKey, semanticKeysByFunctionEntry, addressesByPatternKey,
 				patternKeysByAddress);
 		}
@@ -1066,6 +1456,20 @@ public class QueryCacheManager {
 			Map<String, Set<String>> normalized = new TreeMap<>();
 			for (Map.Entry<String, Set<String>> entry : map.entrySet()) {
 				normalized.put(entry.getKey(), new TreeSet<>(entry.getValue()));
+			}
+			return normalized;
+		}
+
+		private static Map<String, IndexedFunctionFeatures> normalizeFeatures(
+				Map<String, IndexedFunctionFeatures> map) {
+			Map<String, IndexedFunctionFeatures> normalized = new TreeMap<>();
+			if (map == null) {
+				return normalized;
+			}
+			for (Map.Entry<String, IndexedFunctionFeatures> entry : map.entrySet()) {
+				if (entry.getKey() != null && entry.getValue() != null) {
+					normalized.put(entry.getKey(), entry.getValue());
+				}
 			}
 			return normalized;
 		}

@@ -39,7 +39,7 @@
  *
  * <ul>
  *   <li><b>Function changes</b> (add/remove/modify): Invalidates function similarity
- *       and semantic search caches</li>
+ *       and semantic search caches plus per-function indexed features</li>
  *   <li><b>Symbol changes</b> (add/remove/rename): Invalidates semantic search caches
  *       that depend on symbol names</li>
  *   <li><b>Code changes</b> (add/remove/replace): Invalidates pattern search and
