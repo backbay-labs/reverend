@@ -23,6 +23,7 @@ import ghidra.framework.plugintool.PluginTool;
 import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.model.listing.Program;
 import ghidra.reverend.api.v1.EvidenceService;
+import ghidra.reverend.api.v1.MissionService;
 import ghidra.reverend.api.v1.ProposalIntegrationService;
 import ghidra.reverend.api.v1.QueryService;
 
@@ -55,6 +56,7 @@ public class CockpitPlugin extends ProgramPlugin {
 	private QueryService queryService;
 	private EvidenceService evidenceService;
 	private ProposalIntegrationService proposalService;
+	private MissionService missionService;
 	private final CockpitServiceBootstrap serviceBootstrap = new CockpitServiceBootstrap();
 
 	private CockpitSearchProvider searchProvider;
@@ -78,7 +80,8 @@ public class CockpitPlugin extends ProgramPlugin {
 	}
 
 	private void initializeServices() {
-		if (queryService != null && evidenceService != null && proposalService != null) {
+		if (queryService != null && evidenceService != null && proposalService != null &&
+			missionService != null) {
 			return;
 		}
 
@@ -91,6 +94,9 @@ public class CockpitPlugin extends ProgramPlugin {
 		}
 		if (proposalService == null) {
 			proposalService = serviceBootstrap.getProposalService();
+		}
+		if (missionService == null) {
+			missionService = serviceBootstrap.getMissionService();
 		}
 	}
 
@@ -131,6 +137,15 @@ public class CockpitPlugin extends ProgramPlugin {
 		this.proposalService = proposalService;
 	}
 
+	/**
+	 * Sets the mission service for mission operations.
+	 *
+	 * @param missionService the mission service
+	 */
+	public void setMissionService(MissionService missionService) {
+		this.missionService = missionService;
+	}
+
 	private void createProviders() {
 		createSearchProvider();
 		createEvidenceProvider();
@@ -168,8 +183,12 @@ public class CockpitPlugin extends ProgramPlugin {
 		if (proposalService == null) {
 			initializeServices();
 		}
-		if (proposalService != null) {
-			tool.addAction(navigationActions.createProposalAction(proposalService));
+		if (missionService == null) {
+			initializeServices();
+		}
+		if (proposalService != null && missionService != null && evidenceService != null) {
+			tool.addAction(
+				navigationActions.createProposalAction(proposalService, missionService, evidenceService));
 		}
 	}
 
@@ -214,7 +233,8 @@ public class CockpitPlugin extends ProgramPlugin {
 		}
 		return queryService == serviceBootstrap.getQueryService() ||
 			evidenceService == serviceBootstrap.getEvidenceService() ||
-			proposalService == serviceBootstrap.getProposalService();
+			proposalService == serviceBootstrap.getProposalService() ||
+			missionService == serviceBootstrap.getMissionService();
 	}
 
 	@Override

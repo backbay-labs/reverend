@@ -33,9 +33,12 @@ import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.program.model.symbol.ReferenceManager;
 import ghidra.program.util.ProgramLocation;
+import ghidra.reverend.api.v1.EvidenceService;
+import ghidra.reverend.api.v1.MissionService;
 import ghidra.reverend.api.v1.ProposalIntegrationService;
 import ghidra.util.HelpLocation;
 import ghidra.util.Msg;
+import ghidra.util.task.TaskMonitor;
 import resources.Icons;
 
 /**
@@ -169,14 +172,15 @@ public class CockpitNavigationActions {
 	 * @param proposalService the proposal service
 	 * @return the action
 	 */
-	public DockingAction createProposalAction(ProposalIntegrationService proposalService) {
+	public DockingAction createProposalAction(ProposalIntegrationService proposalService,
+			MissionService missionService, EvidenceService evidenceService) {
 		DockingAction action = new DockingAction("Create Proposal", OWNER) {
 			@Override
 			public void actionPerformed(ActionContext context) {
 				Address address = addressSupplier.get();
 				Program program = programSupplier.get();
 				if (address != null && program != null) {
-					createProposal(program, address, proposalService);
+					createProposal(program, address, proposalService, missionService, evidenceService);
 				}
 			}
 
@@ -263,7 +267,8 @@ public class CockpitNavigationActions {
 	}
 
 	private void createProposal(Program program, Address address,
-			ProposalIntegrationService proposalService) {
+			ProposalIntegrationService proposalService, MissionService missionService,
+			EvidenceService evidenceService) {
 		Optional<Function> func = getContainingFunction(address);
 		if (func.isEmpty()) {
 			Msg.showInfo(this, null, "Create Proposal",
@@ -271,11 +276,24 @@ public class CockpitNavigationActions {
 			return;
 		}
 
-		// For now, just notify that proposal creation would happen here
-		// The actual proposal creation depends on the ProposalIntegrationService implementation
-		Msg.showInfo(this, null, "Create Proposal",
-			"Proposal creation initiated for function " + func.get().getName() +
-				" at " + address);
+		try {
+			CockpitMissionProposalFlow flow =
+				new CockpitMissionProposalFlow(missionService, proposalService, evidenceService);
+			CockpitMissionProposalFlow.Result result = flow.execute(
+				program,
+				address,
+				func.get().getName(),
+				"ui",
+				TaskMonitor.DUMMY);
+
+			Msg.showInfo(this, null, "Create Proposal",
+				"Created proposal " + result.getProposalId() + " from mission " +
+					result.getMissionId() + " with evidence " + result.getEvidenceId());
+		}
+		catch (MissionService.MissionException | ProposalIntegrationService.ProposalCreationException |
+			EvidenceService.EvidenceException e) {
+			Msg.showError(this, null, "Create Proposal Failed", e.getMessage());
+		}
 	}
 
 	private boolean hasXrefs(Address address) {

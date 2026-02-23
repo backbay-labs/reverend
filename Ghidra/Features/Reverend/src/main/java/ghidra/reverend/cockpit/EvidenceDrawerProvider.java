@@ -72,6 +72,8 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 
 	private String currentEvidenceId;
 	private List<Evidence> currentEvidence = new ArrayList<>();
+	private CockpitState.OperationStatus operationStatus = CockpitState.OperationStatus.IDLE;
+	private String operationMessage = "";
 
 	/**
 	 * Creates a new evidence drawer provider.
@@ -183,8 +185,11 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 			return;
 		}
 
+		setOperationState(CockpitState.OperationStatus.LOADING,
+			"Loading evidence for address " + address);
 		List<Evidence> evidence = evidenceService.getForAddress(currentProgram, address);
 		displayEvidence(evidence);
+		setOperationState(CockpitState.OperationStatus.SUCCESS, "Loaded " + evidence.size() + " items");
 		statusLabel.setText(String.format("Evidence for %s: %d items", address, evidence.size()));
 	}
 
@@ -194,6 +199,8 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 			return;
 		}
 
+		setOperationState(CockpitState.OperationStatus.LOADING,
+			"Loading evidence " + currentEvidenceId);
 		Optional<Evidence> evidence = evidenceService.get(currentEvidenceId);
 		if (evidence.isPresent()) {
 			// Get the derivation chain for context
@@ -202,10 +209,14 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 			allEvidence.add(evidence.get());
 			allEvidence.addAll(chain);
 			displayEvidence(allEvidence);
+			setOperationState(CockpitState.OperationStatus.SUCCESS,
+				"Loaded " + allEvidence.size() + " items");
 			statusLabel.setText("Evidence: " + currentEvidenceId);
 		}
 		else {
 			clearEvidence();
+			setOperationState(CockpitState.OperationStatus.ERROR,
+				"Evidence not found: " + currentEvidenceId);
 			statusLabel.setText("Evidence not found: " + currentEvidenceId);
 		}
 	}
@@ -321,7 +332,13 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 		evidenceCardsPanel.removeAll();
 		evidenceCardsPanel.revalidate();
 		evidenceCardsPanel.repaint();
+		setOperationState(CockpitState.OperationStatus.IDLE, "");
 		statusLabel.setText("No evidence selected");
+	}
+
+	private void setOperationState(CockpitState.OperationStatus status, String message) {
+		operationStatus = status != null ? status : CockpitState.OperationStatus.IDLE;
+		operationMessage = message != null ? message : "";
 	}
 
 	private Color getConfidenceColor(double confidence) {
@@ -358,6 +375,14 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 	 */
 	public List<Evidence> getCurrentEvidence() {
 		return Collections.unmodifiableList(currentEvidence);
+	}
+
+	public CockpitState.OperationStatus getOperationStatus() {
+		return operationStatus;
+	}
+
+	public String getOperationMessage() {
+		return operationMessage;
 	}
 
 	@Override

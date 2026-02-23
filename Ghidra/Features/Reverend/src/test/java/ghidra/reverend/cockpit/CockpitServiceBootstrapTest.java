@@ -26,6 +26,7 @@ import ghidra.program.database.ProgramBuilder;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.reverend.api.v1.EvidenceService;
+import ghidra.reverend.api.v1.MissionService;
 import ghidra.reverend.api.v1.QueryService;
 import ghidra.reverend.query.LiveQueryServiceImpl;
 import ghidra.test.AbstractGhidraHeadlessIntegrationTest;
@@ -62,6 +63,7 @@ public class CockpitServiceBootstrapTest extends AbstractGhidraHeadlessIntegrati
 		assertTrue(bootstrap.getQueryService() instanceof LiveQueryServiceImpl);
 		assertTrue(bootstrap.getEvidenceService() instanceof LiveEvidenceServiceImpl);
 		assertTrue(bootstrap.getProposalService() instanceof LiveProposalIntegrationServiceImpl);
+		assertTrue(bootstrap.getMissionService() instanceof LiveMissionServiceImpl);
 	}
 
 	@Test
@@ -87,6 +89,15 @@ public class CockpitServiceBootstrapTest extends AbstractGhidraHeadlessIntegrati
 
 		EvidenceService evidenceService = bootstrap.getEvidenceService();
 		assertFalse(evidenceService.query(program, null, null, null).isEmpty());
+
+		MissionService missionService = bootstrap.getMissionService();
+		MissionService.Mission mission = missionService.create(
+			missionService.specBuilder()
+				.type(MissionService.MissionType.FUNCTION_ID)
+				.program(program)
+				.autoProposal(true)
+				.build());
+		assertEquals(MissionService.MissionState.PENDING, mission.getState());
 	}
 
 	@Test
