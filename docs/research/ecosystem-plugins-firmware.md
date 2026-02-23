@@ -328,6 +328,58 @@ Two main projects bridge angr's symbolic execution engine with Ghidra:
 
 ---
 
+## EPIC E26 Operationalization: Firmware Domain Pack
+
+### Pack Contract (Reproducible + Policy-Safe)
+
+| Contract Element | Requirement | Release Check |
+|---|---|---|
+| `pack_id` | Immutable version tag (example: `firmware-pack-v1.0.0`) | Pack ID and manifest hash included in artifacts |
+| Firmware provenance | Image `sha256`, vendor/version, source URL, license policy result | Unknown/forbidden license class is blocking |
+| Extraction determinism | Toolchain versions for binwalk/unblob/EMBA/FirmAE pinned in manifest | Version drift invalidates run |
+| Execution isolation | Emulation runs in sandboxed VM/network namespace with no production credentials | Isolation profile attached to run metadata |
+| Data handling policy | Offline-first analysis for T3/T4 images; cloud connectors explicitly disabled by default | Policy mode recorded and audited |
+| Artifact traceability | SBOM + component mapping + metric report carry checksum-linked run ID | Missing linkages are blocking |
+
+### Baseline-vs-Pack Lift Harness
+
+Run contract (example, deterministic local runner):
+
+```bash
+bash eval/run_smoke.sh \
+  --real-target-manifest eval/reports/e23/real_target_manifest.json \
+  --output eval/output/smoke/e26-firmware-pack-metrics.json
+
+python3 eval/scripts/check_regression.py \
+  --current eval/output/smoke/e26-firmware-pack-metrics.json \
+  --baseline eval/reports/e23/real_target_baseline.json \
+  --output eval/output/smoke/e26-firmware-pack-regression.json
+```
+
+Lift scorecard requirements for `firmware` slice (pack output must beat stock baseline):
+
+| Metric | Stock Baseline Comparator | Pack Target | Gate |
+|---|---|---|---|
+| Filesystem extraction success | Stock extraction-only pipeline | `>= +0.12` absolute lift | Block if not met |
+| Emulation boot success | Stock Firmadyne-like default profile | `>= +0.20` absolute lift | Block if not met |
+| Component attribution recall | Stock signature-only component tagging | `>= +0.10` absolute lift | Block if not met |
+| Known-CVE hit rate on benchmark set | Stock static-only CVE scan hit rate | `>= +0.08` absolute lift | Block if not met |
+| Median triage time per image | Stock baseline median | `<= 0.85x` of baseline latency | Block if regressed |
+
+### Release Decision Artifacts (Limits, Risks, Operator Guidance)
+
+| Artifact | Required Contents | Owner |
+|---|---|---|
+| `eval/releases/e26/firmware/lift-scorecard.md` | Baseline vs pack deltas, confidence bounds, pass/fail | Eval/Research |
+| `docs/evidence/e26/firmware-risk-register.md` | Emulation blind spots (NVRAM/peripheral gaps), false-negative risks, mitigations | Security |
+| `docs/evidence/e26/firmware-operator-guidance.md` | Allowed firmware classes, handling of proprietary images, escalation runbook | Operations |
+
+Release criteria:
+- `GO`: all lift targets pass, provenance/license policy passes, and operator guidance is published.
+- `HOLD`: any failed lift metric, unapproved license/provenance state, policy-mode mismatch, or missing risk disposition.
+
+---
+
 ## Key Takeaways for Ghidra Integration
 
 1. **PyGhidra is the canonical Python path**. It is bundled with Ghidra, maintained by NSA, and provides full CPython 3 access via JPype. Ghidrathon (Jep) is a strong alternative when tighter in-process coupling is needed, particularly for Mandiant/FLARE-style workflows.
