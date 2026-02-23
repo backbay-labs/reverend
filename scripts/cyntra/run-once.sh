@@ -12,13 +12,29 @@ enable_failure_fallback="${CYNTRA_ENABLE_FAILURE_FALLBACK:-1}"
 supervised_stall_timeout_seconds="${CYNTRA_SUPERVISED_STALL_TIMEOUT_SECONDS:-300}"
 supervised_stall_poll_seconds="${CYNTRA_SUPERVISED_STALL_POLL_SECONDS:-1}"
 supervised_activity_paths="${CYNTRA_SUPERVISED_ACTIVITY_PATHS:-$repo_root/.cyntra/logs/events.jsonl,$repo_root/telemetry.jsonl}"
+mission_checkpoint_path="${CYNTRA_MISSION_CHECKPOINT_PATH:-$repo_root/.cyntra/state/run-once-mission-checkpoint.json}"
+mission_primary_max_attempts_raw="${CYNTRA_MISSION_PRIMARY_MAX_ATTEMPTS:-1}"
+mission_classify_max_attempts_raw="${CYNTRA_MISSION_CLASSIFY_MAX_ATTEMPTS:-1}"
+mission_fallback_max_attempts_raw="${CYNTRA_MISSION_FALLBACK_MAX_ATTEMPTS:-1}"
+mission_primary_retryable_codes_raw="${CYNTRA_MISSION_PRIMARY_RETRYABLE_EXIT_CODES:-}"
+mission_classify_retryable_codes_raw="${CYNTRA_MISSION_CLASSIFY_RETRYABLE_EXIT_CODES:-}"
+mission_fallback_retryable_codes_raw="${CYNTRA_MISSION_FALLBACK_RETRYABLE_EXIT_CODES:-}"
 watchdog_registered=0
 watchdog_runner="run-once"
+primary_status=1
 primary_failure_code=""
 primary_supervision_reason=""
 primary_supervision_inactivity_seconds=""
 primary_issue_id=""
 primary_workcell_id=""
+classification_json=""
+failure_code=""
+issue_id=""
+workcell_id=""
+proof_path=""
+policy_block_reason=""
+fallback_status=1
+completion_policy_blocked=0
 
 read_workcell_field() {
   local field_name="${1:-}"
@@ -269,6 +285,810 @@ PY
   fi
 }
 
+normalize_positive_int() {
+  local raw="${1:-1}"
+  if [[ "$raw" =~ ^[0-9]+$ ]] && (( raw > 0 )); then
+    printf '%s\n' "$raw"
+    return 0
+  fi
+  printf '%s\n' "1"
+}
+
+normalize_retryable_codes() {
+  local raw="${1:-}"
+  python3 - "$raw" <<'PY'
+import re
+import sys
+
+raw = str(sys.argv[1])
+codes = []
+seen = set()
+for token in re.split(r"[\s,;|]+", raw):
+    text = token.strip()
+    if not text:
+        continue
+    if not re.fullmatch(r"-?\d+", text):
+        continue
+    value = int(text)
+    if value in seen:
+        continue
+    seen.add(value)
+    codes.append(value)
+print(",".join(str(code) for code in sorted(codes)))
+PY
+}
+
+mission_stage_dependencies_json='{"primary_supervised":[],"classify_failure":["primary_supervised"],"fallback_route":["classify_failure"]}'
+mission_stage_order_csv=""
+mission_input_signature=""
+mission_input_payload_b64=""
+mission_checkpoint_resumed=0
+mission_terminal_exit_code=""
+mission_primary_stage_state="pending"
+mission_primary_stage_attempts=0
+mission_primary_stage_last_exit=""
+mission_classify_stage_state="pending"
+mission_classify_stage_attempts=0
+mission_classify_stage_last_exit=""
+mission_fallback_stage_state="pending"
+mission_fallback_stage_attempts=0
+mission_fallback_stage_last_exit=""
+
+mission_primary_max_attempts="$(normalize_positive_int "$mission_primary_max_attempts_raw")"
+mission_classify_max_attempts="$(normalize_positive_int "$mission_classify_max_attempts_raw")"
+mission_fallback_max_attempts="$(normalize_positive_int "$mission_fallback_max_attempts_raw")"
+mission_primary_retryable_codes="$(normalize_retryable_codes "$mission_primary_retryable_codes_raw")"
+mission_classify_retryable_codes="$(normalize_retryable_codes "$mission_classify_retryable_codes_raw")"
+mission_fallback_retryable_codes="$(normalize_retryable_codes "$mission_fallback_retryable_codes_raw")"
+mission_retry_policy_json="$(python3 - \
+  "$mission_primary_max_attempts" \
+  "$mission_primary_retryable_codes" \
+  "$mission_classify_max_attempts" \
+  "$mission_classify_retryable_codes" \
+  "$mission_fallback_max_attempts" \
+  "$mission_fallback_retryable_codes" <<'PY'
+import json
+import sys
+
+payload = {
+    "primary_supervised": {
+        "max_attempts": int(sys.argv[1]),
+        "retryable_exit_codes": [int(token) for token in sys.argv[2].split(",") if token],
+    },
+    "classify_failure": {
+        "max_attempts": int(sys.argv[3]),
+        "retryable_exit_codes": [int(token) for token in sys.argv[4].split(",") if token],
+    },
+    "fallback_route": {
+        "max_attempts": int(sys.argv[5]),
+        "retryable_exit_codes": [int(token) for token in sys.argv[6].split(",") if token],
+    },
+}
+print(json.dumps(payload, sort_keys=True))
+PY
+)"
+
+resolve_mission_stage_order_csv() {
+  python3 - "$mission_stage_dependencies_json" <<'PY'
+import heapq
+import json
+import sys
+
+deps = json.loads(sys.argv[1])
+stages = sorted(deps.keys())
+incoming = {stage: set() for stage in stages}
+outgoing = {stage: set() for stage in stages}
+for stage, requirements in deps.items():
+    for requirement in requirements:
+        if requirement not in incoming:
+            raise SystemExit(2)
+        incoming[stage].add(requirement)
+        outgoing[requirement].add(stage)
+
+ready = [stage for stage in stages if not incoming[stage]]
+heapq.heapify(ready)
+order = []
+while ready:
+    current = heapq.heappop(ready)
+    order.append(current)
+    for neighbor in sorted(outgoing[current]):
+        incoming[neighbor].discard(current)
+        if not incoming[neighbor]:
+            heapq.heappush(ready, neighbor)
+
+if len(order) != len(stages):
+    raise SystemExit(3)
+print(",".join(order))
+PY
+}
+
+mission_get_stage_state() {
+  local stage_id="${1:-}"
+  case "$stage_id" in
+    primary_supervised) printf '%s\n' "$mission_primary_stage_state" ;;
+    classify_failure) printf '%s\n' "$mission_classify_stage_state" ;;
+    fallback_route) printf '%s\n' "$mission_fallback_stage_state" ;;
+    *) return 1 ;;
+  esac
+}
+
+mission_set_stage_state() {
+  local stage_id="${1:-}"
+  local value="${2:-pending}"
+  case "$stage_id" in
+    primary_supervised) mission_primary_stage_state="$value" ;;
+    classify_failure) mission_classify_stage_state="$value" ;;
+    fallback_route) mission_fallback_stage_state="$value" ;;
+    *) return 1 ;;
+  esac
+}
+
+mission_get_stage_attempts() {
+  local stage_id="${1:-}"
+  case "$stage_id" in
+    primary_supervised) printf '%s\n' "$mission_primary_stage_attempts" ;;
+    classify_failure) printf '%s\n' "$mission_classify_stage_attempts" ;;
+    fallback_route) printf '%s\n' "$mission_fallback_stage_attempts" ;;
+    *) return 1 ;;
+  esac
+}
+
+mission_set_stage_attempts() {
+  local stage_id="${1:-}"
+  local value="${2:-0}"
+  case "$stage_id" in
+    primary_supervised) mission_primary_stage_attempts="$value" ;;
+    classify_failure) mission_classify_stage_attempts="$value" ;;
+    fallback_route) mission_fallback_stage_attempts="$value" ;;
+    *) return 1 ;;
+  esac
+}
+
+mission_get_stage_last_exit() {
+  local stage_id="${1:-}"
+  case "$stage_id" in
+    primary_supervised) printf '%s\n' "$mission_primary_stage_last_exit" ;;
+    classify_failure) printf '%s\n' "$mission_classify_stage_last_exit" ;;
+    fallback_route) printf '%s\n' "$mission_fallback_stage_last_exit" ;;
+    *) return 1 ;;
+  esac
+}
+
+mission_set_stage_last_exit() {
+  local stage_id="${1:-}"
+  local value="${2:-}"
+  case "$stage_id" in
+    primary_supervised) mission_primary_stage_last_exit="$value" ;;
+    classify_failure) mission_classify_stage_last_exit="$value" ;;
+    fallback_route) mission_fallback_stage_last_exit="$value" ;;
+    *) return 1 ;;
+  esac
+}
+
+mission_stage_max_attempts() {
+  local stage_id="${1:-}"
+  case "$stage_id" in
+    primary_supervised) printf '%s\n' "$mission_primary_max_attempts" ;;
+    classify_failure) printf '%s\n' "$mission_classify_max_attempts" ;;
+    fallback_route) printf '%s\n' "$mission_fallback_max_attempts" ;;
+    *) return 1 ;;
+  esac
+}
+
+mission_stage_retryable_codes() {
+  local stage_id="${1:-}"
+  case "$stage_id" in
+    primary_supervised) printf '%s\n' "$mission_primary_retryable_codes" ;;
+    classify_failure) printf '%s\n' "$mission_classify_retryable_codes" ;;
+    fallback_route) printf '%s\n' "$mission_fallback_retryable_codes" ;;
+    *) return 1 ;;
+  esac
+}
+
+mission_exit_code_retryable() {
+  local retryable_codes="${1:-}"
+  local exit_code="${2:-}"
+  if [[ -z "$retryable_codes" || -z "$exit_code" ]]; then
+    printf '%s\n' "0"
+    return 0
+  fi
+  python3 - "$retryable_codes" "$exit_code" <<'PY'
+import sys
+
+codes = {token for token in sys.argv[1].split(",") if token}
+print("1" if sys.argv[2] in codes else "0")
+PY
+}
+
+mission_checkpoint_load_or_init() {
+  local cli_args=("$@")
+  local state_env
+  state_env="$(python3 - \
+    "$mission_checkpoint_path" \
+    "$mission_stage_order_csv" \
+    "$mission_stage_dependencies_json" \
+    "$mission_retry_policy_json" \
+    "$deterministic_failure_codes" \
+    "$enable_failure_fallback" \
+    "$supervised_stall_timeout_seconds" \
+    "$supervised_stall_poll_seconds" \
+    "$supervised_activity_paths" \
+    "$run_started_epoch" \
+    "${cli_args[@]-}" <<'PY'
+import base64
+import hashlib
+import json
+import os
+import shlex
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+checkpoint_path = Path(sys.argv[1])
+stage_order = [token for token in str(sys.argv[2]).split(",") if token]
+stage_dependencies = json.loads(sys.argv[3])
+retry_policy = json.loads(sys.argv[4])
+deterministic_failure_codes = str(sys.argv[5])
+enable_failure_fallback = str(sys.argv[6])
+supervised_stall_timeout_seconds = str(sys.argv[7])
+supervised_stall_poll_seconds = str(sys.argv[8])
+supervised_activity_paths = str(sys.argv[9])
+current_run_started_epoch = int(sys.argv[10])
+cli_args = list(sys.argv[11:])
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def shell_assign(name: str, value: object) -> str:
+    if value is None:
+        text = ""
+    elif isinstance(value, bool):
+        text = "1" if value else "0"
+    else:
+        text = str(value)
+    return f"{name}={shlex.quote(text)}"
+
+
+def normalize_stage(stage_payload: object) -> dict:
+    payload = stage_payload if isinstance(stage_payload, dict) else {}
+    status = str(payload.get("status") or "pending")
+    try:
+        attempts = int(payload.get("attempts") or 0)
+    except Exception:
+        attempts = 0
+    last_exit = payload.get("last_exit_code")
+    if last_exit is None:
+        last_exit_text = ""
+    else:
+        last_exit_text = str(last_exit)
+    return {
+        "status": status,
+        "attempts": max(attempts, 0),
+        "last_exit_code": last_exit_text,
+    }
+
+
+signature_payload = {
+    "runner": "run-once",
+    "cli_args": cli_args,
+    "deterministic_failure_codes": deterministic_failure_codes,
+    "enable_failure_fallback": enable_failure_fallback,
+    "supervised_stall_timeout_seconds": supervised_stall_timeout_seconds,
+    "supervised_stall_poll_seconds": supervised_stall_poll_seconds,
+    "supervised_activity_paths": supervised_activity_paths,
+    "failure_override": str(os.environ.get("CYNTRA_FAILURE_CODE") or os.environ.get("CYNTRA_FAILURE_CLASS") or ""),
+    "mission_retry_policy": retry_policy,
+    "mission_stage_order": stage_order,
+    "mission_stage_dependencies": stage_dependencies,
+}
+signature_payload_json = json.dumps(signature_payload, sort_keys=True, separators=(",", ":"))
+input_signature = hashlib.sha256(signature_payload_json.encode("utf-8")).hexdigest()
+
+doc = {}
+resume = False
+if checkpoint_path.exists():
+    try:
+        loaded = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    except Exception:
+        loaded = {}
+    if isinstance(loaded, dict):
+        doc = loaded
+        if (
+            str(doc.get("runner") or "") == "run-once"
+            and str(doc.get("input_signature") or "") == input_signature
+            and doc.get("completed") is not True
+        ):
+            resume = True
+
+run_started_epoch_value = current_run_started_epoch
+if resume:
+    prior_inputs = doc.get("inputs") if isinstance(doc.get("inputs"), dict) else {}
+    try:
+        run_started_epoch_value = int(prior_inputs.get("run_started_epoch") or current_run_started_epoch)
+    except Exception:
+        run_started_epoch_value = current_run_started_epoch
+
+input_payload = dict(signature_payload)
+input_payload["run_started_epoch"] = run_started_epoch_value
+input_payload_json = json.dumps(input_payload, sort_keys=True, separators=(",", ":"))
+input_payload_b64 = base64.b64encode(input_payload_json.encode("utf-8")).decode("ascii")
+
+if not resume:
+    doc = {
+        "version": 1,
+        "runner": "run-once",
+        "created_at_utc": now_iso(),
+        "updated_at_utc": now_iso(),
+        "completed": False,
+        "terminal_exit_code": None,
+        "checkpoint_path": str(checkpoint_path),
+        "input_signature": input_signature,
+        "inputs": input_payload,
+        "stage_dependencies": stage_dependencies,
+        "execution_order": stage_order,
+        "retry_policy": retry_policy,
+        "stages": {},
+        "outputs": {},
+    }
+else:
+    doc["updated_at_utc"] = now_iso()
+    doc["checkpoint_path"] = str(checkpoint_path)
+    doc["execution_order"] = stage_order
+    doc["stage_dependencies"] = stage_dependencies
+    doc["retry_policy"] = retry_policy
+    doc["inputs"] = input_payload
+    doc["input_signature"] = input_signature
+
+stages = doc.get("stages")
+if not isinstance(stages, dict):
+    stages = {}
+normalized_stages: dict[str, dict] = {}
+for stage_id in stage_order:
+    normalized_stages[stage_id] = normalize_stage(stages.get(stage_id))
+doc["stages"] = normalized_stages
+
+outputs = doc.get("outputs")
+if not isinstance(outputs, dict):
+    outputs = {}
+doc["outputs"] = {
+    "primary_status": str(outputs.get("primary_status") or "1"),
+    "primary_failure_code": str(outputs.get("primary_failure_code") or ""),
+    "primary_supervision_reason": str(outputs.get("primary_supervision_reason") or ""),
+    "primary_supervision_inactivity_seconds": str(outputs.get("primary_supervision_inactivity_seconds") or ""),
+    "classification_json": str(outputs.get("classification_json") or ""),
+    "failure_code": str(outputs.get("failure_code") or ""),
+    "issue_id": str(outputs.get("issue_id") or ""),
+    "workcell_id": str(outputs.get("workcell_id") or ""),
+    "proof_path": str(outputs.get("proof_path") or ""),
+    "policy_block_reason": str(outputs.get("policy_block_reason") or ""),
+    "completion_policy_blocked": "1" if str(outputs.get("completion_policy_blocked") or "") in {"1", "true", "True"} else "0",
+    "fallback_status": str(outputs.get("fallback_status") or "1"),
+}
+
+checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+tmp_path = checkpoint_path.with_suffix(checkpoint_path.suffix + ".tmp")
+tmp_path.write_text(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+tmp_path.replace(checkpoint_path)
+
+primary_stage = normalized_stages["primary_supervised"]
+classify_stage = normalized_stages["classify_failure"]
+fallback_stage = normalized_stages["fallback_route"]
+lines = [
+    shell_assign("mission_input_signature", input_signature),
+    shell_assign("mission_input_payload_b64", input_payload_b64),
+    shell_assign("mission_checkpoint_resumed", "1" if resume else "0"),
+    shell_assign("run_started_epoch", input_payload.get("run_started_epoch")),
+    shell_assign("mission_primary_stage_state", primary_stage.get("status")),
+    shell_assign("mission_primary_stage_attempts", primary_stage.get("attempts")),
+    shell_assign("mission_primary_stage_last_exit", primary_stage.get("last_exit_code")),
+    shell_assign("mission_classify_stage_state", classify_stage.get("status")),
+    shell_assign("mission_classify_stage_attempts", classify_stage.get("attempts")),
+    shell_assign("mission_classify_stage_last_exit", classify_stage.get("last_exit_code")),
+    shell_assign("mission_fallback_stage_state", fallback_stage.get("status")),
+    shell_assign("mission_fallback_stage_attempts", fallback_stage.get("attempts")),
+    shell_assign("mission_fallback_stage_last_exit", fallback_stage.get("last_exit_code")),
+    shell_assign("primary_status", doc["outputs"].get("primary_status")),
+    shell_assign("primary_failure_code", doc["outputs"].get("primary_failure_code")),
+    shell_assign("primary_supervision_reason", doc["outputs"].get("primary_supervision_reason")),
+    shell_assign(
+        "primary_supervision_inactivity_seconds",
+        doc["outputs"].get("primary_supervision_inactivity_seconds"),
+    ),
+    shell_assign("classification_json", doc["outputs"].get("classification_json")),
+    shell_assign("failure_code", doc["outputs"].get("failure_code")),
+    shell_assign("issue_id", doc["outputs"].get("issue_id")),
+    shell_assign("workcell_id", doc["outputs"].get("workcell_id")),
+    shell_assign("proof_path", doc["outputs"].get("proof_path")),
+    shell_assign("policy_block_reason", doc["outputs"].get("policy_block_reason")),
+    shell_assign("completion_policy_blocked", doc["outputs"].get("completion_policy_blocked")),
+    shell_assign("fallback_status", doc["outputs"].get("fallback_status")),
+]
+print("\n".join(lines))
+PY
+)"
+  eval "$state_env"
+}
+
+mission_checkpoint_persist() {
+  local mark_completed="${1:-0}"
+  local terminal_exit_code="${2:-}"
+  MISSION_CHECKPOINT_PATH="$mission_checkpoint_path" \
+    MISSION_INPUT_SIGNATURE="$mission_input_signature" \
+    MISSION_INPUT_PAYLOAD_B64="$mission_input_payload_b64" \
+    MISSION_STAGE_ORDER_CSV="$mission_stage_order_csv" \
+    MISSION_STAGE_DEPENDENCIES_JSON="$mission_stage_dependencies_json" \
+    MISSION_RETRY_POLICY_JSON="$mission_retry_policy_json" \
+    MISSION_PRIMARY_STAGE_STATE="$mission_primary_stage_state" \
+    MISSION_PRIMARY_STAGE_ATTEMPTS="$mission_primary_stage_attempts" \
+    MISSION_PRIMARY_STAGE_LAST_EXIT="$mission_primary_stage_last_exit" \
+    MISSION_CLASSIFY_STAGE_STATE="$mission_classify_stage_state" \
+    MISSION_CLASSIFY_STAGE_ATTEMPTS="$mission_classify_stage_attempts" \
+    MISSION_CLASSIFY_STAGE_LAST_EXIT="$mission_classify_stage_last_exit" \
+    MISSION_FALLBACK_STAGE_STATE="$mission_fallback_stage_state" \
+    MISSION_FALLBACK_STAGE_ATTEMPTS="$mission_fallback_stage_attempts" \
+    MISSION_FALLBACK_STAGE_LAST_EXIT="$mission_fallback_stage_last_exit" \
+    MISSION_PRIMARY_STATUS="$primary_status" \
+    MISSION_PRIMARY_FAILURE_CODE="$primary_failure_code" \
+    MISSION_PRIMARY_SUPERVISION_REASON="$primary_supervision_reason" \
+    MISSION_PRIMARY_SUPERVISION_INACTIVITY_SECONDS="$primary_supervision_inactivity_seconds" \
+    MISSION_CLASSIFICATION_JSON="$classification_json" \
+    MISSION_FAILURE_CODE="$failure_code" \
+    MISSION_ISSUE_ID="$issue_id" \
+    MISSION_WORKCELL_ID="$workcell_id" \
+    MISSION_PROOF_PATH="$proof_path" \
+    MISSION_POLICY_BLOCK_REASON="$policy_block_reason" \
+    MISSION_COMPLETION_POLICY_BLOCKED="$completion_policy_blocked" \
+    MISSION_FALLBACK_STATUS="$fallback_status" \
+    MISSION_MARK_COMPLETED="$mark_completed" \
+    MISSION_TERMINAL_EXIT_CODE="$terminal_exit_code" \
+    python3 - <<'PY'
+import base64
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _as_int(value: str, *, default: int | None = None) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return default
+    try:
+        return int(text)
+    except Exception:
+        return default
+
+
+def _as_stage(status_key: str, attempts_key: str, exit_key: str) -> dict:
+    return {
+        "status": str(os.environ.get(status_key, "pending") or "pending"),
+        "attempts": max(_as_int(os.environ.get(attempts_key, "0"), default=0) or 0, 0),
+        "last_exit_code": str(os.environ.get(exit_key, "") or ""),
+    }
+
+
+checkpoint_path = Path(os.environ["MISSION_CHECKPOINT_PATH"])
+stage_order = [token for token in os.environ.get("MISSION_STAGE_ORDER_CSV", "").split(",") if token]
+stage_dependencies = json.loads(os.environ.get("MISSION_STAGE_DEPENDENCIES_JSON", "{}"))
+retry_policy = json.loads(os.environ.get("MISSION_RETRY_POLICY_JSON", "{}"))
+input_payload_b64 = str(os.environ.get("MISSION_INPUT_PAYLOAD_B64", "") or "")
+inputs = {}
+if input_payload_b64:
+    try:
+        inputs = json.loads(base64.b64decode(input_payload_b64.encode("ascii")).decode("utf-8"))
+    except Exception:
+        inputs = {}
+
+doc = {}
+if checkpoint_path.exists():
+    try:
+        loaded = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    except Exception:
+        loaded = {}
+    if isinstance(loaded, dict):
+        doc = loaded
+
+doc["version"] = 1
+doc["runner"] = "run-once"
+doc["checkpoint_path"] = str(checkpoint_path)
+doc["input_signature"] = str(os.environ.get("MISSION_INPUT_SIGNATURE", "") or "")
+doc["inputs"] = inputs
+doc["execution_order"] = stage_order
+doc["stage_dependencies"] = stage_dependencies
+doc["retry_policy"] = retry_policy
+doc["updated_at_utc"] = now_iso()
+if not str(doc.get("created_at_utc") or "").strip():
+    doc["created_at_utc"] = now_iso()
+
+doc["stages"] = {
+    "primary_supervised": _as_stage(
+        "MISSION_PRIMARY_STAGE_STATE",
+        "MISSION_PRIMARY_STAGE_ATTEMPTS",
+        "MISSION_PRIMARY_STAGE_LAST_EXIT",
+    ),
+    "classify_failure": _as_stage(
+        "MISSION_CLASSIFY_STAGE_STATE",
+        "MISSION_CLASSIFY_STAGE_ATTEMPTS",
+        "MISSION_CLASSIFY_STAGE_LAST_EXIT",
+    ),
+    "fallback_route": _as_stage(
+        "MISSION_FALLBACK_STAGE_STATE",
+        "MISSION_FALLBACK_STAGE_ATTEMPTS",
+        "MISSION_FALLBACK_STAGE_LAST_EXIT",
+    ),
+}
+
+doc["outputs"] = {
+    "primary_status": str(os.environ.get("MISSION_PRIMARY_STATUS", "") or ""),
+    "primary_failure_code": str(os.environ.get("MISSION_PRIMARY_FAILURE_CODE", "") or ""),
+    "primary_supervision_reason": str(os.environ.get("MISSION_PRIMARY_SUPERVISION_REASON", "") or ""),
+    "primary_supervision_inactivity_seconds": str(
+        os.environ.get("MISSION_PRIMARY_SUPERVISION_INACTIVITY_SECONDS", "") or ""
+    ),
+    "classification_json": str(os.environ.get("MISSION_CLASSIFICATION_JSON", "") or ""),
+    "failure_code": str(os.environ.get("MISSION_FAILURE_CODE", "") or ""),
+    "issue_id": str(os.environ.get("MISSION_ISSUE_ID", "") or ""),
+    "workcell_id": str(os.environ.get("MISSION_WORKCELL_ID", "") or ""),
+    "proof_path": str(os.environ.get("MISSION_PROOF_PATH", "") or ""),
+    "policy_block_reason": str(os.environ.get("MISSION_POLICY_BLOCK_REASON", "") or ""),
+    "completion_policy_blocked": "1"
+    if str(os.environ.get("MISSION_COMPLETION_POLICY_BLOCKED", "0") or "").strip().lower() in {"1", "true"}
+    else "0",
+    "fallback_status": str(os.environ.get("MISSION_FALLBACK_STATUS", "") or ""),
+}
+
+mark_completed = str(os.environ.get("MISSION_MARK_COMPLETED", "0") or "").strip()
+if mark_completed in {"1", "true", "True"}:
+    doc["completed"] = True
+    doc["terminal_exit_code"] = _as_int(os.environ.get("MISSION_TERMINAL_EXIT_CODE", ""), default=0)
+else:
+    doc["completed"] = False
+    doc["terminal_exit_code"] = None
+
+checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+tmp_path = checkpoint_path.with_suffix(checkpoint_path.suffix + ".tmp")
+tmp_path.write_text(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+tmp_path.replace(checkpoint_path)
+PY
+}
+
+mission_stage_should_run() {
+  local stage_id="${1:-}"
+  case "$stage_id" in
+    primary_supervised)
+      return 0
+      ;;
+    classify_failure)
+      [[ "$enable_failure_fallback" == "1" ]]
+      return $?
+      ;;
+    fallback_route)
+      [[ "$enable_failure_fallback" == "1" ]] || return 1
+      [[ -n "${CYNTRA_FAILURE_CODE:-${CYNTRA_FAILURE_CLASS:-}}" ]] && return 1
+      [[ "$completion_policy_blocked" == "1" ]] && return 1
+      [[ -n "$failure_code" ]]
+      return $?
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+decode_classification_json() {
+  local payload="${1:-}"
+  [[ -n "$payload" ]] || return 1
+  eval "$(python3 - "$payload" <<'PY'
+import json
+import shlex
+import sys
+
+payload = json.loads(sys.argv[1])
+fields = {
+    "failure_code": str(payload.get("failure_code") or ""),
+    "issue_id": str(payload.get("issue_id") or ""),
+    "workcell_id": str(payload.get("workcell_id") or ""),
+    "proof_path": str(payload.get("proof_path") or ""),
+    "policy_block_reason": str(payload.get("policy_block_reason") or ""),
+}
+for key, value in fields.items():
+    print(f"{key}={shlex.quote(value)}")
+PY
+)"
+}
+
+run_mission_stage_primary_supervised() {
+  run_primary_once_supervised "$@"
+}
+
+run_mission_stage_classify_failure() {
+  if [[ -n "${CYNTRA_FAILURE_CODE:-${CYNTRA_FAILURE_CLASS:-}}" ]]; then
+    classification_json=""
+    failure_code=""
+    issue_id=""
+    workcell_id=""
+    proof_path=""
+    policy_block_reason=""
+    completion_policy_blocked=0
+    return 0
+  fi
+
+  classification_json="$(classify_latest_deterministic_failure || true)"
+  if [[ -z "$classification_json" && -n "$primary_failure_code" ]]; then
+    classification_json="$(python3 - "$primary_failure_code" "$primary_issue_id" "$primary_workcell_id" <<'PY'
+import json
+import sys
+payload = {
+    "failure_code": str(sys.argv[1]),
+    "issue_id": str(sys.argv[2]),
+    "workcell_id": str(sys.argv[3]),
+    "proof_path": "",
+    "completion_classification": "",
+    "noop_reason": "",
+    "policy_result": "",
+    "policy_block_reason": "",
+}
+print(json.dumps(payload))
+PY
+)"
+  fi
+  if [[ -z "$classification_json" ]]; then
+    failure_code=""
+    issue_id=""
+    workcell_id=""
+    proof_path=""
+    policy_block_reason=""
+    completion_policy_blocked=0
+    return 0
+  fi
+
+  decode_classification_json "$classification_json"
+  completion_policy_blocked=0
+  if [[ "$failure_code" == "policy.completion_blocked" ]]; then
+    completion_policy_blocked=1
+    case "$policy_block_reason" in
+      missing_manifest_noop_justification)
+        echo "[cyntra] completion policy blocked zero-diff closure (missing manifest no-op justification)"
+        ;;
+      blocking_gate_skip_reason_not_allowlisted)
+        echo "[cyntra] completion policy blocked closure (blocking gates skipped beyond budget without allowlisted reason)"
+        ;;
+      blocking_gate_skip_evidence_missing)
+        echo "[cyntra] completion policy blocked closure (blocking gate skip evidence missing from gate summary telemetry)"
+        ;;
+      *)
+        if [[ -n "$policy_block_reason" ]]; then
+          echo "[cyntra] completion policy blocked closure (${policy_block_reason})"
+        else
+          echo "[cyntra] completion policy blocked closure"
+        fi
+        ;;
+    esac
+  fi
+}
+
+run_mission_stage_fallback_route() {
+  echo "[cyntra] deterministic failure classified as failure_code='$failure_code'; attempting fallback route"
+  if CYNTRA_FAILURE_CODE="$failure_code" \
+    CYNTRA_FAILURE_CLASS="$failure_code" \
+    CYNTRA_FALLBACK_ISSUE_ID="$issue_id" \
+    CYNTRA_FALLBACK_WORKCELL_ID="$workcell_id" \
+    CYNTRA_FALLBACK_PROOF_PATH="$proof_path" \
+    scripts/cyntra/cyntra.sh run --once "$@"; then
+    fallback_status=0
+  else
+    fallback_status=$?
+  fi
+  return "$fallback_status"
+}
+
+run_mission_stage_handler() {
+  local stage_id="${1:-}"
+  shift || true
+  case "$stage_id" in
+    primary_supervised)
+      run_mission_stage_primary_supervised "$@"
+      ;;
+    classify_failure)
+      run_mission_stage_classify_failure
+      ;;
+    fallback_route)
+      run_mission_stage_fallback_route "$@"
+      ;;
+    *)
+      echo "[cyntra] ERROR: unknown mission stage '$stage_id'" >&2
+      return 2
+      ;;
+  esac
+}
+
+execute_mission_stage() {
+  local stage_id="${1:-}"
+  shift || true
+  local stage_state
+  stage_state="$(mission_get_stage_state "$stage_id")"
+  local stage_attempts
+  stage_attempts="$(mission_get_stage_attempts "$stage_id")"
+  local max_attempts
+  max_attempts="$(mission_stage_max_attempts "$stage_id")"
+  local retryable_codes
+  retryable_codes="$(mission_stage_retryable_codes "$stage_id")"
+
+  if [[ "$stage_state" == "succeeded" || "$stage_state" == "skipped" ]]; then
+    echo "[cyntra] mission DAG resume: stage '$stage_id' already ${stage_state} (attempts=$stage_attempts)"
+    return 0
+  fi
+
+  if [[ "$stage_state" == "running" ]]; then
+    if (( stage_attempts > 0 )); then
+      stage_attempts=$((stage_attempts - 1))
+      mission_set_stage_attempts "$stage_id" "$stage_attempts"
+    fi
+    mission_set_stage_state "$stage_id" "pending"
+    mission_set_stage_last_exit "$stage_id" ""
+    mission_checkpoint_persist 0 ""
+    echo "[cyntra] mission DAG resume: stage '$stage_id' was interrupted while running; replaying attempt"
+  fi
+
+  if ! mission_stage_should_run "$stage_id"; then
+    mission_set_stage_state "$stage_id" "skipped"
+    mission_set_stage_last_exit "$stage_id" ""
+    mission_checkpoint_persist 0 ""
+    echo "[cyntra] mission DAG stage '$stage_id' skipped by policy"
+    return 0
+  fi
+
+  while (( stage_attempts < max_attempts )); do
+    local next_attempt=$((stage_attempts + 1))
+    mission_set_stage_state "$stage_id" "running"
+    mission_set_stage_attempts "$stage_id" "$next_attempt"
+    mission_checkpoint_persist 0 ""
+
+    local stage_rc=0
+    if run_mission_stage_handler "$stage_id" "$@"; then
+      stage_rc=0
+    else
+      stage_rc=$?
+    fi
+
+    stage_attempts="$next_attempt"
+    if (( stage_rc == 0 )); then
+      mission_set_stage_state "$stage_id" "succeeded"
+      mission_set_stage_last_exit "$stage_id" "0"
+      mission_checkpoint_persist 0 ""
+      return 0
+    fi
+
+    mission_set_stage_last_exit "$stage_id" "$stage_rc"
+    local retryable=0
+    if [[ "$(mission_exit_code_retryable "$retryable_codes" "$stage_rc")" == "1" ]]; then
+      retryable=1
+    fi
+
+    if (( stage_attempts < max_attempts )) && [[ "$retryable" == "1" ]]; then
+      mission_set_stage_state "$stage_id" "pending"
+      mission_checkpoint_persist 0 ""
+      echo "[cyntra] mission DAG stage '$stage_id' attempt ${stage_attempts}/${max_attempts} failed with exit=${stage_rc}; retrying"
+      continue
+    fi
+
+    mission_set_stage_state "$stage_id" "failed"
+    mission_checkpoint_persist 0 ""
+    echo "[cyntra] mission DAG stage '$stage_id' failed with exit=${stage_rc} (attempt ${stage_attempts}/${max_attempts})"
+    return "$stage_rc"
+  done
+
+  mission_set_stage_state "$stage_id" "failed"
+  mission_checkpoint_persist 0 ""
+  return 1
+}
+
 watchdog_reconcile_and_register() {
   python3 - "$repo_root" "$watchdog_state_path" "$watchdog_events_path" "$watchdog_runner" "$$" <<'PY'
 import json
@@ -515,11 +1335,6 @@ scripts/cyntra/preflight.sh
 primary_issue_id="$(read_workcell_field issue_id || true)"
 primary_workcell_id="$(read_workcell_field id || true)"
 run_started_epoch="$(date +%s)"
-run_primary_once_supervised "$@"
-
-if [[ "$enable_failure_fallback" != "1" ]]; then
-  exit "$primary_status"
-fi
 
 classify_latest_deterministic_failure() {
   python3 - "$repo_root" "$deterministic_failure_codes" "$run_started_epoch" <<'PY'
@@ -1033,106 +1848,50 @@ print(
 PY
 }
 
-if [[ -n "${CYNTRA_FAILURE_CODE:-${CYNTRA_FAILURE_CLASS:-}}" ]]; then
-  exit "$primary_status"
+mission_stage_order_csv="$(resolve_mission_stage_order_csv)"
+if [[ -z "$mission_stage_order_csv" ]]; then
+  echo "[cyntra] ERROR: mission DAG order resolution failed" >&2
+  exit 2
 fi
 
-classification_json="$(classify_latest_deterministic_failure || true)"
-if [[ -z "$classification_json" && -n "$primary_failure_code" ]]; then
-  classification_json="$(python3 - "$primary_failure_code" "$primary_issue_id" "$primary_workcell_id" <<'PY'
-import json
-import sys
-payload = {
-    "failure_code": str(sys.argv[1]),
-    "issue_id": str(sys.argv[2]),
-    "workcell_id": str(sys.argv[3]),
-    "proof_path": "",
-    "completion_classification": "",
-    "noop_reason": "",
-    "policy_result": "",
-    "policy_block_reason": "",
-}
-print(json.dumps(payload))
-PY
-)"
-fi
-if [[ -z "$classification_json" ]]; then
-  exit "$primary_status"
-fi
-
-failure_code="$(python3 - "$classification_json" <<'PY'
-import json
-import sys
-payload = json.loads(sys.argv[1])
-print(str(payload.get("failure_code") or ""))
-PY
-)"
-issue_id="$(python3 - "$classification_json" <<'PY'
-import json
-import sys
-payload = json.loads(sys.argv[1])
-print(str(payload.get("issue_id") or ""))
-PY
-)"
-workcell_id="$(python3 - "$classification_json" <<'PY'
-import json
-import sys
-payload = json.loads(sys.argv[1])
-print(str(payload.get("workcell_id") or ""))
-PY
-)"
-proof_path="$(python3 - "$classification_json" <<'PY'
-import json
-import sys
-payload = json.loads(sys.argv[1])
-print(str(payload.get("proof_path") or ""))
-PY
-)"
-policy_block_reason="$(python3 - "$classification_json" <<'PY'
-import json
-import sys
-payload = json.loads(sys.argv[1])
-print(str(payload.get("policy_block_reason") or ""))
-PY
-)"
-
-if [[ -z "$failure_code" ]]; then
-  exit "$primary_status"
-fi
-
-if [[ "$failure_code" == "policy.completion_blocked" ]]; then
-  case "$policy_block_reason" in
-    missing_manifest_noop_justification)
-      echo "[cyntra] completion policy blocked zero-diff closure (missing manifest no-op justification)"
-      ;;
-    blocking_gate_skip_reason_not_allowlisted)
-      echo "[cyntra] completion policy blocked closure (blocking gates skipped beyond budget without allowlisted reason)"
-      ;;
-    blocking_gate_skip_evidence_missing)
-      echo "[cyntra] completion policy blocked closure (blocking gate skip evidence missing from gate summary telemetry)"
-      ;;
-    *)
-      if [[ -n "$policy_block_reason" ]]; then
-        echo "[cyntra] completion policy blocked closure (${policy_block_reason})"
-      else
-        echo "[cyntra] completion policy blocked closure"
-      fi
-      ;;
-  esac
-  exit 1
-fi
-
-echo "[cyntra] deterministic failure classified as failure_code='$failure_code'; attempting fallback route"
-
-if CYNTRA_FAILURE_CODE="$failure_code" \
-  CYNTRA_FAILURE_CLASS="$failure_code" \
-  CYNTRA_FALLBACK_ISSUE_ID="$issue_id" \
-  CYNTRA_FALLBACK_WORKCELL_ID="$workcell_id" \
-  CYNTRA_FALLBACK_PROOF_PATH="$proof_path" \
-  scripts/cyntra/cyntra.sh run --once "$@"; then
-  fallback_status=0
+mission_checkpoint_load_or_init "$@"
+if [[ "$mission_checkpoint_resumed" == "1" ]]; then
+  echo "[cyntra] mission DAG resume from checkpoint '$mission_checkpoint_path'"
 else
-  fallback_status=$?
+  echo "[cyntra] mission DAG start checkpoint='$mission_checkpoint_path'"
+fi
+echo "[cyntra] mission DAG order=$mission_stage_order_csv retries=primary(max=${mission_primary_max_attempts},codes=${mission_primary_retryable_codes:-none}) classify(max=${mission_classify_max_attempts},codes=${mission_classify_retryable_codes:-none}) fallback(max=${mission_fallback_max_attempts},codes=${mission_fallback_retryable_codes:-none})"
+
+mission_terminal_exit_code=""
+IFS=',' read -r -a mission_stage_order <<<"$mission_stage_order_csv"
+for stage_id in "${mission_stage_order[@]}"; do
+  [[ -n "$stage_id" ]] || continue
+  if execute_mission_stage "$stage_id" "$@"; then
+    continue
+  else
+    mission_terminal_exit_code="$?"
+    break
+  fi
+done
+
+if [[ -n "$mission_terminal_exit_code" ]]; then
+  mission_checkpoint_persist 1 "$mission_terminal_exit_code"
+  rm -f "$mission_checkpoint_path" || true
+  exit "$mission_terminal_exit_code"
 fi
 
-exit "$fallback_status"
+if [[ "$completion_policy_blocked" == "1" ]]; then
+  mission_terminal_exit_code="1"
+elif [[ "$enable_failure_fallback" != "1" ]]; then
+  mission_terminal_exit_code="$primary_status"
+elif [[ -n "${CYNTRA_FAILURE_CODE:-${CYNTRA_FAILURE_CLASS:-}}" ]]; then
+  mission_terminal_exit_code="$primary_status"
+elif [[ -z "$failure_code" ]]; then
+  mission_terminal_exit_code="$primary_status"
+else
+  mission_terminal_exit_code="$fallback_status"
+fi
+
+mission_checkpoint_persist 1 "$mission_terminal_exit_code"
+rm -f "$mission_checkpoint_path" || true
+exit "$mission_terminal_exit_code"
