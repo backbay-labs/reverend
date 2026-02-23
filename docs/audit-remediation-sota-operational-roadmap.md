@@ -59,6 +59,7 @@ Dispatch waves:
 - `similarity-index-profile ... decompileCandidates=0` documents that `findSimilarFunctions` primary scoring no longer decompiles every candidate function.
 - E21-S4 overlay policy: query results now emit explicit `weight_policy` + `static_weight`/`dynamic_weight` provenance fields and deterministic `evidence_ref:{static|dynamic}:...` links for cockpit drilldown rendering.
 - E21-S5 cockpit mission loop: proposal review/apply/rollback mutations now emit linked receipt artifacts and append proposal-level provenance chains so repeated scenario runs can verify deterministic loop outputs.
+- E21-S7 operator runbook publication: `docs/operator-reviewer-runbook.md` now includes a local clean-environment assistant workflow with prerequisites, launch/verification commands, deterministic mission execution, and failure-signature remediation mapping.
 
 ## Required Verification Commands
 - `./gradlew --no-daemon :Framework-TraceModeling:compileJava`
