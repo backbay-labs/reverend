@@ -53,6 +53,102 @@ join_by_comma() {
   echo "$*"
 }
 
+write_blocking_gate_summary_artifact() {
+  local summary_path="${artifact_root}/blocking-gate-summary.json"
+  mkdir -p "$artifact_root"
+  CYNTRA_MODULE_COVERAGE_GENERIC="$module_coverage_generic" \
+    CYNTRA_MODULE_COVERAGE_REVEREND="$module_coverage_reverend" \
+    CYNTRA_MODULE_COVERAGE_SOFTWAREMODELING="$module_coverage_softwaremodeling" \
+    CYNTRA_MODULE_COVERAGE_BASE="$module_coverage_base" \
+    CYNTRA_BLOCKING_SKIP_BUDGET="${CYNTRA_COMPLETION_BLOCKING_SKIP_BUDGET:-0}" \
+    python3 - "$summary_path" <<'PY'
+import json
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+summary_path = Path(__import__("sys").argv[1])
+
+
+def _as_int(value):
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text and text.lstrip("-").isdigit():
+            try:
+                return int(text)
+            except Exception:
+                return None
+    return None
+
+
+def parse_coverage(module: str, value: str) -> dict:
+    text = (value or "").strip()
+    lowered = text.lower()
+    if lowered.startswith("executed"):
+        return {"module": module, "status": "executed", "reason": ""}
+    if lowered.startswith("skipped"):
+        reason = ""
+        match = re.match(r"^skipped\s*\((.+)\)\s*$", text, flags=re.IGNORECASE)
+        if match:
+            reason = match.group(1).strip()
+        else:
+            match = re.match(r"^skipped\s*:\s*(.+)\s*$", text, flags=re.IGNORECASE)
+            if match:
+                reason = match.group(1).strip()
+        return {"module": module, "status": "skipped", "reason": reason}
+    return {"module": module, "status": text or "not-run", "reason": ""}
+
+
+coverages = [
+    parse_coverage("Generic", os.environ.get("CYNTRA_MODULE_COVERAGE_GENERIC", "")),
+    parse_coverage("Reverend", os.environ.get("CYNTRA_MODULE_COVERAGE_REVEREND", "")),
+    parse_coverage("SoftwareModeling", os.environ.get("CYNTRA_MODULE_COVERAGE_SOFTWAREMODELING", "")),
+    parse_coverage("Base", os.environ.get("CYNTRA_MODULE_COVERAGE_BASE", "")),
+]
+blocking_gate_skips = [
+    {"gate": item["module"], "reason": item["reason"], "status": "skipped"}
+    for item in coverages
+    if item["status"] == "skipped"
+]
+blocking_gate_skip_reasons = sorted(
+    {
+        str(item.get("reason") or "").strip()
+        for item in blocking_gate_skips
+        if str(item.get("reason") or "").strip()
+    },
+    key=lambda text: text.lower(),
+)
+blocking_gate_skip_budget = max(_as_int(os.environ.get("CYNTRA_BLOCKING_SKIP_BUDGET")) or 0, 0)
+blocking_gate_skipped_count = len(blocking_gate_skips)
+
+gate_summary = {
+    "module_coverage_generic": os.environ.get("CYNTRA_MODULE_COVERAGE_GENERIC", ""),
+    "module_coverage_reverend": os.environ.get("CYNTRA_MODULE_COVERAGE_REVEREND", ""),
+    "module_coverage_softwaremodeling": os.environ.get("CYNTRA_MODULE_COVERAGE_SOFTWAREMODELING", ""),
+    "module_coverage_base": os.environ.get("CYNTRA_MODULE_COVERAGE_BASE", ""),
+    "blocking_gate_skips": blocking_gate_skips,
+    "blocking_gate_skipped_count": blocking_gate_skipped_count,
+    "blocking_gate_skip_reasons": blocking_gate_skip_reasons,
+    "blocking_gate_skip_budget": blocking_gate_skip_budget,
+}
+payload = {
+    "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+    "source": "scripts/cyntra/gates.sh",
+    "gate_summary": gate_summary,
+    **gate_summary,
+}
+summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+  echo "[gates] blocking gate skip summary artifact: $summary_path"
+}
+
 check_manifest_context() {
   python3 - <<'PY'
 import json
@@ -858,6 +954,7 @@ case "$mode" in
     run_security_evidence_integrity
     run_roadmap_consistency_validation
     print_module_coverage_summary
+    write_blocking_gate_summary_artifact
     ;;
   context)
     check_manifest_context
@@ -873,6 +970,7 @@ case "$mode" in
     run_reverend_compile_regression
     run_frontier_compile_regression
     print_module_coverage_summary
+    write_blocking_gate_summary_artifact
     ;;
   evidence)
     run_security_evidence_integrity

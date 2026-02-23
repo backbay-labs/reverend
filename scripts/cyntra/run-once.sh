@@ -269,6 +269,8 @@ fi
 classify_latest_deterministic_failure() {
   python3 - "$repo_root" "$deterministic_failure_codes" "$run_started_epoch" <<'PY'
 import json
+import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -355,6 +357,30 @@ def _first_text(*values):
     return ""
 
 
+def _normalized_reason(value: str) -> str:
+    text = value.strip().lower()
+    return re.sub(r"[\s_\-]+", " ", text)
+
+
+def _split_tokens(raw: str) -> list[str]:
+    tokens = []
+    for token in re.split(r"[,;|]", raw):
+        text = token.strip()
+        if text:
+            tokens.append(text)
+    return tokens
+
+
+def load_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def load_manifest(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -377,6 +403,81 @@ def manifest_noop_justification(manifest: dict) -> tuple[str, str]:
     if reason:
         return reason, "manifest.noop_justification"
     return "", ""
+
+
+def parse_skip_entry(raw: object) -> dict[str, str]:
+    if isinstance(raw, dict):
+        gate = _first_text(raw.get("gate"), raw.get("name"), raw.get("module"), raw.get("id"))
+        reason = _first_text(raw.get("reason"), raw.get("skip_reason"), raw.get("status_reason"))
+        status = _first_text(raw.get("status"), raw.get("result")) or "skipped"
+        return {"gate": gate, "reason": reason, "status": status}
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text:
+            return {"gate": text, "reason": "", "status": "skipped"}
+    return {"gate": "", "reason": "", "status": ""}
+
+
+def parse_module_coverage_skip(module: str, value: object) -> dict[str, str]:
+    if not isinstance(value, str):
+        return {"gate": "", "reason": "", "status": ""}
+    text = value.strip()
+    if not text.lower().startswith("skipped"):
+        return {"gate": "", "reason": "", "status": ""}
+    reason = ""
+    match = re.match(r"^skipped\s*\((.+)\)\s*$", text, flags=re.IGNORECASE)
+    if match:
+        reason = match.group(1).strip()
+    else:
+        match = re.match(r"^skipped\s*:\s*(.+)\s*$", text, flags=re.IGNORECASE)
+        if match:
+            reason = match.group(1).strip()
+    return {"gate": module, "reason": reason, "status": "skipped"}
+
+
+def dedupe_skip_entries(entries: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen = set()
+    deduped = []
+    for entry in entries:
+        gate = _first_text(entry.get("gate"))
+        reason = _first_text(entry.get("reason"))
+        status = _first_text(entry.get("status")) or "skipped"
+        key = (gate, reason, status.lower())
+        if not gate and not reason:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append({"gate": gate, "reason": reason, "status": status})
+    deduped.sort(key=lambda item: (item.get("gate", "").lower(), item.get("reason", "").lower()))
+    return deduped
+
+
+def collect_skip_reasons(skips: list[dict[str, str]], *extra_reason_values: object) -> list[str]:
+    reasons = []
+    for skip in skips:
+        reason = _first_text(skip.get("reason"))
+        if reason:
+            reasons.append(reason)
+    for value in extra_reason_values:
+        if isinstance(value, str):
+            reason = value.strip()
+            if reason:
+                reasons.append(reason)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    reasons.append(item.strip())
+    deduped = []
+    seen = set()
+    for reason in reasons:
+        key = reason.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(reason)
+    deduped.sort(key=lambda text: text.lower())
+    return deduped
 
 
 completion_statuses = {
@@ -423,6 +524,105 @@ explicit_noop_justification, explicit_noop_justification_source = manifest_noop_
 )
 has_explicit_noop_justification = bool(explicit_noop_justification)
 
+blocking_skip_allowlist_tokens = _split_tokens(
+    os.environ.get("CYNTRA_COMPLETION_BLOCKING_SKIP_REASON_ALLOWLIST", "no scope changes")
+)
+blocking_skip_allowlist = sorted(
+    {
+        token
+        for token in blocking_skip_allowlist_tokens
+        if _normalized_reason(token)
+    },
+    key=lambda text: text.lower(),
+)
+blocking_skip_allowlist_normalized = {_normalized_reason(token) for token in blocking_skip_allowlist}
+
+gate_skip_artifact = load_json(repo_root / ".cyntra" / "artifacts" / "gates" / "blocking-gate-summary.json")
+artifact_gate_summary = gate_skip_artifact.get("gate_summary") if isinstance(gate_skip_artifact, dict) else {}
+if not isinstance(artifact_gate_summary, dict):
+    artifact_gate_summary = {}
+
+blocking_skip_entries: list[dict[str, str]] = []
+for candidate in (
+    gate_summary.get("blocking_gate_skips"),
+    gate_summary.get("blocking_skipped_gates"),
+    gate_summary.get("skipped_blocking_gates"),
+    verification.get("blocking_gate_skips"),
+    metadata.get("blocking_gate_skips"),
+    proof.get("blocking_gate_skips"),
+    artifact_gate_summary.get("blocking_gate_skips"),
+    gate_skip_artifact.get("blocking_gate_skips") if isinstance(gate_skip_artifact, dict) else None,
+):
+    if not isinstance(candidate, list):
+        continue
+    for item in candidate:
+        blocking_skip_entries.append(parse_skip_entry(item))
+
+if not blocking_skip_entries:
+    for module_name, key in (
+        ("Generic", "module_coverage_generic"),
+        ("Reverend", "module_coverage_reverend"),
+        ("SoftwareModeling", "module_coverage_softwaremodeling"),
+        ("Base", "module_coverage_base"),
+    ):
+        blocking_skip_entries.append(parse_module_coverage_skip(module_name, gate_summary.get(key)))
+        blocking_skip_entries.append(parse_module_coverage_skip(module_name, artifact_gate_summary.get(key)))
+
+normalized_blocking_skips = dedupe_skip_entries(blocking_skip_entries)
+blocking_skip_count_hint = _first_int(
+    gate_summary.get("blocking_gate_skipped_count"),
+    verification.get("blocking_gate_skipped_count"),
+    metadata.get("blocking_gate_skipped_count"),
+    proof.get("blocking_gate_skipped_count"),
+    artifact_gate_summary.get("blocking_gate_skipped_count"),
+    gate_skip_artifact.get("blocking_gate_skipped_count") if isinstance(gate_skip_artifact, dict) else None,
+)
+blocking_gate_skipped_count = max(
+    blocking_skip_count_hint if blocking_skip_count_hint is not None else len(normalized_blocking_skips),
+    len(normalized_blocking_skips),
+    0,
+)
+blocking_gate_skip_reasons = collect_skip_reasons(
+    normalized_blocking_skips,
+    gate_summary.get("blocking_gate_skip_reasons"),
+    verification.get("blocking_gate_skip_reasons"),
+    metadata.get("blocking_gate_skip_reasons"),
+    proof.get("blocking_gate_skip_reasons"),
+    artifact_gate_summary.get("blocking_gate_skip_reasons"),
+    gate_skip_artifact.get("blocking_gate_skip_reasons") if isinstance(gate_skip_artifact, dict) else None,
+)
+blocking_skip_budget = max(
+    _first_int(
+        gate_summary.get("blocking_gate_skip_budget"),
+        verification.get("blocking_gate_skip_budget"),
+        metadata.get("blocking_gate_skip_budget"),
+        proof.get("blocking_gate_skip_budget"),
+        artifact_gate_summary.get("blocking_gate_skip_budget"),
+        gate_skip_artifact.get("blocking_gate_skip_budget") if isinstance(gate_skip_artifact, dict) else None,
+        os.environ.get("CYNTRA_COMPLETION_BLOCKING_SKIP_BUDGET"),
+    )
+    or 0,
+    0,
+)
+blocking_gate_budget_exceeded = blocking_gate_skipped_count > blocking_skip_budget
+blocking_gate_skip_reasons_allowlisted = (
+    blocking_gate_skipped_count == 0
+    or (
+        bool(blocking_gate_skip_reasons)
+        and all(
+            _normalized_reason(reason) in blocking_skip_allowlist_normalized
+            for reason in blocking_gate_skip_reasons
+        )
+    )
+)
+blocking_gate_skip_evidence_present = (
+    blocking_gate_skipped_count == 0
+    or (
+        bool(blocking_gate_skip_reasons)
+        and (bool(normalized_blocking_skips) or blocking_skip_count_hint is not None)
+    )
+)
+
 if diff_files_value > 0 or diff_lines_value > 0:
     completion_classification = "code_change"
 else:
@@ -432,6 +632,7 @@ noop_reason = ""
 noop_reason_source = ""
 policy_result = "allow"
 policy_blocked = False
+policy_block_reason = ""
 if completion_classification == "noop":
     if has_explicit_noop_justification:
         noop_reason = explicit_noop_justification
@@ -441,16 +642,40 @@ if completion_classification == "noop":
         noop_reason_source = "missing_manifest_noop_justification"
         policy_result = "blocked"
         policy_blocked = True
+        policy_block_reason = "missing_manifest_noop_justification"
 
-gate_summary["diff_files"] = diff_files_value
-gate_summary["diff_lines"] = diff_lines_value
-gate_summary["completion_classification"] = completion_classification
-gate_summary["noop_reason"] = noop_reason
-gate_summary["noop_reason_source"] = noop_reason_source
-gate_summary["noop_justification_source"] = noop_reason_source
-gate_summary["explicit_noop_justification_present"] = has_explicit_noop_justification
-gate_summary["policy_result"] = policy_result
-gate_summary["policy_blocked"] = policy_blocked
+if blocking_gate_budget_exceeded:
+    if not blocking_gate_skip_evidence_present:
+        policy_result = "blocked"
+        policy_blocked = True
+        policy_block_reason = "blocking_gate_skip_evidence_missing"
+    elif not blocking_gate_skip_reasons_allowlisted:
+        policy_result = "blocked"
+        policy_blocked = True
+        policy_block_reason = "blocking_gate_skip_reason_not_allowlisted"
+
+completion_gate_summary_payload = {
+    "diff_files": diff_files_value,
+    "diff_lines": diff_lines_value,
+    "completion_classification": completion_classification,
+    "noop_reason": noop_reason,
+    "noop_reason_source": noop_reason_source,
+    "noop_justification_source": noop_reason_source,
+    "explicit_noop_justification_present": has_explicit_noop_justification,
+    "blocking_gate_skips": normalized_blocking_skips,
+    "blocking_gate_skipped_count": blocking_gate_skipped_count,
+    "blocking_gate_skip_budget": blocking_skip_budget,
+    "blocking_gate_budget_exceeded": blocking_gate_budget_exceeded,
+    "blocking_gate_skip_reasons": blocking_gate_skip_reasons,
+    "blocking_gate_skip_reasons_allowlisted": blocking_gate_skip_reasons_allowlisted,
+    "blocking_gate_skip_evidence_present": blocking_gate_skip_evidence_present,
+    "blocking_gate_skip_reason_allowlist": blocking_skip_allowlist,
+    "policy_result": policy_result,
+    "policy_blocked": policy_blocked,
+    "policy_block_reason": policy_block_reason,
+}
+
+gate_summary.update(completion_gate_summary_payload)
 verification["gate_summary"] = gate_summary
 proof["verification"] = verification
 
@@ -505,17 +730,7 @@ completion_summary_event = {
     "issue_id": issue_id,
     "workcell_id": workcell_id,
     "proof_path": str(latest),
-    "gate_summary": {
-        "diff_files": diff_files_value,
-        "diff_lines": diff_lines_value,
-        "completion_classification": completion_classification,
-        "noop_reason": noop_reason,
-        "noop_reason_source": noop_reason_source,
-        "noop_justification_source": noop_reason_source,
-        "explicit_noop_justification_present": has_explicit_noop_justification,
-        "policy_result": policy_result,
-        "policy_blocked": policy_blocked,
-    },
+    "gate_summary": completion_gate_summary_payload,
 }
 if is_completion_result:
     with telemetry_path.open("a", encoding="utf-8") as handle:
@@ -553,6 +768,7 @@ print(
             "completion_classification": completion_classification,
             "noop_reason": noop_reason,
             "policy_result": policy_result,
+            "policy_block_reason": policy_block_reason,
         }
     )
 )
@@ -596,13 +812,37 @@ payload = json.loads(sys.argv[1])
 print(str(payload.get("proof_path") or ""))
 PY
 )"
+policy_block_reason="$(python3 - "$classification_json" <<'PY'
+import json
+import sys
+payload = json.loads(sys.argv[1])
+print(str(payload.get("policy_block_reason") or ""))
+PY
+)"
 
 if [[ -z "$failure_code" ]]; then
   exit "$primary_status"
 fi
 
 if [[ "$failure_code" == "policy.completion_blocked" ]]; then
-  echo "[cyntra] completion policy blocked zero-diff closure (missing manifest no-op justification)"
+  case "$policy_block_reason" in
+    missing_manifest_noop_justification)
+      echo "[cyntra] completion policy blocked zero-diff closure (missing manifest no-op justification)"
+      ;;
+    blocking_gate_skip_reason_not_allowlisted)
+      echo "[cyntra] completion policy blocked closure (blocking gates skipped beyond budget without allowlisted reason)"
+      ;;
+    blocking_gate_skip_evidence_missing)
+      echo "[cyntra] completion policy blocked closure (blocking gate skip evidence missing from gate summary telemetry)"
+      ;;
+    *)
+      if [[ -n "$policy_block_reason" ]]; then
+        echo "[cyntra] completion policy blocked closure (${policy_block_reason})"
+      else
+        echo "[cyntra] completion policy blocked closure"
+      fi
+      ;;
+  esac
   exit 1
 fi
 

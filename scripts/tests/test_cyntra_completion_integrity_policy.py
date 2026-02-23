@@ -80,6 +80,8 @@ class CyntraCompletionIntegrityPolicyTest(unittest.TestCase):
 
                     env = os.environ.copy()
                     env["CYNTRA_TEST_COMPLETION_FIXTURE"] = str(fixture_path)
+                    env["CYNTRA_COMPLETION_BLOCKING_SKIP_BUDGET"] = "0"
+                    env["CYNTRA_COMPLETION_BLOCKING_SKIP_REASON_ALLOWLIST"] = "no scope changes"
                     result = subprocess.run(
                         ["bash", str(runner)],
                         cwd=tmp,
