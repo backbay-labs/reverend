@@ -60,6 +60,14 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		Math.max(0, getIntConfig("decompile.budgetPerQuery", 64));
 	private static final int DECOMPILE_BUDGET_PER_SESSION =
 		Math.max(0, getIntConfig("decompile.budgetPerSession", 4096));
+	private static final RankingWeightPolicy SIMILARITY_RANKING_POLICY =
+		RankingWeightPolicy.fromConfig(
+			"ranking.weights.similarity.static", 0.6d,
+			"ranking.weights.similarity.dynamic", 0.4d);
+	private static final RankingWeightPolicy SEMANTIC_RANKING_POLICY =
+		RankingWeightPolicy.fromConfig(
+			"ranking.weights.semantic.static", 0.55d,
+			"ranking.weights.semantic.dynamic", 0.45d);
 
 	private final QueryCacheManager cacheManager;
 	private final DecompilerContextProvider decompilerProvider;
@@ -231,16 +239,20 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 
 				double indexedSimilarity = computeFunctionSimilarity(referenceFeatures, candidateFeatures);
 				double finalSimilarity = indexedSimilarity;
+				boolean dynamicSignalApplied = false;
 				if (embeddingBackendAvailable) {
 					EmbeddingScoreResult embeddingResult = computeEmbeddingScoreWithBudget(
 						program, candidate, referenceTerms, monitor, queryBudget);
 					if (embeddingResult.usedEmbeddingScore) {
-						finalSimilarity = Math.min(1.0, (0.6 * indexedSimilarity) + (0.4 * embeddingResult.score));
+						finalSimilarity = SIMILARITY_RANKING_POLICY.combine(indexedSimilarity,
+							embeddingResult.score);
+						dynamicSignalApplied = SIMILARITY_RANKING_POLICY.getDynamicWeight() > 0.0d;
 						decompileCandidates++;
 					}
 				}
 				if (finalSimilarity > 0.3) { // Threshold for relevance
-					scoredCandidates.add(new FunctionScore(candidate, finalSimilarity));
+					scoredCandidates.add(new FunctionScore(candidate, finalSimilarity,
+						dynamicSignalApplied));
 				}
 
 				processed++;
@@ -266,6 +278,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					buildEvidenceId("similarity", candidate.function.getEntryPoint()),
 					buildEvidenceRefs("similarity", candidate.function.getEntryPoint()),
 					buildProvenance("similarity", similarityMode, embeddingBackendAvailable,
+						candidate.dynamicSignalApplied, SIMILARITY_RANKING_POLICY,
 						candidate.function.getEntryPoint())
 				));
 			}
@@ -412,7 +425,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 				}
 				double lexicalScore = lexicalScores.getOrDefault(candidate, 0.0);
 				double indexedScore = computeIndexedSemanticScore(feature, queryTerms, lexicalScore);
-				scoredCandidates.add(new FunctionScore(candidate, indexedScore));
+				scoredCandidates.add(new FunctionScore(candidate, indexedScore, false));
 			}
 			scoredCandidates.sort((a, b) -> {
 				int scoreCmp = Double.compare(b.score, a.score);
@@ -446,12 +459,16 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					}
 					double finalScore = candidateScore.score;
 					if (embeddingResult.usedEmbeddingScore) {
-						finalScore = (0.55 * candidateScore.score) + (0.45 * embeddingResult.score);
+						finalScore = SEMANTIC_RANKING_POLICY.combine(candidateScore.score,
+							embeddingResult.score);
 						if (finalScore < EMBEDDING_MIN_SCORE) {
 							continue;
 						}
 					}
-					refinedCandidates.add(new FunctionScore(candidateScore.function, finalScore));
+					boolean dynamicSignalApplied = embeddingResult.usedEmbeddingScore &&
+						SEMANTIC_RANKING_POLICY.getDynamicWeight() > 0.0d;
+					refinedCandidates.add(new FunctionScore(candidateScore.function, finalScore,
+						dynamicSignalApplied));
 				}
 				scoredCandidates = refinedCandidates;
 			}
@@ -493,6 +510,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 					buildEvidenceId("semantic", scored.function.getEntryPoint()),
 					buildEvidenceRefs("semantic", scored.function.getEntryPoint()),
 					buildProvenance("semantic", semanticMode, embeddingBackendAvailable,
+						scored.dynamicSignalApplied, SEMANTIC_RANKING_POLICY,
 						scored.function.getEntryPoint())
 				));
 			}
@@ -802,20 +820,37 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		String normalizedAddress = normalizeAddressKey(address);
 		return List.of(
 			"evidence_ref:" + operation + ":" + normalizedAddress,
-			"provenance_ref:" + operation + ":" + normalizedAddress
+			"evidence_ref:static:" + operation + ":" + normalizedAddress,
+			"evidence_ref:dynamic:" + operation + ":" + normalizedAddress,
+			"provenance_ref:static:" + operation + ":" + normalizedAddress,
+			"provenance_ref:dynamic:" + operation + ":" + normalizedAddress
 		);
 	}
 
 	private Map<String, String> buildProvenance(String operation, String mode,
-			boolean embeddingBackendAvailable, Address address) {
+			boolean embeddingBackendAvailable, boolean dynamicSignalApplied,
+			RankingWeightPolicy rankingWeightPolicy, Address address) {
 		Map<String, String> provenance = new LinkedHashMap<>();
+		String normalizedAddress = normalizeAddressKey(address);
 		provenance.put("operation", operation);
 		provenance.put("ranking_mode", mode);
 		provenance.put("embedding_backend_status",
 			embeddingBackendAvailable ? "available" : "unavailable");
 		provenance.put("embedding_fallback_applied", String.valueOf(!embeddingBackendAvailable));
-		provenance.put("address", normalizeAddressKey(address));
+		provenance.put("address", normalizedAddress);
 		provenance.put("ranker", "indexed-features+embedding");
+		provenance.put("weight_policy", rankingWeightPolicy.getPolicyName());
+		provenance.put("static_weight", rankingWeightPolicy.getStaticWeightString());
+		provenance.put("dynamic_weight", rankingWeightPolicy.getDynamicWeightString());
+		provenance.put("dynamic_signal_applied", String.valueOf(dynamicSignalApplied));
+		provenance.put("static_evidence_ref",
+			"evidence_ref:static:" + operation + ":" + normalizedAddress);
+		provenance.put("dynamic_evidence_ref",
+			"evidence_ref:dynamic:" + operation + ":" + normalizedAddress);
+		provenance.put("static_provenance_ref",
+			"provenance_ref:static:" + operation + ":" + normalizedAddress);
+		provenance.put("dynamic_provenance_ref",
+			"provenance_ref:dynamic:" + operation + ":" + normalizedAddress);
 		return Collections.unmodifiableMap(provenance);
 	}
 
@@ -990,10 +1025,60 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 	private static class FunctionScore {
 		private final Function function;
 		private final double score;
+		private final boolean dynamicSignalApplied;
 
-		FunctionScore(Function function, double score) {
+		FunctionScore(Function function, double score, boolean dynamicSignalApplied) {
 			this.function = function;
 			this.score = score;
+			this.dynamicSignalApplied = dynamicSignalApplied;
+		}
+	}
+
+	private static class RankingWeightPolicy {
+		private final String policyName;
+		private final double staticWeight;
+		private final double dynamicWeight;
+
+		private RankingWeightPolicy(String policyName, double staticWeight, double dynamicWeight) {
+			this.policyName = policyName;
+			this.staticWeight = staticWeight;
+			this.dynamicWeight = dynamicWeight;
+		}
+
+		static RankingWeightPolicy fromConfig(String staticWeightSuffix, double staticWeightDefault,
+				String dynamicWeightSuffix, double dynamicWeightDefault) {
+			double staticWeight = Math.max(0.0d, getDoubleConfig(staticWeightSuffix, staticWeightDefault));
+			double dynamicWeight = Math.max(0.0d, getDoubleConfig(dynamicWeightSuffix, dynamicWeightDefault));
+			double total = staticWeight + dynamicWeight;
+			if (total <= 0.0d) {
+				return new RankingWeightPolicy("static=1.0000,dynamic=0.0000", 1.0d, 0.0d);
+			}
+			double normalizedStatic = staticWeight / total;
+			double normalizedDynamic = dynamicWeight / total;
+			String policyName = String.format(Locale.ROOT, "static=%.4f,dynamic=%.4f",
+				normalizedStatic, normalizedDynamic);
+			return new RankingWeightPolicy(policyName, normalizedStatic, normalizedDynamic);
+		}
+
+		double combine(double staticSignalScore, double dynamicSignalScore) {
+			double combined = (staticWeight * staticSignalScore) + (dynamicWeight * dynamicSignalScore);
+			return Math.max(0.0d, Math.min(1.0d, combined));
+		}
+
+		String getPolicyName() {
+			return policyName;
+		}
+
+		double getDynamicWeight() {
+			return dynamicWeight;
+		}
+
+		String getStaticWeightString() {
+			return String.format(Locale.ROOT, "%.4f", staticWeight);
+		}
+
+		String getDynamicWeightString() {
+			return String.format(Locale.ROOT, "%.4f", dynamicWeight);
 		}
 	}
 

@@ -175,6 +175,40 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 	}
 
 	/**
+	 * Shows evidence drilldown for a search hit, including static/dynamic provenance overlays.
+	 *
+	 * @param entry selected search result entry
+	 */
+	public void showEvidenceForHit(SearchResultEntry entry) {
+		if (entry == null) {
+			clearEvidence();
+			return;
+		}
+
+		this.currentEvidenceId = entry.getEvidenceId().orElse(null);
+		if (currentEvidenceId == null) {
+			displayEvidence(Collections.emptyList(), entry);
+			setOperationState(CockpitState.OperationStatus.SUCCESS,
+				"Loaded provenance overlay for selected hit");
+			statusLabel.setText("Provenance links for selected hit");
+			return;
+		}
+
+		setOperationState(CockpitState.OperationStatus.LOADING,
+			"Loading evidence " + currentEvidenceId);
+		Optional<Evidence> evidence = evidenceService.get(currentEvidenceId);
+		List<Evidence> allEvidence = new ArrayList<>();
+		if (evidence.isPresent()) {
+			allEvidence.add(evidence.get());
+			allEvidence.addAll(evidenceService.getDerivationChain(currentEvidenceId));
+		}
+		displayEvidence(allEvidence, entry);
+		setOperationState(CockpitState.OperationStatus.SUCCESS,
+			"Loaded " + allEvidence.size() + " items");
+		statusLabel.setText("Evidence: " + currentEvidenceId);
+	}
+
+	/**
 	 * Shows evidence for a specific address.
 	 *
 	 * @param address the address to show evidence for
@@ -222,8 +256,20 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 	}
 
 	private void displayEvidence(List<Evidence> evidenceList) {
+		displayEvidence(evidenceList, null);
+	}
+
+	private void displayEvidence(List<Evidence> evidenceList, SearchResultEntry hitEntry) {
 		currentEvidence = new ArrayList<>(evidenceList);
 		evidenceCardsPanel.removeAll();
+
+		if (hitEntry != null) {
+			JPanel provenancePanel = createProvenanceOverlayPanel(hitEntry);
+			if (provenancePanel != null) {
+				evidenceCardsPanel.add(provenancePanel);
+				evidenceCardsPanel.add(Box.createRigidArea(new Dimension(0, 10)));
+			}
+		}
 
 		// Group evidence by type
 		Map<EvidenceType, List<Evidence>> byType = new LinkedHashMap<>();
@@ -240,6 +286,62 @@ public class EvidenceDrawerProvider extends ComponentProviderAdapter {
 
 		evidenceCardsPanel.revalidate();
 		evidenceCardsPanel.repaint();
+	}
+
+	private JPanel createProvenanceOverlayPanel(SearchResultEntry entry) {
+		Set<String> staticLinks = new LinkedHashSet<>();
+		Set<String> dynamicLinks = new LinkedHashSet<>();
+		for (String ref : entry.getEvidenceRefs()) {
+			if (ref.contains(":static:")) {
+				staticLinks.add(ref);
+			}
+			else if (ref.contains(":dynamic:")) {
+				dynamicLinks.add(ref);
+			}
+		}
+		copyProvenanceLink(entry.getProvenance(), "static_evidence_ref", staticLinks);
+		copyProvenanceLink(entry.getProvenance(), "static_provenance_ref", staticLinks);
+		copyProvenanceLink(entry.getProvenance(), "dynamic_evidence_ref", dynamicLinks);
+		copyProvenanceLink(entry.getProvenance(), "dynamic_provenance_ref", dynamicLinks);
+		if (staticLinks.isEmpty() && dynamicLinks.isEmpty()) {
+			return null;
+		}
+
+		JPanel panel = new JPanel();
+		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+		panel.setBorder(BorderFactory.createTitledBorder(
+			BorderFactory.createEtchedBorder(),
+			"Hit Provenance Links",
+			TitledBorder.LEFT,
+			TitledBorder.TOP));
+		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		panel.add(createProvenanceRow("Static", staticLinks));
+		panel.add(Box.createRigidArea(new Dimension(0, 4)));
+		panel.add(createProvenanceRow("Dynamic", dynamicLinks));
+		return panel;
+	}
+
+	private void copyProvenanceLink(Map<String, String> provenance, String key, Set<String> links) {
+		if (provenance == null || links == null) {
+			return;
+		}
+		String value = provenance.get(key);
+		if (value != null && !value.isBlank()) {
+			links.add(value);
+		}
+	}
+
+	private JPanel createProvenanceRow(String label, Set<String> links) {
+		JPanel row = new JPanel(new BorderLayout(5, 0));
+		JLabel titleLabel = new JLabel(label + ":");
+		titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD));
+		row.add(titleLabel, BorderLayout.WEST);
+		String linkText = links.isEmpty() ? "none" : String.join(" | ", links);
+		JLabel linksLabel = new JLabel("<html>" + truncate(linkText, 180) + "</html>");
+		linksLabel.setFont(linksLabel.getFont().deriveFont(11f));
+		row.add(linksLabel, BorderLayout.CENTER);
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return row;
 	}
 
 	private JPanel createEvidenceTypePanel(EvidenceType type, List<Evidence> evidenceList) {

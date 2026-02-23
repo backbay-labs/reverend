@@ -57,6 +57,7 @@ Dispatch waves:
 ## E21-3201 Profiling Artifacts
 - `semantic-search-stage ... stage=embedding ... details={primaryRanker=indexed-features, indexedFresh=..., indexedReused=..., refineCandidateCount=...}` documents that semantic ranking is index-first and only decompile-refines a bounded shortlist.
 - `similarity-index-profile ... decompileCandidates=0` documents that `findSimilarFunctions` primary scoring no longer decompiles every candidate function.
+- E21-S4 overlay policy: query results now emit explicit `weight_policy` + `static_weight`/`dynamic_weight` provenance fields and deterministic `evidence_ref:{static|dynamic}:...` links for cockpit drilldown rendering.
 
 ## Required Verification Commands
 - `./gradlew --no-daemon :Framework-TraceModeling:compileJava`

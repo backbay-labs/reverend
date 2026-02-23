@@ -165,6 +165,44 @@ public class LiveQueryServiceImplTest extends AbstractGhidraHeadlessIntegrationT
 					firstResult.getProvenance().get("ranking_mode"));
 				assertEquals("true",
 					firstResult.getProvenance().get("embedding_fallback_applied"));
+				assertEquals("false",
+					firstResult.getProvenance().get("dynamic_signal_applied"));
+				assertTrue(firstResult.getEvidenceRefs().stream()
+					.anyMatch(ref -> ref.contains(":static:")));
+				assertTrue(firstResult.getEvidenceRefs().stream()
+					.anyMatch(ref -> ref.contains(":dynamic:")));
+				assertEquals("0.6000", firstResult.getProvenance().get("static_weight"));
+				assertEquals("0.4000", firstResult.getProvenance().get("dynamic_weight"));
+			}
+		}
+		finally {
+			System.clearProperty("ghidra.reverend.semantic.embedding.backend");
+		}
+	}
+
+	@Test
+	public void testSemanticSearchDeterministicPinnedFixtureOutput() throws QueryException {
+		System.setProperty("ghidra.reverend.semantic.embedding.backend", "none");
+		try {
+			List<QueryResult> first = queryService.semanticSearch(
+				program, "test", null, 10, TaskMonitor.DUMMY);
+			List<QueryResult> second = queryService.semanticSearch(
+				program, "test", null, 10, TaskMonitor.DUMMY);
+			assertEquals(first.size(), second.size());
+			for (int i = 0; i < first.size(); i++) {
+				QueryResult firstResult = first.get(i);
+				QueryResult secondResult = second.get(i);
+				assertEquals(firstResult.getAddress(), secondResult.getAddress());
+				assertEquals(firstResult.getScore(), secondResult.getScore(), 0.000001d);
+				assertEquals(firstResult.getEvidenceRefs(), secondResult.getEvidenceRefs());
+				assertEquals("deterministic_index_fallback",
+					firstResult.getProvenance().get("ranking_mode"));
+				assertEquals("false",
+					firstResult.getProvenance().get("dynamic_signal_applied"));
+				assertEquals("0.5500", firstResult.getProvenance().get("static_weight"));
+				assertEquals("0.4500", firstResult.getProvenance().get("dynamic_weight"));
+				assertNotNull(firstResult.getProvenance().get("static_evidence_ref"));
+				assertNotNull(firstResult.getProvenance().get("dynamic_evidence_ref"));
 			}
 		}
 		finally {
