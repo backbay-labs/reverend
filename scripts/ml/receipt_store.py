@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +47,7 @@ EDGE_CONTRACTS: dict[str, set[tuple[str, str]]] = {
         ("receipt", "receipt"),
     },
 }
+RAW_SIGNAL_ENTITY_TYPES = frozenset({"static", "dynamic", "symbolic", "taint"})
 
 
 def _utc_now() -> str:
@@ -190,6 +193,41 @@ class ReceiptIntegrityReport:
         return len(self.issues)
 
 
+@dataclass(frozen=True)
+class ProvenanceChainIssue:
+    proposal_id: str | None
+    receipt_id: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class ProvenanceChainReport:
+    ok: bool
+    issues: tuple[ProvenanceChainIssue, ...]
+    explainability_packet: Mapping[str, Any]
+
+    @property
+    def issue_count(self) -> int:
+        return len(self.issues)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "kind": "provenance_chain_verification_report",
+            "ok": self.ok,
+            "issue_count": self.issue_count,
+            "issues": [
+                {
+                    "proposal_id": issue.proposal_id,
+                    "receipt_id": issue.receipt_id,
+                    "reason": issue.reason,
+                }
+                for issue in self.issues
+            ],
+            "explainability_packet": _json_copy(self.explainability_packet),
+        }
+
+
 class ReceiptStoreIntegrityError(ValueError):
     """Raised when receipt history fails integrity verification."""
 
@@ -309,6 +347,303 @@ def verify_receipt_history(receipts: Sequence[Mapping[str, Any]]) -> ReceiptInte
     return ReceiptIntegrityReport(ok=not issues, issues=tuple(issues))
 
 
+def _extract_applied_proposal_id(receipt: Mapping[str, Any]) -> str:
+    target_raw = receipt.get("target")
+    if isinstance(target_raw, Mapping):
+        target_type = str(target_raw.get("target_type") or "").strip().lower()
+        target_id = str(target_raw.get("target_id") or "").strip()
+        if target_type == "proposal" and target_id:
+            return target_id
+
+    metadata_raw = receipt.get("metadata")
+    if isinstance(metadata_raw, Mapping):
+        for key in ("applied_proposal_id", "proposal_id"):
+            proposal_id = str(metadata_raw.get(key) or "").strip()
+            if proposal_id:
+                return proposal_id
+    return ""
+
+
+def _oriented_provenance_edges(item: Mapping[str, Any]) -> tuple[tuple[tuple[str, str], tuple[str, str], str], ...]:
+    source_entity_type = str(item.get("entity_type") or "").strip()
+    source_entity_id = str(item.get("entity_id") or "").strip()
+    edge_raw = item.get("edge")
+    if not source_entity_type or not source_entity_id or not isinstance(edge_raw, Mapping):
+        return ()
+
+    edge_type = str(edge_raw.get("edge_type") or "").strip()
+    target_entity_type = str(edge_raw.get("target_entity_type") or "").strip()
+    target_entity_id = str(edge_raw.get("target_entity_id") or "").strip()
+    if not edge_type or not target_entity_type or not target_entity_id:
+        return ()
+
+    source = (source_entity_type, source_entity_id)
+    target = (target_entity_type, target_entity_id)
+
+    if edge_type == "derived_from":
+        return ((target, source, edge_type),)
+    if edge_type == "corroborates":
+        return (
+            (source, target, edge_type),
+            (target, source, edge_type),
+        )
+    return ((source, target, edge_type),)
+
+
+def _resolve_canonical_signal_chain(
+    *,
+    raw_signal_nodes: set[tuple[str, str]],
+    proposal_node: tuple[str, str],
+    adjacency: Mapping[tuple[str, str], Sequence[tuple[tuple[str, str], str]]],
+) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]] | None:
+    if not raw_signal_nodes:
+        return None
+
+    queue: deque[tuple[str, str]] = deque(sorted(raw_signal_nodes))
+    parents: dict[tuple[str, str], tuple[str, str] | None] = {node: None for node in raw_signal_nodes}
+    inbound_edges: dict[tuple[str, str], str] = {}
+
+    while queue:
+        node = queue.popleft()
+        if node == proposal_node:
+            break
+        neighbors = sorted(
+            adjacency.get(node, ()),
+            key=lambda item: (item[0][0], item[0][1], item[1]),
+        )
+        for next_node, edge_type in neighbors:
+            if next_node in parents:
+                continue
+            parents[next_node] = node
+            inbound_edges[next_node] = edge_type
+            queue.append(next_node)
+
+    if proposal_node not in parents:
+        return None
+
+    nodes: list[tuple[str, str]] = []
+    edges: list[str] = []
+    cursor = proposal_node
+    while True:
+        nodes.append(cursor)
+        parent = parents[cursor]
+        if parent is None:
+            break
+        edges.append(inbound_edges[cursor])
+        cursor = parent
+
+    nodes.reverse()
+    edges.reverse()
+    return (tuple(nodes), tuple(edges))
+
+
+def _build_canonical_explainability_chain(
+    *,
+    path_nodes: Sequence[tuple[str, str]],
+    path_edges: Sequence[str],
+    proposal_id: str,
+    receipt: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    chain: list[dict[str, Any]] = []
+    for idx, node in enumerate(path_nodes):
+        entry: dict[str, Any] = {
+            "step_index": idx,
+            "kind": "entity",
+            "entity_type": node[0],
+            "entity_id": node[1],
+        }
+        if idx > 0:
+            entry["edge_type"] = path_edges[idx - 1]
+        chain.append(entry)
+
+    chain_raw = receipt.get("chain")
+    if isinstance(chain_raw, Mapping):
+        sequence_number = chain_raw.get("sequence_number")
+        previous_receipt_id = chain_raw.get("previous_receipt_id")
+    else:
+        sequence_number = None
+        previous_receipt_id = None
+
+    receipt_id = str(receipt.get("receipt_id") or "").strip()
+    receipt_step: dict[str, Any] = {
+        "step_index": len(chain),
+        "kind": "receipt",
+        "receipt_id": receipt_id,
+        "link_type": "APPLIED_BY_RECEIPT",
+    }
+    if sequence_number is not None:
+        receipt_step["sequence_number"] = sequence_number
+    if previous_receipt_id is not None:
+        receipt_step["previous_receipt_id"] = previous_receipt_id
+    chain.append(receipt_step)
+
+    target_raw = receipt.get("target")
+    if isinstance(target_raw, Mapping):
+        target_type = str(target_raw.get("target_type") or "").strip()
+        target_id = str(target_raw.get("target_id") or "").strip()
+        if target_type and target_id:
+            if target_type.lower() != "proposal" or target_id != proposal_id:
+                chain.append(
+                    {
+                        "step_index": len(chain),
+                        "kind": "annotation",
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "link_type": "APPLIES_ANNOTATION",
+                    }
+                )
+
+    return chain
+
+
+def verify_provenance_chain(receipts: Sequence[Mapping[str, Any]]) -> ProvenanceChainReport:
+    issues: list[ProvenanceChainIssue] = []
+    integrity_report = verify_receipt_history(receipts)
+    if not integrity_report.ok:
+        for issue in integrity_report.issues:
+            issues.append(
+                ProvenanceChainIssue(
+                    proposal_id=None,
+                    receipt_id=issue.receipt_id,
+                    reason=f"receipt_integrity: {issue.reason}",
+                )
+            )
+
+    explainability_by_proposal: dict[str, dict[str, Any]] = {}
+    for receipt in receipts:
+        proposal_id = _extract_applied_proposal_id(receipt)
+        if not proposal_id:
+            continue
+
+        receipt_id = str(receipt.get("receipt_id") or "").strip() or None
+        try:
+            _validate_entity_id("proposal", proposal_id, field="proposal_id")
+        except ValueError as exc:
+            issues.append(
+                ProvenanceChainIssue(
+                    proposal_id=proposal_id,
+                    receipt_id=receipt_id,
+                    reason=str(exc),
+                )
+            )
+            continue
+
+        chain_raw = receipt.get("chain")
+        previous_receipt_id = (
+            str(chain_raw.get("previous_receipt_id") or "").strip()
+            if isinstance(chain_raw, Mapping)
+            else ""
+        )
+        if not previous_receipt_id:
+            issues.append(
+                ProvenanceChainIssue(
+                    proposal_id=proposal_id,
+                    receipt_id=receipt_id,
+                    reason="applied proposal receipt is missing previous_receipt_id provenance link",
+                )
+            )
+
+        evidence_raw = receipt.get("evidence")
+        evidence_items = [item for item in evidence_raw if isinstance(item, Mapping)] if isinstance(evidence_raw, list) else []
+        if not evidence_items:
+            issues.append(
+                ProvenanceChainIssue(
+                    proposal_id=proposal_id,
+                    receipt_id=receipt_id,
+                    reason="applied proposal receipt has no canonical evidence entries",
+                )
+            )
+            continue
+
+        raw_signal_nodes: set[tuple[str, str]] = set()
+        seen_nodes: set[tuple[str, str]] = set()
+        adjacency: dict[tuple[str, str], list[tuple[tuple[str, str], str]]] = {}
+        for item in evidence_items:
+            source_entity_type = str(item.get("entity_type") or "").strip()
+            source_entity_id = str(item.get("entity_id") or "").strip()
+            if source_entity_type and source_entity_id:
+                source = (source_entity_type, source_entity_id)
+                seen_nodes.add(source)
+                if source_entity_type in RAW_SIGNAL_ENTITY_TYPES:
+                    raw_signal_nodes.add(source)
+
+            edge_raw = item.get("edge")
+            if isinstance(edge_raw, Mapping):
+                target_entity_type = str(edge_raw.get("target_entity_type") or "").strip()
+                target_entity_id = str(edge_raw.get("target_entity_id") or "").strip()
+                if target_entity_type and target_entity_id:
+                    target = (target_entity_type, target_entity_id)
+                    seen_nodes.add(target)
+                    if target_entity_type in RAW_SIGNAL_ENTITY_TYPES:
+                        raw_signal_nodes.add(target)
+
+            for src, dst, edge_type in _oriented_provenance_edges(item):
+                adjacency.setdefault(src, []).append((dst, edge_type))
+
+        proposal_node = ("proposal", proposal_id)
+        if proposal_node not in seen_nodes:
+            issues.append(
+                ProvenanceChainIssue(
+                    proposal_id=proposal_id,
+                    receipt_id=receipt_id,
+                    reason="missing proposal evidence node in canonical evidence chain",
+                )
+            )
+            continue
+        if not raw_signal_nodes:
+            issues.append(
+                ProvenanceChainIssue(
+                    proposal_id=proposal_id,
+                    receipt_id=receipt_id,
+                    reason="missing raw-signal evidence chain to proposal",
+                )
+            )
+            continue
+
+        canonical_path = _resolve_canonical_signal_chain(
+            raw_signal_nodes=raw_signal_nodes,
+            proposal_node=proposal_node,
+            adjacency=adjacency,
+        )
+        if canonical_path is None:
+            issues.append(
+                ProvenanceChainIssue(
+                    proposal_id=proposal_id,
+                    receipt_id=receipt_id,
+                    reason="no canonical provenance path from raw signals to applied proposal",
+                )
+            )
+            continue
+
+        path_nodes, path_edges = canonical_path
+        explainability_by_proposal[proposal_id] = {
+            "proposal_id": proposal_id,
+            "applied_receipt_id": receipt_id,
+            "canonical_chain": _build_canonical_explainability_chain(
+                path_nodes=path_nodes,
+                path_edges=path_edges,
+                proposal_id=proposal_id,
+                receipt=receipt,
+            ),
+        }
+
+    explainability_packet = {
+        "schema_version": 1,
+        "kind": "applied_proposal_explainability_packet",
+        "generated_at_utc": _utc_now(),
+        "applied_proposals": [
+            _json_copy(explainability_by_proposal[proposal_id])
+            for proposal_id in sorted(explainability_by_proposal)
+        ],
+    }
+
+    return ProvenanceChainReport(
+        ok=not issues,
+        issues=tuple(issues),
+        explainability_packet=explainability_packet,
+    )
+
+
 class ReceiptStore:
     """JSON-backed append-only receipt store."""
 
@@ -425,6 +760,37 @@ class ReceiptStore:
             normalized.append(item)
         return verify_receipt_history(normalized)
 
+    def verify_provenance(self) -> ProvenanceChainReport:
+        self._ensure_loaded()
+        history = self._doc["receipts"]
+        if not isinstance(history, list):
+            raise ValueError("receipt store 'receipts' must be an array")
+        normalized: list[Mapping[str, Any]] = []
+        for idx, item in enumerate(history):
+            if not isinstance(item, Mapping):
+                return ProvenanceChainReport(
+                    ok=False,
+                    issues=(
+                        ProvenanceChainIssue(
+                            proposal_id=None,
+                            receipt_id=None,
+                            reason=f"receipt entry at index {idx} must be an object",
+                        ),
+                    ),
+                    explainability_packet={
+                        "schema_version": 1,
+                        "kind": "applied_proposal_explainability_packet",
+                        "generated_at_utc": _utc_now(),
+                        "applied_proposals": [],
+                    },
+                )
+            normalized.append(item)
+        return verify_provenance_chain(normalized)
+
+    def build_explainability_packet(self) -> Mapping[str, Any]:
+        report = self.verify_provenance()
+        return _json_copy(report.explainability_packet)
+
     def _ensure_loaded(self) -> None:
         if self._loaded:
             return
@@ -454,3 +820,48 @@ class ReceiptStore:
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_text(json.dumps(self._doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp.replace(self._path)
+
+
+def _verify_provenance_command(args: argparse.Namespace) -> int:
+    store = ReceiptStore(args.store)
+    report = store.verify_provenance()
+    payload = report.as_dict()
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    else:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0 if report.ok else 1
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Receipt-store provenance utilities")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    verify_parser = subparsers.add_parser(
+        "verify-provenance",
+        help="Verify applied-proposal provenance links and emit explainability packet JSON",
+    )
+    verify_parser.add_argument(
+        "--store",
+        type=Path,
+        required=True,
+        help="Path to receipt store JSON file",
+    )
+    verify_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write machine-readable verifier report JSON",
+    )
+    verify_parser.set_defaults(func=_verify_provenance_command)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
