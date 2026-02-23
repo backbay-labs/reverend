@@ -63,6 +63,17 @@ Dispatch waves:
 - E21-S5 cockpit mission loop: proposal review/apply/rollback mutations now emit linked receipt artifacts and append proposal-level provenance chains so repeated scenario runs can verify deterministic loop outputs.
 - E21-S7 operator runbook publication: `docs/operator-reviewer-runbook.md` now includes a local clean-environment assistant workflow with prerequisites, launch/verification commands, deterministic mission execution, and failure-signature remediation mapping.
 
+## E21-S8 GA Readiness Packet Artifacts (2026-02-23)
+- Exit-gate packet: `docs/exit-gate-report.md`
+- Formal decision record: `docs/go-no-go-decision.md`
+- Operational-claim gate artifacts:
+  - `.cyntra/artifacts/gates/eval/operational-claim-regression.json`
+  - `.cyntra/artifacts/gates/eval/operational-claim-delta.json`
+  - `.cyntra/artifacts/gates/eval/operational-claim-manifest.json`
+- Compile/gate provenance artifact: `.cyntra/artifacts/gates/blocking-gate-summary.json`
+- Benchmark lift evidence: `docs/evidence/rc-functional-validation/09-soak-report.json` and `docs/soak-test-report-1701.md`
+- Risk/signoff evidence: `docs/security/security-signoff-checklist.md` and `docs/security/evidence/abuse-scenario-suite-1806/README.md`
+
 ## Required Verification Commands
 - `./gradlew --no-daemon :Framework-TraceModeling:compileJava`
 - `./gradlew --no-daemon :Reverend:compileJava :Reverend:test --tests "ghidra.reverend.cockpit.*"`
@@ -88,3 +99,5 @@ Dispatch waves:
 - `docs/research/INDEX.md`
 - `docs/e9-frontier-roadmap.md`
 - `docs/e13-e19-frontier-ga-roadmap.md`
+- `docs/exit-gate-report.md`
+- `docs/go-no-go-decision.md`
