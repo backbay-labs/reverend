@@ -396,6 +396,47 @@ CREATE TABLE annotations (
 CREATE INDEX idx_annotations_func ON annotations(function_id);
 CREATE INDEX idx_annotations_type ON annotations(annotation_type);
 
+-- Canonical evidence entities (E24 unification layer)
+CREATE TABLE evidence_entities (
+    entity_id                    CHAR(68) PRIMARY KEY, -- ev[sdytpr]_<stable-token>
+    entity_type                  VARCHAR(16) NOT NULL, -- static|dynamic|symbolic|taint|proposal|receipt
+    entity_schema_version        SMALLINT NOT NULL DEFAULT 1,
+    program_id                   UUID REFERENCES programs(id),
+    function_id                  UUID REFERENCES functions(id),
+    source_locator               JSONB NOT NULL,       -- canonical source tuple
+    min_snap                     BIGINT,               -- inclusive; NULL for non-temporal entities
+    max_snap                     BIGINT,               -- inclusive; NULL for non-temporal entities
+    first_receipt_entity_id      CHAR(68),             -- canonical receipt entity (evr_*)
+    last_receipt_entity_id       CHAR(68),             -- canonical receipt entity (evr_*)
+    reproducibility_manifest_hash CHAR(64) NOT NULL,   -- pinned config/dataset digest
+    created_at                   TIMESTAMP DEFAULT now(),
+    UNIQUE(entity_type, program_id, source_locator)
+);
+
+CREATE INDEX idx_evidence_entities_type_program ON evidence_entities(entity_type, program_id);
+CREATE INDEX idx_evidence_entities_function ON evidence_entities(function_id);
+CREATE INDEX idx_evidence_entities_lifespan ON evidence_entities(min_snap, max_snap);
+
+-- Canonical evidence graph edges (contract-aligned)
+CREATE TABLE evidence_edges (
+    id                           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    edge_type                    VARCHAR(16) NOT NULL, -- supports|derived_from|corroborates|supersedes
+    edge_schema_version          SMALLINT NOT NULL DEFAULT 1,
+    source_entity_id             CHAR(68) NOT NULL REFERENCES evidence_entities(entity_id),
+    target_entity_id             CHAR(68) NOT NULL REFERENCES evidence_entities(entity_id),
+    min_snap                     BIGINT,
+    max_snap                     BIGINT,
+    first_receipt_entity_id      CHAR(68),
+    last_receipt_entity_id       CHAR(68),
+    reproducibility_manifest_hash CHAR(64) NOT NULL,
+    created_at                   TIMESTAMP DEFAULT now(),
+    UNIQUE(edge_type, source_entity_id, target_entity_id, min_snap, max_snap)
+);
+
+CREATE INDEX idx_evidence_edges_source ON evidence_edges(source_entity_id);
+CREATE INDEX idx_evidence_edges_target ON evidence_edges(target_entity_id);
+CREATE INDEX idx_evidence_edges_type ON evidence_edges(edge_type);
+
 -- String references (extracted during analysis)
 CREATE TABLE string_refs (
     function_id     UUID NOT NULL REFERENCES functions(id),
@@ -546,6 +587,44 @@ LIMIT 100;
 - Routing: Batch vector search
 - Method: For each query function, perform HNSW search. Batch queries are parallelized across connections. Results are aggregated and deduplicated.
 - Latency target: <5 minutes for 10K query functions against 10M corpus
+
+**Q6: "Cockpit chain from signal to applied change."**
+- Input: function ID (or proposal entity ID) + optional `as_of_receipt_entity_id`
+- Routing: Relational graph traversal over `evidence_entities` + `evidence_edges`
+- Query:
+```sql
+WITH RECURSIVE cockpit_chain AS (
+    SELECT ee.entity_id,
+           ee.entity_type,
+           0 AS depth
+    FROM evidence_entities ee
+    WHERE ee.function_id = $function_id
+      AND ee.entity_type IN ('static', 'dynamic', 'symbolic', 'taint')
+
+    UNION ALL
+
+    SELECT ee2.entity_id,
+           ee2.entity_type,
+           cc.depth + 1
+    FROM cockpit_chain cc
+    JOIN evidence_edges ed ON ed.source_entity_id = cc.entity_id
+    JOIN evidence_entities ee2 ON ee2.entity_id = ed.target_entity_id
+    WHERE cc.depth < 4
+      AND ed.edge_type IN ('supports', 'derived_from', 'supersedes')
+)
+SELECT cc.depth,
+       cc.entity_type,
+       cc.entity_id,
+       ee.min_snap,
+       ee.max_snap,
+       ee.first_receipt_entity_id,
+       ee.last_receipt_entity_id,
+       ee.reproducibility_manifest_hash
+FROM cockpit_chain cc
+JOIN evidence_entities ee ON ee.entity_id = cc.entity_id
+ORDER BY cc.depth, cc.entity_type, cc.entity_id;
+```
+- Latency target: <250ms for a single function chain in a 10M-function corpus
 
 ### Query Routing Architecture
 

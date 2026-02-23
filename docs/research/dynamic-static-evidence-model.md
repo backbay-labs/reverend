@@ -40,7 +40,7 @@ Dynamic analysis produces several distinct categories of evidence. Each has diff
 | **Network Traffic Capture** | `{snap_id, direction, protocol, src, dst, payload_ref}` | Per-packet | Variable (header 64B + payload ref) | External reference / data label |
 | **Timing Measurement** | `{snap_id, addr_range, cycle_count, wall_ns, iteration}` | Per-function or per-block | 32 bytes/entry | Function or BasicBlock |
 
-### 1.2 Stable Evidence Reference IDs (Proposal-Safe)
+### 1.2 Stable Canonical IDs and Proposal References (Proposal-Safe)
 
 Evidence attached to review proposals must use a stable identifier that survives:
 
@@ -51,12 +51,23 @@ Evidence attached to review proposals must use a stable identifier that survives
 Use a deterministic ID derived from canonical source fields rather than a storage row id:
 
 ```
-EvidenceRefIdV1 = "evr_" + hex(sha256(canonical_key))
+CanonicalEntityIdV1(entity_type) =
+  prefix(entity_type) + hex(sha256(canonical_key))
 
 canonical_key =
+  entity_type + "|" +
   evidence_type + "|" +
   program_id + "|" +
   canonical_source_tuple
+
+prefix(static)   = "evs_"
+prefix(dynamic)  = "evd_"
+prefix(symbolic) = "evy_"
+prefix(taint)    = "evt_"
+prefix(proposal) = "evp_"
+prefix(receipt)  = "evr_"
+
+EvidenceRefIdV1 = CanonicalEntityIdV1(entity_type)
 ```
 
 Canonical source tuples for UI-219 evidence classes:
@@ -66,6 +77,7 @@ Canonical source tuples for UI-219 evidence classes:
 - `callsite`: `call_addr|caller_function_addr|callee_target`
 
 `evidence_ref_id` is immutable. Re-importing the same source tuple must resolve to the same ID, enabling dedup and stable proposal links.
+`evr_` remains reserved for canonical `receipt` entities only.
 
 ### 1.3 Evidence Category Details
 
@@ -377,7 +389,7 @@ The evidence store uses a two-level indexing scheme:
 
 ```
 Primary Index:  B+tree on (evidence_ref_id, snap_id)
-    - evidence_ref_id: deterministic ID from canonical evidence key
+    - evidence_ref_id: deterministic canonical entity ID from canonical evidence key
       (see Section 1.2)
     - snap_id: snapshot number
     - Supports point queries and forward/backward scans
@@ -475,7 +487,7 @@ interface EvidenceQuery {
     +-----------------------+    +---------------------------------+
 ```
 
-**B+tree on (evidence_ref_id, snap_id)**: Handles point-in-time lookups and temporal scans. `evidence_ref_id` is a deterministic hash over canonical source fields (e.g., `xref(from,to,type)` or `constant(insn,operand,value)`), so proposal links remain stable across imports, apply, and rollback.
+**B+tree on (evidence_ref_id, snap_id)**: Handles point-in-time lookups and temporal scans. `evidence_ref_id` is a deterministic canonical entity ID over canonical source fields (e.g., `xref(from,to,type)` or `constant(insn,operand,value)`), so proposal links remain stable across imports, apply, and rollback.
 
 **Interval R-tree on (addr_range, lifespan)**: Handles 2D rectangle queries (address range x time range). Used for "show all evidence for this function in this time window." The R-tree can be approximated with a pair of B+trees (one on address, one on snap) with intersection at query time if R-tree complexity is unwarranted.
 
@@ -490,7 +502,7 @@ ProposalEvidenceLink {
     link_id:         UUID              // immutable link record
     changeset_id:    UUID
     delta_id:        UUID              // proposal record inside the changeset
-    evidence_ref_id: string            // "evr_<sha256>"
+    evidence_ref_id: string            // "ev[sdytpr]_<sha256>"
     evidence_kind:   enum { XREF, CONSTANT, CALLSITE, OTHER }
     role:            enum { PRIMARY, SUPPORTING, CONTRADICTING }
     captured_at:     timestamptz
@@ -1439,18 +1451,30 @@ CREATE TABLE network_capture (
 
 -- Canonical evidence refs used by proposal/review workflows
 CREATE TABLE evidence_ref (
-    evidence_ref_id CHAR(68) PRIMARY KEY, -- "evr_" + sha256(canonical_key)
+    evidence_ref_id CHAR(68) PRIMARY KEY, -- canonical entity ID: "ev[sdytpr]_" + sha256(canonical_key)
+    entity_type     VARCHAR(16) NOT NULL, -- 'static', 'dynamic', 'symbolic', 'taint', 'proposal', 'receipt'
+    entity_id       CHAR(68) NOT NULL,    -- same stable ID as evidence_ref_id (materialized for joins)
+    entity_schema_version SMALLINT NOT NULL DEFAULT 1,
     evidence_type   VARCHAR(32),          -- 'xref', 'constant', 'callsite', ...
     program_id      VARCHAR(36),
     canonical_key   TEXT,                 -- normalized tuple encoded as text
     source_table    VARCHAR(64),          -- 'xref', 'instruction', 'call_edge', ...
     source_pk       VARCHAR(96),          -- stable PK in source table
+    min_snap        BIGINT NOT NULL,      -- inclusive temporal lower bound
+    max_snap        BIGINT NOT NULL,      -- inclusive temporal upper bound
+    first_receipt_id VARCHAR(36),         -- first receipt that introduced this evidence entity
+    last_receipt_id VARCHAR(36),          -- latest receipt that mutated/superseded this evidence entity
+    reproducibility_manifest_hash CHAR(64), -- deterministic run manifest hash for replay
     payload_hash    BLOB,                 -- optional hash of expanded evidence payload
     metadata        TEXT,
     created_at      BIGINT,
+    UNIQUE (entity_id),
     UNIQUE (evidence_type, program_id, canonical_key)
 );
 CREATE INDEX idx_evidence_ref_source ON evidence_ref(source_table, source_pk);
+CREATE INDEX idx_evidence_ref_entity ON evidence_ref(entity_type, entity_id);
+CREATE INDEX idx_evidence_ref_lifespan ON evidence_ref(min_snap, max_snap);
+CREATE INDEX idx_evidence_ref_receipt_span ON evidence_ref(first_receipt_id, last_receipt_id);
 
 -- Delta-level links used by the review UI evidence drawer
 CREATE TABLE proposal_evidence_link (
@@ -1567,6 +1591,26 @@ SELECT rel.receipt_id,
 FROM receipt_evidence_link rel
 WHERE rel.receipt_id IN (:apply_receipt_id, :rollback_receipt_id)
 ORDER BY rel.evidence_ref_id, rel.relationship;
+```
+
+#### Query 7: "Cockpit evidence chain from raw signal to applied change"
+
+```sql
+SELECT pel.delta_id,
+       er.entity_type AS signal_entity_type,
+       er.entity_id   AS signal_entity_id,
+       er.min_snap,
+       er.max_snap,
+       er.first_receipt_id,
+       er.last_receipt_id,
+       rel.receipt_id AS apply_or_rollback_receipt_id,
+       rel.relationship
+FROM proposal_evidence_link pel
+JOIN evidence_ref er ON er.evidence_ref_id = pel.evidence_ref_id
+JOIN receipt_evidence_link rel ON rel.proposal_link_id = pel.link_id
+WHERE pel.changeset_id = :changeset_id
+  AND pel.delta_id = :delta_id
+ORDER BY rel.receipt_id, pel.link_role, er.entity_type, er.entity_id;
 ```
 
 ### 8.5 Query Interface Architecture
