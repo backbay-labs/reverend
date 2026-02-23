@@ -91,7 +91,8 @@ public class QueryTelemetry {
 	public QueryTelemetry() {
 		// Initialize common operation types
 		for (String opType : Arrays.asList("findSimilarFunctions", "semanticSearch",
-				"patternSearch", "getContext")) {
+				"patternSearch", "getContext", "queryTemporalWindow",
+				"queryTemporalIntervalJoin", "queryTemporalLineage")) {
 			latencyByOperation.put(opType, new LatencyMetrics(opType));
 		}
 	}

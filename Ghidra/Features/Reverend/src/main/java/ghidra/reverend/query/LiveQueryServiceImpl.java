@@ -15,6 +15,7 @@
  */
 package ghidra.reverend.query;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -73,6 +74,8 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 	private final DecompilerContextProvider decompilerProvider;
 	private final QueryTelemetry telemetry;
 	private final DecompileBudgetManager decompileBudgetManager;
+	private final TemporalEvidenceGraph temporalEvidenceGraph;
+	private final Map<String, String> lastTemporalEventByProgramAddress = new ConcurrentHashMap<>();
 	private final ThreadLocal<BudgetStatus> lastSemanticBudgetStatus =
 		ThreadLocal.withInitial(BudgetStatus::none);
 
@@ -91,6 +94,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		this.cacheManager = Objects.requireNonNull(cacheManager, "cacheManager");
 		this.decompilerProvider = Objects.requireNonNull(decompilerProvider, "decompilerProvider");
 		this.telemetry = Objects.requireNonNull(telemetry, "telemetry");
+		this.temporalEvidenceGraph = new TemporalEvidenceGraph();
 		this.decompileBudgetManager = new DecompileBudgetManager(
 			DECOMPILE_BUDGET_PER_QUERY, DECOMPILE_BUDGET_PER_SESSION);
 	}
@@ -151,6 +155,10 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			program.removeListener(this);
 			cacheManager.invalidateProgram(program);
 			decompilerProvider.disposeForProgram(program);
+			String programId = programId(program);
+			temporalEvidenceGraph.clearProgram(programId);
+			lastTemporalEventByProgramAddress.keySet()
+				.removeIf(key -> key.startsWith(programId + "|"));
 		}
 
 		if (currentProgram == program) {
@@ -167,6 +175,15 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 	 */
 	public Program getCurrentProgram() {
 		return currentProgram;
+	}
+
+	void ingestTemporalEventForTesting(TemporalEvent event) {
+		if (event == null) {
+			return;
+		}
+		temporalEvidenceGraph.upsert(event);
+		event.getAddress().ifPresent(address ->
+			rememberTemporalEvent(event.getProgramId(), address, event.getEventId()));
 	}
 
 	@Override
@@ -302,6 +319,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 
 			// Cache the results
 			cacheManager.cacheSimilarFunctions(program, cacheKey, results);
+			recordTemporalQueryResults(program, "similarity", operationId, results);
 
 			telemetry.recordOperationSuccess(operationId, System.nanoTime() - startTime);
 			return results;
@@ -526,6 +544,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 
 			// Cache results
 			cacheManager.cacheSemanticSearch(program, cacheKey, results);
+			recordTemporalQueryResults(program, "semantic", operationId, results);
 
 			telemetry.recordOperationSuccess(operationId, System.nanoTime() - startTime);
 			lastSemanticBudgetStatus.set(budgetStatus);
@@ -586,6 +605,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 
 			// Cache results
 			cacheManager.cachePatternSearch(program, cacheKey, results);
+			recordTemporalPatternResults(program, operationId, results);
 
 			telemetry.recordOperationSuccess(operationId, System.nanoTime() - startTime);
 			return results;
@@ -638,6 +658,7 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 			}
 
 			QueryContext context = new QueryContextImpl(address, function, decompiledCode, references);
+			recordTemporalContextEvent(program, operationId, context);
 
 			// Cache the context
 			cacheManager.cacheContext(program, address, context);
@@ -651,6 +672,75 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 		} catch (Exception e) {
 			telemetry.recordOperationError(operationId, e);
 			throw new QueryException("Error getting context: " + e.getMessage(), e);
+		}
+	}
+
+	@Override
+	public List<TemporalEvent> queryTemporalWindow(Program program, TemporalWindowRequest request)
+			throws QueryException {
+		long startTime = System.nanoTime();
+		String operationId = telemetry.startOperation("queryTemporalWindow", program);
+		try {
+			validateProgramBinding(program);
+			Objects.requireNonNull(request, "request");
+			List<TemporalEvent> results = temporalEvidenceGraph.queryWindow(programId(program), request);
+			telemetry.recordOperationSuccess(operationId, System.nanoTime() - startTime);
+			return results;
+		}
+		catch (QueryException e) {
+			telemetry.recordOperationError(operationId, e);
+			throw e;
+		}
+		catch (Exception e) {
+			telemetry.recordOperationError(operationId, e);
+			throw new QueryException("Error in temporal window query: " + e.getMessage(), e);
+		}
+	}
+
+	@Override
+	public List<TemporalIntervalJoinResult> queryTemporalIntervalJoin(Program program,
+			TemporalIntervalJoinRequest request) throws QueryException {
+		long startTime = System.nanoTime();
+		String operationId = telemetry.startOperation("queryTemporalIntervalJoin", program);
+		try {
+			validateProgramBinding(program);
+			Objects.requireNonNull(request, "request");
+			List<TemporalIntervalJoinResult> results =
+				temporalEvidenceGraph.intervalJoin(programId(program), request);
+			telemetry.recordOperationSuccess(operationId, System.nanoTime() - startTime);
+			return results;
+		}
+		catch (QueryException e) {
+			telemetry.recordOperationError(operationId, e);
+			throw e;
+		}
+		catch (Exception e) {
+			telemetry.recordOperationError(operationId, e);
+			throw new QueryException("Error in temporal interval join query: " + e.getMessage(), e);
+		}
+	}
+
+	@Override
+	public List<TemporalEvent> queryTemporalLineage(Program program, String eventId, int maxDepth)
+			throws QueryException {
+		long startTime = System.nanoTime();
+		String operationId = telemetry.startOperation("queryTemporalLineage", program);
+		try {
+			validateProgramBinding(program);
+			if (eventId == null || eventId.isBlank()) {
+				throw new QueryException("eventId cannot be blank");
+			}
+			List<TemporalEvent> results = temporalEvidenceGraph.lineage(programId(program), eventId, maxDepth);
+			telemetry.recordOperationSuccess(operationId, System.nanoTime() - startTime);
+			return results;
+		}
+		catch (QueryException e) {
+			telemetry.recordOperationError(operationId, e);
+			throw e;
+		}
+		catch (Exception e) {
+			telemetry.recordOperationError(operationId, e);
+			throw new QueryException("Error in temporal lineage query: " + e.getMessage(), e);
 		}
 	}
 
@@ -856,6 +946,118 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 
 	private String normalizeAddressKey(Address address) {
 		return address != null ? address.toString() : "none";
+	}
+
+	private void recordTemporalQueryResults(Program program, String operation, String operationId,
+			List<QueryResult> results) {
+		if (program == null || results == null || results.isEmpty()) {
+			return;
+		}
+		Instant baseTime = Instant.now();
+		String programId = programId(program);
+		for (int index = 0; index < results.size(); index++) {
+			QueryResult result = results.get(index);
+			Instant eventTime = baseTime.plusMillis(index);
+			String eventId = buildTemporalEventId(operationId, operation,
+				result.getAddress(), index);
+			List<String> predecessors = new ArrayList<>();
+			String predecessor = previousTemporalEvent(programId, result.getAddress());
+			if (predecessor != null) {
+				predecessors.add(predecessor);
+			}
+			Map<String, String> metadata = new LinkedHashMap<>();
+			metadata.put("operation", operation);
+			metadata.put("score", String.format(Locale.ROOT, "%.6f", result.getScore()));
+			metadata.put("summary", result.getSummary());
+			result.getEvidenceId().ifPresent(evidenceId -> metadata.put("evidenceId", evidenceId));
+			TemporalEvent temporalEvent = new TemporalEventImpl(
+				eventId,
+				programId,
+				result.getAddress(),
+				operation,
+				eventTime,
+				eventTime,
+				predecessors,
+				metadata);
+			temporalEvidenceGraph.upsert(temporalEvent);
+			rememberTemporalEvent(programId, result.getAddress(), eventId);
+		}
+	}
+
+	private void recordTemporalPatternResults(Program program, String operationId, List<Address> addresses) {
+		if (program == null || addresses == null || addresses.isEmpty()) {
+			return;
+		}
+		Instant baseTime = Instant.now();
+		String programId = programId(program);
+		for (int index = 0; index < addresses.size(); index++) {
+			Address address = addresses.get(index);
+			Instant eventTime = baseTime.plusMillis(index);
+			String eventId = buildTemporalEventId(operationId, "pattern", address, index);
+			List<String> predecessors = new ArrayList<>();
+			String predecessor = previousTemporalEvent(programId, address);
+			if (predecessor != null) {
+				predecessors.add(predecessor);
+			}
+			Map<String, String> metadata = new LinkedHashMap<>();
+			metadata.put("operation", "pattern");
+			metadata.put("address", normalizeAddressKey(address));
+			TemporalEvent temporalEvent = new TemporalEventImpl(
+				eventId, programId, address, "pattern", eventTime, eventTime, predecessors, metadata);
+			temporalEvidenceGraph.upsert(temporalEvent);
+			rememberTemporalEvent(programId, address, eventId);
+		}
+	}
+
+	private void recordTemporalContextEvent(Program program, String operationId, QueryContext context) {
+		if (program == null || context == null || context.getAddress() == null) {
+			return;
+		}
+		String programId = programId(program);
+		Address address = context.getAddress();
+		String eventId = buildTemporalEventId(operationId, "context", address, 0);
+		List<String> predecessors = new ArrayList<>();
+		String predecessor = previousTemporalEvent(programId, address);
+		if (predecessor != null) {
+			predecessors.add(predecessor);
+		}
+		Map<String, String> metadata = new LinkedHashMap<>();
+		metadata.put("operation", "context");
+		metadata.put("referenceCount", String.valueOf(context.getReferences().size()));
+		context.getFunction().ifPresent(function -> metadata.put("function", function.getName()));
+		context.getDecompiledCode().ifPresent(code -> metadata.put("decompiled", String.valueOf(!code.isBlank())));
+		Instant eventTime = Instant.now();
+		TemporalEvent temporalEvent = new TemporalEventImpl(
+			eventId, programId, address, "context", eventTime, eventTime, predecessors, metadata);
+		temporalEvidenceGraph.upsert(temporalEvent);
+		rememberTemporalEvent(programId, address, eventId);
+	}
+
+	private String buildTemporalEventId(String operationId, String operation, Address address, int ordinal) {
+		return "temporal:" + operation + ":" + operationId + ":" + normalizeAddressKey(address) + ":" + ordinal;
+	}
+
+	private String previousTemporalEvent(String programId, Address address) {
+		return lastTemporalEventByProgramAddress.get(programId + "|" + normalizeAddressKey(address));
+	}
+
+	private void rememberTemporalEvent(String programId, Address address, String eventId) {
+		lastTemporalEventByProgramAddress.put(programId + "|" + normalizeAddressKey(address), eventId);
+	}
+
+	private String programId(Program program) {
+		if (program == null) {
+			return "";
+		}
+		String executablePath = program.getExecutablePath();
+		if (executablePath != null && !executablePath.isBlank()) {
+			return executablePath;
+		}
+		String programName = program.getName();
+		if (programName != null && !programName.isBlank()) {
+			return programName;
+		}
+		return "program-" + System.identityHashCode(program);
 	}
 
 	private double computeIndexedSemanticScore(QueryCacheManager.IndexedFunctionFeatures feature,
@@ -1290,6 +1492,74 @@ public class LiveQueryServiceImpl implements QueryService, DomainObjectListener,
 				count++;
 			}
 			return count;
+		}
+	}
+
+	private static class TemporalEventImpl implements TemporalEvent {
+		private final String eventId;
+		private final String programId;
+		private final Address address;
+		private final String operation;
+		private final Instant startTime;
+		private final Instant endTime;
+		private final List<String> predecessorEventIds;
+		private final Map<String, String> metadata;
+
+		TemporalEventImpl(String eventId, String programId, Address address, String operation,
+				Instant startTime, Instant endTime, List<String> predecessorEventIds,
+				Map<String, String> metadata) {
+			this.eventId = eventId;
+			this.programId = programId != null ? programId : "";
+			this.address = address;
+			this.operation = operation != null ? operation : "";
+			this.startTime = startTime;
+			this.endTime = endTime != null ? endTime : startTime;
+			this.predecessorEventIds = predecessorEventIds != null
+					? Collections.unmodifiableList(new ArrayList<>(predecessorEventIds))
+					: Collections.emptyList();
+			this.metadata = metadata != null
+					? Collections.unmodifiableMap(new LinkedHashMap<>(metadata))
+					: Collections.emptyMap();
+		}
+
+		@Override
+		public String getEventId() {
+			return eventId;
+		}
+
+		@Override
+		public String getProgramId() {
+			return programId;
+		}
+
+		@Override
+		public Optional<Address> getAddress() {
+			return Optional.ofNullable(address);
+		}
+
+		@Override
+		public String getOperation() {
+			return operation;
+		}
+
+		@Override
+		public Instant getStartTime() {
+			return startTime;
+		}
+
+		@Override
+		public Instant getEndTime() {
+			return endTime;
+		}
+
+		@Override
+		public List<String> getPredecessorEventIds() {
+			return predecessorEventIds;
+		}
+
+		@Override
+		public Map<String, String> getMetadata() {
+			return metadata;
 		}
 	}
 
