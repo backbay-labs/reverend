@@ -864,6 +864,37 @@ run_query_slo_gate() {
   echo "[gates] query SLO OK (artifacts: $query_slo_json, $query_slo_md)"
 }
 
+run_mission_parity_gate() {
+  local parity_reporter="eval/scripts/mission_parity_report.py"
+  local headless_path="${CYNTRA_MISSION_PARITY_HEADLESS_PATH:-eval/reports/e25/mission-parity-headless.json}"
+  local cockpit_path="${CYNTRA_MISSION_PARITY_COCKPIT_PATH:-eval/reports/e25/mission-parity-cockpit.json}"
+  local eval_gate_out="${artifact_root}/eval"
+  local parity_json="${eval_gate_out}/mission-parity-report.json"
+  local parity_md="${eval_gate_out}/mission-parity-report.md"
+
+  if [[ ! -f "$parity_reporter" ]]; then
+    echo "[gates] ERROR: missing mission parity reporter: $parity_reporter" >&2
+    exit 1
+  fi
+  if [[ ! -f "$headless_path" ]]; then
+    echo "[gates] ERROR: missing mission parity headless artifact: $headless_path" >&2
+    exit 1
+  fi
+  if [[ ! -f "$cockpit_path" ]]; then
+    echo "[gates] ERROR: missing mission parity cockpit artifact: $cockpit_path" >&2
+    exit 1
+  fi
+
+  mkdir -p "$eval_gate_out"
+  python3 "$parity_reporter" \
+    --headless "$headless_path" \
+    --cockpit "$cockpit_path" \
+    --output-json "$parity_json" \
+    --output-md "$parity_md" \
+    --fail-on-mismatch
+  echo "[gates] mission parity OK (artifacts: $parity_json, $parity_md)"
+}
+
 run_operational_claim_gate() {
   local smoke_runner="eval/run_smoke.sh"
   local regression_checker="eval/scripts/check_regression.py"
@@ -1180,6 +1211,7 @@ case "$mode" in
     run_frontier_compile_regression
     run_eval_regression
     run_query_slo_gate
+    run_mission_parity_gate
     run_operational_claim_gate
     run_reliability_soak_slo
     run_security_evidence_integrity
