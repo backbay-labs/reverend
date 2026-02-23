@@ -255,6 +255,8 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 		}
 
 		state.setLastQuery(query);
+		state.setSearchOperationStatus(CockpitState.OperationStatus.LOADING);
+		state.setSearchOperationMessage("Searching: " + query);
 		int searchGeneration = activeSearchGeneration.incrementAndGet();
 		updateStatus("Searching: " + query);
 
@@ -265,11 +267,15 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 					monitor.setMessage("Searching: " + query);
 					List<QueryResult> queryResults = queryService.semanticSearch(
 						currentProgram, query, null, state.getMaxResults(), monitor);
+					state.setSearchOperationStatus(CockpitState.OperationStatus.SUCCESS);
+					state.setSearchOperationMessage("Search completed");
 					LiveQueryServiceImpl.BudgetStatus budgetStatus = consumeBudgetStatusIfAvailable();
 					populateResultsAsync(queryResults, searchGeneration, monitor);
 					applyBudgetStatus(searchGeneration, budgetStatus);
 				}
 				catch (QueryService.QueryException e) {
+					state.setSearchOperationStatus(CockpitState.OperationStatus.ERROR);
+					state.setSearchOperationMessage(e.getMessage());
 					updateStatus("Search failed: " + e.getMessage());
 					Msg.showError(this, mainPanel, "Search Failed", e.getMessage());
 				}
@@ -324,6 +330,8 @@ public class CockpitSearchProvider extends ComponentProviderAdapter {
 		activeSearchGeneration.incrementAndGet();
 		results.clear();
 		tableModel.fireTableDataChanged();
+		state.setSearchOperationStatus(CockpitState.OperationStatus.IDLE);
+		state.setSearchOperationMessage("");
 		updateStatus("Ready");
 	}
 

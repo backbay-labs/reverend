@@ -17,6 +17,7 @@ package ghidra.reverend.cockpit;
 
 import ghidra.program.model.listing.Program;
 import ghidra.reverend.api.v1.EvidenceService;
+import ghidra.reverend.api.v1.MissionService;
 import ghidra.reverend.api.v1.ProposalIntegrationService;
 import ghidra.reverend.api.v1.QueryService;
 import ghidra.reverend.query.*;
@@ -29,6 +30,7 @@ public class CockpitServiceBootstrap implements AutoCloseable {
 	private LiveQueryServiceImpl queryService;
 	private LiveEvidenceServiceImpl evidenceService;
 	private LiveProposalIntegrationServiceImpl proposalService;
+	private LiveMissionServiceImpl missionService;
 	private boolean initialized;
 
 	/**
@@ -46,6 +48,7 @@ public class CockpitServiceBootstrap implements AutoCloseable {
 			telemetry);
 		evidenceService = new LiveEvidenceServiceImpl();
 		proposalService = new LiveProposalIntegrationServiceImpl(evidenceService);
+		missionService = new LiveMissionServiceImpl();
 		initialized = true;
 	}
 
@@ -86,6 +89,16 @@ public class CockpitServiceBootstrap implements AutoCloseable {
 	public synchronized ProposalIntegrationService getProposalService() {
 		ensureInitialized();
 		return proposalService;
+	}
+
+	/**
+	 * Returns the live mission service.
+	 *
+	 * @return live mission service
+	 */
+	public synchronized MissionService getMissionService() {
+		ensureInitialized();
+		return missionService;
 	}
 
 	/**
@@ -130,10 +143,12 @@ public class CockpitServiceBootstrap implements AutoCloseable {
 		queryService.close();
 		evidenceService.close();
 		proposalService.close();
+		missionService.close();
 
 		queryService = null;
 		evidenceService = null;
 		proposalService = null;
+		missionService = null;
 		initialized = false;
 	}
 

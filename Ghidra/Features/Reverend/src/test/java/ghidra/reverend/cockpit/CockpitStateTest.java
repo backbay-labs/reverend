@@ -49,6 +49,12 @@ public class CockpitStateTest {
 		assertEquals("hierarchical", state.getGraphLayoutMode());
 		assertFalse(state.isBudgetExhausted());
 		assertEquals("", state.getBudgetStatusMessage());
+		assertEquals(CockpitState.OperationStatus.IDLE, state.getSearchOperationStatus());
+		assertEquals("", state.getSearchOperationMessage());
+		assertEquals(CockpitState.OperationStatus.IDLE, state.getEvidenceOperationStatus());
+		assertEquals("", state.getEvidenceOperationMessage());
+		assertEquals(CockpitState.OperationStatus.IDLE, state.getProposalOperationStatus());
+		assertEquals("", state.getProposalOperationMessage());
 	}
 
 	@Test
@@ -163,6 +169,12 @@ public class CockpitStateTest {
 		state.setGraphLayoutMode("circular");
 		state.setBudgetExhausted(true);
 		state.setBudgetStatusMessage("decompile budget exhausted");
+		state.setSearchOperationStatus(CockpitState.OperationStatus.SUCCESS);
+		state.setSearchOperationMessage("ok");
+		state.setEvidenceOperationStatus(CockpitState.OperationStatus.LOADING);
+		state.setEvidenceOperationMessage("loading");
+		state.setProposalOperationStatus(CockpitState.OperationStatus.ERROR);
+		state.setProposalOperationMessage("failed");
 
 		// Save to SaveState
 		SaveState saveState = new SaveState();
@@ -184,6 +196,12 @@ public class CockpitStateTest {
 		assertEquals("circular", restored.getGraphLayoutMode());
 		assertTrue(restored.isBudgetExhausted());
 		assertEquals("decompile budget exhausted", restored.getBudgetStatusMessage());
+		assertEquals(CockpitState.OperationStatus.SUCCESS, restored.getSearchOperationStatus());
+		assertEquals("ok", restored.getSearchOperationMessage());
+		assertEquals(CockpitState.OperationStatus.LOADING, restored.getEvidenceOperationStatus());
+		assertEquals("loading", restored.getEvidenceOperationMessage());
+		assertEquals(CockpitState.OperationStatus.ERROR, restored.getProposalOperationStatus());
+		assertEquals("failed", restored.getProposalOperationMessage());
 	}
 
 	@Test
